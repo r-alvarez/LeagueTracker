@@ -41,7 +41,7 @@ body {
 
 a { color: inherit; }
 
-.shell { max-width: 1180px; margin: 0 auto; padding: 0 20px 48px; }
+.shell { max-width: 1460px; margin: 0 auto; padding: 0 24px 48px; }
 
 .topbar { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding: 18px 0 4px; }
 .topbar h1 { font-size: 21px; font-weight: 700; margin: 0; }
