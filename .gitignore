@@ -1,3 +1,6 @@
+# Riot API key - first line of this file, read at runtime. Never commit.
+riot-api-key.txt
+
 # Runtime data - personal match history, SQLite index, LP ledger. Never commit.
 /data/
 *.db
