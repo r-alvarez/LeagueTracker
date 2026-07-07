@@ -15,6 +15,7 @@ public sealed class ImportService(
     HistorySyncService history,
     TrackedPlayerService player,
     JobStatusService status,
+    DataPaths paths,
     ILogger<ImportService> logger)
 {
     public async Task ImportFolderAsync(string folder, CancellationToken ct)
@@ -43,15 +44,17 @@ public sealed class ImportService(
                 status.Report(i + 1, files.Length, $"{i + 1}/{files.Length} games ({imported} new, {skipped} already present)");
             }
 
-            // The ledger lives next to the scripts (folder root or its parent).
+            // LP ledgers: the app's own mirror (so a db rebuild restores every
+            // snapshot ever taken) plus any ledger shipped with the import folder.
             var ledgerImported = 0;
-            foreach (var candidate in new[] { Path.Combine(folder, "lp-history.csv"), Path.Combine(Path.GetDirectoryName(folder.TrimEnd('\\', '/')) ?? folder, "lp-history.csv") })
+            foreach (var candidate in new[]
             {
-                if (File.Exists(candidate))
-                {
-                    ledgerImported = await ImportLpLedgerAsync(candidate, ct);
-                    break;
-                }
+                paths.LpLedgerCsv,
+                Path.Combine(folder, "lp-history.csv"),
+                Path.Combine(Path.GetDirectoryName(folder.TrimEnd('\\', '/')) ?? folder, "lp-history.csv"),
+            }.Distinct())
+            {
+                if (File.Exists(candidate)) ledgerImported += await ImportLpLedgerAsync(candidate, ct);
             }
 
             var lpPerGame = Path.Combine(folder, "lp-per-game.csv");

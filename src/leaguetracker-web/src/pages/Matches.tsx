@@ -45,19 +45,29 @@ export default function Matches() {
           </thead>
           <tbody>
             {items.map(m => (
-              <tr key={m.id} className={m.win ? 'row-win' : 'row-loss'} style={{ cursor: 'pointer' }} onClick={() => navigate(`/matches/${m.id}`)}>
+              <tr key={m.id} className={m.isRemake ? '' : m.win ? 'row-win' : 'row-loss'} style={{ cursor: 'pointer' }} onClick={() => navigate(`/matches/${m.id}`)}>
                 <td><Link to={`/matches/${m.id}`} onClick={e => e.stopPropagation()}>{new Date(m.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</Link></td>
                 <td>
                   <span className="champ">
                     <ChampBadge name={m.champion} iconOnly />
+                    {m.allyJungler && (
+                      <span className="vs-jgl">
+                        <ChampBadge name={m.allyJungler} small iconOnly />
+                        <RoleIcon role="JUNGLE" size={11} />
+                      </span>
+                    )}
                     <RoleIcon role={m.position} />
                     <span className="champ-name">{m.champion}</span>
                   </span>
                 </td>
-                <td><span className={m.win ? 'badge win' : 'badge loss'}>{m.win ? 'Victory' : 'Defeat'}</span></td>
+                <td>
+                  {m.isRemake
+                    ? <span className="badge remake">Remake</span>
+                    : <span className={m.win ? 'badge win' : 'badge loss'}>{m.win ? 'Victory' : 'Defeat'}</span>}
+                </td>
                 <td>
                   <span className="vs-pair">
-                    {m.opponentChampion ? <ChampBadge name={m.opponentChampion} small iconOnly /> : <span className="mut">—</span>}
+                    {m.opponentChampion ? <ChampBadge name={m.opponentChampion} iconOnly /> : <span className="mut">—</span>}
                     {m.enemyJungler && (
                       <span className="vs-jgl">
                         <ChampBadge name={m.enemyJungler} small iconOnly />

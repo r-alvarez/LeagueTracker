@@ -70,6 +70,8 @@ export interface MatchSummary {
   skillshotsDodged: number | null
   opponentChampion: string | null
   enemyJungler: string | null
+  allyJungler: string | null
+  isRemake: boolean
   csAt10: number | null
   laneGoldDiff10: number | null
   killParticipation: number | null

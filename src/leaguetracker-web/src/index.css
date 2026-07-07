@@ -228,6 +228,7 @@ tr.drill table.data td, tr.drill table.data th { background: transparent; }
 .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
 .badge.win { background: rgba(63, 185, 80, 0.14); color: var(--delta-good); }
 .badge.loss { background: rgba(240, 85, 106, 0.14); color: var(--lp-loss); }
+.badge.remake { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
 
 .win { color: var(--delta-good); font-weight: 600; }
 .loss { color: var(--lp-loss); font-weight: 600; }

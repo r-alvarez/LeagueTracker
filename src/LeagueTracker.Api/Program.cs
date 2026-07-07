@@ -20,7 +20,9 @@ builder.Services.AddSingleton<IRiotKeyProvider, RiotKeyProvider>();
 builder.Services.AddSingleton<RankCache>();
 builder.Services.AddSingleton<JobStatusService>();
 builder.Services.AddTransient<RiotRateLimitHandler>();
-builder.Services.AddHttpClient<RiotApiClient>(c => c.Timeout = TimeSpan.FromSeconds(60))
+// Generous timeout: the rate limiter paces requests INSIDE the handler, so a
+// burst legitimately waits out the key's 2-minute budget before sending.
+builder.Services.AddHttpClient<RiotApiClient>(c => c.Timeout = TimeSpan.FromMinutes(10))
     .AddHttpMessageHandler<RiotRateLimitHandler>();
 
 builder.Services.AddSingleton<DataPaths>();
@@ -41,7 +43,14 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
-    scope.ServiceProvider.GetRequiredService<LeagueDbContext>().Database.EnsureCreated();
+    var db = scope.ServiceProvider.GetRequiredService<LeagueDbContext>();
+    db.Database.EnsureCreated();
+    // Additive columns land via idempotent ALTERs - EnsureCreated never alters an
+    // existing table, and wiping the db would cost capture-time-only data (ranks, LP).
+    foreach (var alter in new[] { "ALTER TABLE Matches ADD COLUMN AllyJungler TEXT NULL" })
+    {
+        try { db.Database.ExecuteSqlRaw(alter); } catch { /* column already exists */ }
+    }
 }
 
 app.UseCors();
@@ -191,6 +200,24 @@ app.MapGet("/api/analytics/summary", async (LeagueDbContext db, int lastN = 20, 
 // lastGames takes precedence over days; neither = whole history.
 app.MapGet("/api/stats", async (LeagueDbContext db, int? days, int? lastGames, CancellationToken ct) =>
     Results.Ok(await Reports.StatsAsync(db, days, lastGames, ct)));
+app.MapPost("/api/ranks/backfill", (IServiceScopeFactory scopeFactory, JobStatusService jobs, int days = 7) =>
+{
+    if (!jobs.TryStart("rank-backfill")) return Results.Conflict(jobs.Snapshot());
+    _ = Task.Run(async () =>
+    {
+        using var scope = scopeFactory.CreateScope();
+        try
+        {
+            await scope.ServiceProvider.GetRequiredService<HistorySyncService>().BackfillRanksAsync(days, CancellationToken.None);
+        }
+        catch
+        {
+            // Already logged and surfaced via job status.
+        }
+    });
+    return Results.Accepted("/api/jobs/status", jobs.Snapshot());
+});
+
 app.MapPost("/api/analytics/reprocess", (IServiceScopeFactory scopeFactory, JobStatusService jobs) =>
 {
     if (!jobs.TryStart("reprocess")) return Results.Conflict(jobs.Snapshot());
@@ -349,7 +376,8 @@ static object MatchListItem(Match m, string? items = null, int? summoner1Id = nu
     m.LpChange, m.LpBefore, m.LpAfter,
     m.TimeInEnemyHalfPct, m.AvgNearestAllyDist,
     m.SkillshotsHit, m.SkillshotsDodged,
-    m.OpponentChampion, m.EnemyJungler, m.CsAt10, m.LaneGoldDiff10, m.KillParticipation, m.SoloKills,
+    m.OpponentChampion, m.EnemyJungler, m.AllyJungler, m.CsAt10, m.LaneGoldDiff10, m.KillParticipation, m.SoloKills,
+    IsRemake = m.DurationSec < 300,
 };
 
 static IResult CsvFile(string fileName, string csv) =>
