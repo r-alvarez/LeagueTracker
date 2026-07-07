@@ -295,6 +295,19 @@ export interface LaneStateStats {
   }
 }
 
+export interface ProfileMetric {
+  key: string
+  label: string
+  category: string
+  unit: string
+  higherIsBetter: boolean
+  avg: number
+  avgWins: number | null
+  avgLosses: number | null
+  separationPct: number | null
+  games: number
+}
+
 export interface MatchupRow {
   opponent: string
   games: number
@@ -385,6 +398,7 @@ export interface Stats {
     byRole: CountedItem[]
     goldState: { behind: number; even: number; ahead: number }
   }
+  profile: ProfileMetric[]
   byChampion: SplitRow[]
   byRole: SplitRow[]
   series: SeriesPoint[]

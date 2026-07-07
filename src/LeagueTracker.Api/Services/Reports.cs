@@ -356,6 +356,7 @@ public static class Reports
                     Ahead = followIns.Count(d => d.FollowTeamGoldDiff > 1500),
                 },
             },
+            Profile = BuildProfile(matches),
             ByChampion = SplitBy(m => m.Champion, withDetail: true),
             ByRole = SplitBy(m => m.Position),
             Series = series,
@@ -415,6 +416,113 @@ public static class Reports
         }
 
         return o;
+    }
+
+    /// One improvement-path metric. Value comes from a match's challenges block
+    /// (keyed by Riot's field name) or a synthetic key we inject per match.
+    private sealed record MetricDef(string Key, string Label, string Category, string Unit, bool HigherIsBetter);
+
+    // Curated from Riot's ~128-field challenges block + a few top-level fields.
+    // Ordered by category; each is something a player can actually train.
+    private static readonly MetricDef[] MetricCatalog =
+    [
+        new("laneMinionsFirst10Minutes", "CS in first 10 min", "Laning", "cs", true),
+        new("maxCsAdvantageOnLaneOpponent", "Max CS lead on lane", "Laning", "cs", true),
+        new("maxLevelLeadLaneOpponent", "Max level lead on lane", "Laning", "lvl", true),
+        new("visionScoreAdvantageLaneOpponent", "Vision lead vs lane", "Vision", "", true),
+        new("visionScorePerMinute", "Vision score / min", "Vision", "/min", true),
+        new("wardTakedowns", "Enemy wards cleared", "Vision", "", true),
+        new("stealthWardsPlaced", "Stealth wards placed", "Vision", "", true),
+        new("killParticipation", "Kill participation", "Combat", "%", true),
+        new("teamDamagePercentage", "Team damage share", "Combat", "%", true),
+        new("damageTakenOnTeamPercentage", "Damage taken share", "Combat", "%", false),
+        new("dodgeSkillShotsSmallWindow", "Clutch skillshot dodges", "Combat", "", true),
+        new("soloKills", "Solo kills", "Combat", "", true),
+        new("outnumberedKills", "Outnumbered kills", "Combat", "", true),
+        new("takedownsFirstXMinutes", "Early takedowns", "Combat", "", true),
+        new("immobilizeAndKillWithAlly", "CC into kills w/ ally", "Combat", "", true),
+        new("turretPlatesTaken", "Turret plates taken", "Objectives", "", true),
+        new("damageDealtToObjectives", "Damage to objectives", "Objectives", "", true),
+        new("dragonTakedowns", "Dragon takedowns", "Objectives", "", true),
+        new("turretTakedowns", "Turret takedowns", "Objectives", "", true),
+        new("killsOnOtherLanesEarlyJungleAsLaner", "Early roam kills", "Macro", "", true),
+        new("totalTimeSpentDead", "Time spent dead", "Macro", "sec", false),
+        new("totalTimeCcDealt", "CC dealt to enemies", "Combat", "sec", true),
+    ];
+
+    private static Dictionary<string, double> MetricsFor(Match m)
+    {
+        var d = new Dictionary<string, double>();
+        if (m.ChallengesJson is { Length: > 0 })
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(m.ChallengesJson);
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.Number && prop.Value.TryGetDouble(out var v))
+                    {
+                        d[prop.Name] = v;
+                    }
+                }
+            }
+            catch { /* malformed block - skip */ }
+        }
+        // Top-level participant fields injected under the same keys the catalog uses.
+        d["totalTimeSpentDead"] = m.TotalTimeSpentDead;
+        d["totalTimeCcDealt"] = m.TotalTimeCcDealt;
+        return d;
+    }
+
+    /// Strengths & weaknesses: each metric's average, its average in wins vs
+    /// losses, and how strongly it separates the two - a benchmark-free
+    /// improvement map built from the player's own games.
+    private static object BuildProfile(List<Match> matches)
+    {
+        var perMatch = matches.Select(m => (m.Win, Metrics: MetricsFor(m))).ToList();
+        var rows = new List<object>();
+
+        foreach (var def in MetricCatalog)
+        {
+            var present = perMatch.Where(x => x.Metrics.ContainsKey(def.Key)).ToList();
+            if (present.Count < 3) continue;   // too few to average meaningfully
+
+            double Avg(IEnumerable<(bool Win, Dictionary<string, double> Metrics)> xs)
+            {
+                var vals = xs.Where(x => x.Metrics.ContainsKey(def.Key)).Select(x => x.Metrics[def.Key]).ToList();
+                return vals is { Count: > 0 } ? vals.Average() : 0;
+            }
+
+            var wins = present.Where(x => x.Win).ToList();
+            var losses = present.Where(x => !x.Win).ToList();
+            var avgAll = Avg(present);
+            var avgWins = wins is { Count: > 0 } ? Avg(wins) : (double?)null;
+            var avgLosses = losses is { Count: > 0 } ? Avg(losses) : (double?)null;
+
+            // Signed win-loss separation, oriented so positive always means
+            // "the good direction correlates with your wins".
+            double? separation = null;
+            if (avgWins is { } w && avgLosses is { } l)
+            {
+                var raw = (w - l) / Math.Max(0.01, Math.Abs(avgAll));
+                separation = Math.Round((def.HigherIsBetter ? raw : -raw) * 100, 1);
+            }
+
+            rows.Add(new
+            {
+                def.Key,
+                def.Label,
+                def.Category,
+                def.Unit,
+                def.HigherIsBetter,
+                Avg = Math.Round(avgAll, def.Unit is "%" ? 3 : 2),
+                AvgWins = avgWins is { } aw ? Math.Round(aw, def.Unit is "%" ? 3 : 2) : (double?)null,
+                AvgLosses = avgLosses is { } al ? Math.Round(al, def.Unit is "%" ? 3 : 2) : (double?)null,
+                SeparationPct = separation,
+                Games = present.Count,
+            });
+        }
+        return rows;
     }
 
     /// Distinct game patches (major.minor) across stored matches, oldest first.

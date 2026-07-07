@@ -239,6 +239,19 @@ tr.drill table.data td, tr.drill table.data th { background: transparent; }
 .stat-row .k small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
 .stat-row .v { font-size: 20px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
+/* Strengths & weaknesses profile: diverging bar per metric around a centre axis. */
+.profile-list { display: flex; flex-direction: column; }
+.profile-row { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(120px, 2fr) minmax(90px, auto); gap: 14px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--grid); }
+.profile-row:last-child { border-bottom: 0; }
+.profile-label { display: flex; align-items: center; gap: 8px; }
+.cat-chip { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; }
+.profile-bar { position: relative; height: 14px; }
+.profile-bar .axis { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--baseline); }
+.profile-bar .fill { position: absolute; top: 2px; height: 10px; border-radius: 3px; }
+.profile-bar .fill.good { background: var(--chart-green); }
+.profile-bar .fill.bad { background: var(--lp-loss); }
+.profile-vals { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+
 /* Mini win-rate meter: accent fill on a same-surface track, value alongside. */
 .meter {
   display: inline-block; vertical-align: middle; width: 52px; height: 6px;
