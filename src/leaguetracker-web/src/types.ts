@@ -279,7 +279,21 @@ export interface CountedItem {
 
 export interface BucketStat {
   games: number
+  wins: number
   winRate: number
+}
+
+export interface LaneStateStats {
+  ahead: BucketStat
+  even: BucketStat
+  behind: BucketStat
+  at15: { ahead: BucketStat; even: BucketStat; behind: BucketStat }
+  trajectory: {
+    leadsHeldAt20: { held: number; of: number }
+    deficitsRecoveredAt20: { recovered: number; of: number }
+    thrownFromAhead: number
+    comebackWins: number
+  }
 }
 
 export interface MatchupRow {
@@ -360,7 +374,7 @@ export interface Stats {
     skillshotsHitPerGame: number
     skillshotsDodgedPerGame: number
   }
-  winrateByLaneState: { ahead: BucketStat; even: BucketStat; behind: BucketStat }
+  winrateByLaneState: LaneStateStats
   deathZones: CountedItem[]
   topKillers: CountedItem[]
   followIn: {

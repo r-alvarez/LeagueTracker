@@ -161,7 +161,12 @@ public static class Reports
         double PerGame(int count) => matches.Count > 0 ? Math.Round(count / (double)matches.Count, 2) : 0;
         double DurMin(Match m) => Math.Max(1.0, m.DurationSec / 60.0);
         double Kda(Match m) => (m.Kills + m.Assists) / (double)Math.Max(1, m.Deaths);
-        static object Bucket(List<Match> ms) => new { Games = ms.Count, WinRate = ms is { Count: > 0 } ? Math.Round(ms.Count(x => x.Win) / (double)ms.Count, 3) : 0 };
+        static object Bucket(List<Match> ms) => new
+        {
+            Games = ms.Count,
+            Wins = ms.Count(x => x.Win),
+            WinRate = ms is { Count: > 0 } ? Math.Round(ms.Count(x => x.Win) / (double)ms.Count, 3) : 0,
+        };
         static List<object> Counted(IEnumerable<string> keys, int total) => keys
             .GroupBy(k => k)
             .Select(g => new { Key = g.Key, Count = g.Count(), Share = total > 0 ? Math.Round(g.Count() / (double)total, 3) : 0 })
@@ -170,6 +175,36 @@ public static class Reports
         var ahead = withLane.Where(m => m.LaneGoldDiff10 >= 500).ToList();
         var behind = withLane.Where(m => m.LaneGoldDiff10 <= -500).ToList();
         var even = withLane.Where(m => m.LaneGoldDiff10 is > -500 and < 500).ToList();
+
+        // Lead trajectory: does a 10-minute state survive to 20:00? Read from the
+        // stored lane checkpoints (mid/late data exists only when the game got there).
+        var checkpointJson = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        int? GoldAt(Match m, int minute)
+        {
+            if (m.LaneDiffsJson is not { Length: > 0 }) return null;
+            try
+            {
+                return System.Text.Json.JsonSerializer
+                    .Deserialize<List<TimelineAnalyzer.LaneDiffPoint>>(m.LaneDiffsJson, checkpointJson)?
+                    .FirstOrDefault(c => c.Min == minute)?.Gold;
+            }
+            catch { return null; }
+        }
+        var aheadWith20 = ahead.Select(m => GoldAt(m, 20)).Where(g => g is not null).Select(g => g!.Value).ToList();
+        var behindWith20 = behind.Select(m => GoldAt(m, 20)).Where(g => g is not null).Select(g => g!.Value).ToList();
+        var laneTrajectory = new
+        {
+            LeadsHeldAt20 = new { Held = aheadWith20.Count(g => g >= 500), Of = aheadWith20.Count },
+            DeficitsRecoveredAt20 = new { Recovered = behindWith20.Count(g => g > -500), Of = behindWith20.Count },
+            ThrownFromAhead = ahead.Count(m => !m.Win),
+            ComebackWins = behind.Count(m => m.Win),
+        };
+        var at15 = new
+        {
+            Ahead = Bucket(matches.Where(m => m.LaneGoldDiff15 >= 500).ToList()),
+            Even = Bucket(matches.Where(m => m.LaneGoldDiff15 is > -500 and < 500).ToList()),
+            Behind = Bucket(matches.Where(m => m.LaneGoldDiff15 <= -500).ToList()),
+        };
 
         List<object> SplitBy(Func<Match, string> key, bool withDetail = false) => matches
             .GroupBy(key).Where(g => g.Key is { Length: > 0 })
@@ -300,7 +335,7 @@ public static class Reports
                 Champions = matches.Select(m => m.Champion).Distinct().Count(),
             },
             Overall = overall,
-            WinrateByLaneState = new { Ahead = Bucket(ahead), Even = Bucket(even), Behind = Bucket(behind) },
+            WinrateByLaneState = new { Ahead = Bucket(ahead), Even = Bucket(even), Behind = Bucket(behind), At15 = at15, Trajectory = laneTrajectory },
             DeathZones = Counted(deaths.Where(d => d.Zone is { Length: > 0 }).Select(d => d.Zone), deaths.Count),
             TopKillers = Counted(deaths.Select(d => d.KilledBy), deaths.Count),
             FollowIn = new
