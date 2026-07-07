@@ -1,4 +1,4 @@
-import type { AnalyticsSummary, JobStatus, LpPerGame, LpPoint, MatchDetail, MatchPage, Stats, Status } from './types'
+import type { AnalyticsSummary, ChallengeBenchmark, JobStatus, LpPerGame, LpPoint, MatchDetail, MatchPage, Stats, Status } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const resp = await fetch(url)
@@ -23,6 +23,12 @@ export const api = {
   syncHistory: (rankedTarget: number) => post<JobStatus>(`/api/sync/history?rankedTarget=${rankedTarget}`),
   importFolder: (path: string) => post<JobStatus>(`/api/import?path=${encodeURIComponent(path)}`),
   analytics: (lastN: number) => get<AnalyticsSummary>(`/api/analytics/summary?lastN=${lastN}`),
+  challengePercentiles: async (): Promise<ChallengeBenchmark | null> => {
+    const r = await fetch('/api/challenges/percentiles')
+    if (r.status === 204) return null   // key lacks Challenges-V1 access, or not fetched yet
+    if (!r.ok) throw new Error(`/api/challenges/percentiles -> HTTP ${r.status}`)
+    return r.json()
+  },
   stats: (opts: { days?: number; lastGames?: number }) => {
     const params = new URLSearchParams()
     if (opts.days) params.set('days', String(opts.days))

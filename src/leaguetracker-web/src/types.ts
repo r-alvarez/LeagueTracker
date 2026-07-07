@@ -330,6 +330,21 @@ export interface ProfileGroup {
   metrics: ProfileMetric[]
 }
 
+export interface ChallengeRow {
+  id: number
+  name: string
+  description: string
+  level: string
+  levelRank: number
+  percentile: number | null
+  value: number | null
+}
+
+export interface ChallengeBenchmark {
+  asOfUtc: string | null
+  challenges: ChallengeRow[]
+}
+
 export interface MatchupRow {
   opponent: string
   games: number
