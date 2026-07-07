@@ -420,34 +420,34 @@ public static class Reports
 
     /// One improvement-path metric. Value comes from a match's challenges block
     /// (keyed by Riot's field name) or a synthetic key we inject per match.
-    private sealed record MetricDef(string Key, string Label, string Category, string Unit, bool HigherIsBetter);
+    private sealed record MetricDef(string Key, string Label, string Category, string Unit, bool HigherIsBetter, string Description);
 
     // Curated from Riot's ~128-field challenges block + a few top-level fields.
     // Ordered by category; each is something a player can actually train.
     private static readonly MetricDef[] MetricCatalog =
     [
-        new("laneMinionsFirst10Minutes", "CS in first 10 min", "Laning", "cs", true),
-        new("maxCsAdvantageOnLaneOpponent", "Max CS lead on lane", "Laning", "cs", true),
-        new("maxLevelLeadLaneOpponent", "Max level lead on lane", "Laning", "lvl", true),
-        new("visionScoreAdvantageLaneOpponent", "Vision lead vs lane", "Vision", "", true),
-        new("visionScorePerMinute", "Vision score / min", "Vision", "/min", true),
-        new("wardTakedowns", "Enemy wards cleared", "Vision", "", true),
-        new("stealthWardsPlaced", "Stealth wards placed", "Vision", "", true),
-        new("killParticipation", "Kill participation", "Combat", "%", true),
-        new("teamDamagePercentage", "Team damage share", "Combat", "%", true),
-        new("damageTakenOnTeamPercentage", "Damage taken share", "Combat", "%", false),
-        new("dodgeSkillShotsSmallWindow", "Clutch skillshot dodges", "Combat", "", true),
-        new("soloKills", "Solo kills", "Combat", "", true),
-        new("outnumberedKills", "Outnumbered kills", "Combat", "", true),
-        new("takedownsFirstXMinutes", "Early takedowns", "Combat", "", true),
-        new("immobilizeAndKillWithAlly", "CC into kills w/ ally", "Combat", "", true),
-        new("turretPlatesTaken", "Turret plates taken", "Objectives", "", true),
-        new("damageDealtToObjectives", "Damage to objectives", "Objectives", "", true),
-        new("dragonTakedowns", "Dragon takedowns", "Objectives", "", true),
-        new("turretTakedowns", "Turret takedowns", "Objectives", "", true),
-        new("killsOnOtherLanesEarlyJungleAsLaner", "Early roam kills", "Macro", "", true),
-        new("totalTimeSpentDead", "Time spent dead", "Macro", "sec", false),
-        new("totalTimeCcDealt", "CC dealt to enemies", "Combat", "sec", true),
+        new("laneMinionsFirst10Minutes", "CS in first 10 min", "Laning", "cs", true, "Minions killed in the first 10 minutes - how cleanly you farm the early lane. 80+ is a strong lane."),
+        new("maxCsAdvantageOnLaneOpponent", "Max CS lead on lane", "Laning", "cs", true, "The biggest CS lead you held over your lane opponent at any point. Shows how hard you can press a farm advantage."),
+        new("maxLevelLeadLaneOpponent", "Max level lead on lane", "Laning", "lvl", true, "The biggest level lead over your laner. A level lead (extra ability point) is often more decisive than a gold lead."),
+        new("visionScoreAdvantageLaneOpponent", "Vision lead vs lane", "Vision", "", true, "Your vision score minus your lane opponent's - warding and clearing relative to your direct rival. Positive means you out-visioned them."),
+        new("visionScorePerMinute", "Vision score / min", "Vision", "/min", true, "Vision score earned per minute (wards placed, cleared, and time they live). The pace of your map control."),
+        new("wardTakedowns", "Enemy wards cleared", "Vision", "", true, "Enemy wards you destroyed. Denying the enemy vision is half of the vision game and easy to under-do."),
+        new("stealthWardsPlaced", "Stealth wards placed", "Vision", "", true, "Yellow (trinket/stealth) wards you placed. Volume of proactive vision you set up."),
+        new("killParticipation", "Kill participation", "Combat", "%", true, "Share of your team's kills you got a kill or assist on. Low KP means you're not around for fights - roaming and grouping fix it."),
+        new("teamDamagePercentage", "Team damage share", "Combat", "%", true, "Your share of the team's total damage to champions. As a mid carry this should be one of the highest on your team."),
+        new("damageTakenOnTeamPercentage", "Damage taken share", "Combat", "%", false, "Your share of the damage your team took. High for a squishy mid means you're getting caught or over-extending in fights."),
+        new("dodgeSkillShotsSmallWindow", "Clutch skillshot dodges", "Combat", "", true, "Skillshots you dodged in a tight window during a fight - raw mechanical reaction under pressure."),
+        new("soloKills", "Solo kills", "Combat", "", true, "Kills with no assists - you beat someone 1v1. A measure of lane and duel dominance."),
+        new("outnumberedKills", "Outnumbered kills", "Combat", "", true, "Kills you scored while your team was outnumbered nearby - clutch, high-skill plays."),
+        new("takedownsFirstXMinutes", "Early takedowns", "Combat", "", true, "Kills and assists in the opening minutes. Early participation snowballs the map."),
+        new("immobilizeAndKillWithAlly", "CC into kills w/ ally", "Combat", "", true, "Times you crowd-controlled an enemy and then killed them with a teammate - coordinated setups."),
+        new("turretPlatesTaken", "Turret plates taken", "Objectives", "", true, "Turret plate gold you claimed before 14:00. Plates are a big, often-ignored early gold source."),
+        new("damageDealtToObjectives", "Damage to objectives", "Objectives", "", true, "Damage you dealt to turrets, dragons, baron and heralds. Shows whether you help close games, not just fight."),
+        new("dragonTakedowns", "Dragon takedowns", "Objectives", "", true, "Dragons you helped secure. Being present for dragons is core mid-game macro."),
+        new("turretTakedowns", "Turret takedowns", "Objectives", "", true, "Turrets you helped destroy. Turrets - not kills - are how the map actually gets taken."),
+        new("killsOnOtherLanesEarlyJungleAsLaner", "Early roam kills", "Macro", "", true, "Kills you got in OTHER lanes early as a laner - i.e. roaming. For a mid main this is the main way a lane lead becomes a map lead."),
+        new("totalTimeSpentDead", "Time spent dead", "Macro", "sec", false, "Total time on the grey screen. You can't influence anything while dead - lower is better, and it's where thrown games hide."),
+        new("totalTimeCcDealt", "CC dealt to enemies", "Combat", "sec", true, "Total seconds of crowd control you applied to enemy champions. Enabling your team by locking targets down."),
     ];
 
     private static Dictionary<string, double> MetricsFor(Match m)
@@ -479,7 +479,10 @@ public static class Reports
     /// improvement map built from the player's own games.
     private static object BuildProfile(List<Match> matches)
     {
-        var perMatch = matches.Select(m => (m.Win, Metrics: MetricsFor(m))).ToList();
+        // Newest-first in, chronological for the trend sparkline.
+        var chronological = matches.AsEnumerable().Reverse()
+            .Select(m => (m.Win, Metrics: MetricsFor(m))).ToList();
+        var perMatch = chronological;
         var rows = new List<object>();
 
         foreach (var def in MetricCatalog)
@@ -508,6 +511,11 @@ public static class Reports
                 separation = Math.Round((def.HigherIsBetter ? raw : -raw) * 100, 1);
             }
 
+            var recent = chronological
+                .Where(x => x.Metrics.ContainsKey(def.Key))
+                .Select(x => Math.Round(x.Metrics[def.Key], def.Unit is "%" ? 3 : 2))
+                .ToList();
+
             rows.Add(new
             {
                 def.Key,
@@ -515,11 +523,13 @@ public static class Reports
                 def.Category,
                 def.Unit,
                 def.HigherIsBetter,
+                def.Description,
                 Avg = Math.Round(avgAll, def.Unit is "%" ? 3 : 2),
                 AvgWins = avgWins is { } aw ? Math.Round(aw, def.Unit is "%" ? 3 : 2) : (double?)null,
                 AvgLosses = avgLosses is { } al ? Math.Round(al, def.Unit is "%" ? 3 : 2) : (double?)null,
                 SeparationPct = separation,
                 Games = present.Count,
+                Recent = recent,
             });
         }
         return rows;

@@ -251,6 +251,14 @@ tr.drill table.data td, tr.drill table.data th { background: transparent; }
 .profile-bar .fill.good { background: var(--chart-green); }
 .profile-bar .fill.bad { background: var(--lp-loss); }
 .profile-vals { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.profile-row.clickable { cursor: pointer; }
+.profile-row.clickable:hover { background: color-mix(in srgb, var(--ink) 3%, transparent); }
+.profile-row.active { background: var(--panel-2); }
+.profile-label .disclosure { color: var(--muted); font-size: 11px; width: 12px; display: inline-block; }
+.profile-detail { background: var(--panel-2); border: 1px solid var(--grid); border-radius: 8px; padding: 14px 16px; margin: 2px 0 8px; }
+.profile-detail .tiles { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.profile-detail .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.spark-scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-2); margin-top: 4px; font-variant-numeric: tabular-nums; }
 
 /* Mini win-rate meter: accent fill on a same-surface track, value alongside. */
 .meter {

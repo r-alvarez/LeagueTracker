@@ -301,11 +301,13 @@ export interface ProfileMetric {
   category: string
   unit: string
   higherIsBetter: boolean
+  description: string
   avg: number
   avgWins: number | null
   avgLosses: number | null
   separationPct: number | null
   games: number
+  recent: number[]
 }
 
 export interface MatchupRow {
