@@ -116,6 +116,15 @@ function Scoreboard({ title, side, won, players, objectives, maxDamage, duration
   )
 }
 
+// Lane-context classification from exact kill data: a solo kill is the lane
+// opponent alone (no assists, nobody else actually near); a gank is the enemy
+// jungler taking part in the kill during the laning/mid phase.
+function deathTag(d: DeathEvent, opponent: string | null, jungler: string | null): 'solo' | 'gank' | null {
+  if (jungler && d.timeSec <= 1200 && (d.killedBy === jungler || d.damageFrom.split(', ').includes(jungler))) return 'gank'
+  if (opponent && d.killedBy === opponent && !d.assistedBy && (d.enemiesNearDeath ?? 1) <= 1) return 'solo'
+  return null
+}
+
 function damageSummary(d: DeathEvent): string {
   if (d.damageInstanceCount === null || d.topSourceShare === null) return '—'
   const style = d.topSourceShare >= 0.7 ? 'burst' : 'whittled'
@@ -217,6 +226,21 @@ function DetailsTab({ detail }: { detail: Detail }) {
           )}
         </div>
         <div className="grid" style={{ alignContent: 'start' }}>
+          {(() => {
+            const solo = detail.deaths.filter(d => deathTag(d, m.opponentChampion, m.enemyJungler) === 'solo').length
+            const gank = detail.deaths.filter(d => deathTag(d, m.opponentChampion, m.enemyJungler) === 'gank').length
+            return (solo > 0 || gank > 0) && (
+              <div className="card tile">
+                <div className="label">Lane deaths</div>
+                <div className="value">
+                  {solo > 0 && <span className="loss">×{solo} solo</span>}
+                  {solo > 0 && gank > 0 && <span className="mut"> · </span>}
+                  {gank > 0 && <span>×{gank} ganked</span>}
+                </div>
+                <div className="sub">tagged per death in Deaths & objectives</div>
+              </div>
+            )
+          })()}
           <div className="card tile">
             <div className="label">Wards</div>
             <div className="value">{detail.wards.wardsPlaced}</div>
@@ -284,6 +308,20 @@ function DetailsTab({ detail }: { detail: Detail }) {
               </span>
             ))}
           </div>
+          {(me.skillshotsHit !== null || me.skillshotsDodged !== null) && (
+            <div className="obj-chips" style={{ marginTop: 12 }}>
+              <span className="obj-chip">{me.skillshotsHit ?? 0} <span className="mut">skillshots hit</span></span>
+              <span className="obj-chip">{me.skillshotsDodged ?? 0} <span className="mut">dodged</span></span>
+              {(() => {
+                const casts = me.spell1Casts + me.spell2Casts + me.spell3Casts + me.spell4Casts
+                return casts > 0 && me.skillshotsHit !== null && (
+                  <span className="obj-chip" title="Riot doesn't expose skillshot attempts, so a true accuracy % isn't computable - this is hits relative to all ability casts.">
+                    {Math.round((100 * me.skillshotsHit) / casts)} <span className="mut">hits per 100 casts</span>
+                  </span>
+                )
+              })()}
+            </div>
+          )}
           <div style={{ marginTop: 12 }}>
             {pings.length === 0 ? <span className="mut">No pings recorded.</span> : (
               <span className="obj-chips">
@@ -361,7 +399,9 @@ export default function MatchDetail() {
         <div className="card tile">
           <div className="label">{new Date(m.date).toLocaleString()} · {m.queueName}</div>
           <div className="value">
-            <span className={m.win ? 'win' : 'loss'}>{m.win ? 'Victory' : 'Defeat'}</span> — {m.champion}
+            {m.isRemake
+              ? <span className="mut">Remake</span>
+              : <span className={m.win ? 'win' : 'loss'}>{m.win ? 'Victory' : 'Defeat'}</span>} — {m.champion}
           </div>
           <div className="sub">
             {m.kills}/{m.deaths}/{m.assists} · {m.durationMin.toFixed(0)} min · {m.cs} CS
@@ -400,9 +440,9 @@ export default function MatchDetail() {
 
       {tab === 'general' && (
         <>
-          <Scoreboard title={allies[0]?.win ? 'Victory' : 'Defeat'} side={detail.mySide} won={allies[0]?.win ?? false}
+          <Scoreboard title={m.isRemake ? 'Remake' : allies[0]?.win ? 'Victory' : 'Defeat'} side={detail.mySide} won={!m.isRemake && (allies[0]?.win ?? false)}
             players={allies} objectives={detail.teamObjectives.ally} maxDamage={maxDamage} durationMin={m.durationMin} />
-          <Scoreboard title={enemies[0]?.win ? 'Victory' : 'Defeat'} side={enemySide} won={enemies[0]?.win ?? false}
+          <Scoreboard title={m.isRemake ? 'Remake' : enemies[0]?.win ? 'Victory' : 'Defeat'} side={enemySide} won={!m.isRemake && (enemies[0]?.win ?? false)}
             players={enemies} objectives={detail.teamObjectives.enemy} maxDamage={maxDamage} durationMin={m.durationMin} />
         </>
       )}
@@ -436,7 +476,11 @@ export default function MatchDetail() {
                       <tr key={d.timeSec}>
                         <td className="num">{d.gameTime}</td>
                         <td className="mut">{d.zone || '—'}</td>
-                        <td>{d.killedBy}{d.assistedBy && <span className="mut"> +{d.assistedBy}</span>}</td>
+                        <td>
+                          {d.killedBy}{d.assistedBy && <span className="mut"> +{d.assistedBy}</span>}
+                          {deathTag(d, m.opponentChampion, m.enemyJungler) === 'solo' && <span className="badge loss" style={{ marginLeft: 6 }}>solo-killed</span>}
+                          {deathTag(d, m.opponentChampion, m.enemyJungler) === 'gank' && <span className="badge remake" style={{ marginLeft: 6 }}>gank</span>}
+                        </td>
                         <td>{damageSummary(d)}</td>
                         <td className="num">{d.enemiesNearDeath !== null
                           ? <span className={d.enemiesNearDeath >= 3 ? 'loss' : ''}>{d.enemiesNearDeath}</span>

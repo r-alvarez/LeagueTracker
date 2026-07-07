@@ -57,6 +57,7 @@ public sealed class Match
     // Laning context vs the same-role enemy, from the timeline minute-frames.
     public string? OpponentChampion { get; set; }
     public string? EnemyJungler { get; set; }
+    public string? AllyJungler { get; set; }
     public int? CsAt10 { get; set; }
     public int? CsAt14 { get; set; }
     public int? LaneGoldDiff10 { get; set; }

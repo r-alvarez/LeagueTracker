@@ -100,7 +100,7 @@ public static class Reports
     public static async Task<object> AnalyticsSummaryAsync(LeagueDbContext db, int lastN, CancellationToken ct)
     {
         var matches = await db.Matches.AsNoTracking()
-            .Where(m => m.IsRanked && m.HasTimeline)
+            .Where(m => m.IsRanked && m.HasTimeline && m.DurationSec >= 300)
             .OrderByDescending(m => m.GameEndUtc)
             .Take(Math.Clamp(lastN, 1, 500))
             .Include(m => m.DeathEvents)
@@ -132,7 +132,10 @@ public static class Reports
     /// Definitions follow the League Coach engine so numbers match like-for-like.
     public static async Task<object> StatsAsync(LeagueDbContext db, int? days, int? lastGames, CancellationToken ct)
     {
-        var query = db.Matches.AsNoTracking().Where(m => m.IsRanked).OrderByDescending(m => m.GameEndUtc);
+        // Remakes (<5 min) carry no LP and no signal - they don't count as games here.
+        var query = db.Matches.AsNoTracking()
+            .Where(m => m.IsRanked && m.DurationSec >= 300)
+            .OrderByDescending(m => m.GameEndUtc);
         List<Match> matches;
         if (lastGames is > 0)
         {

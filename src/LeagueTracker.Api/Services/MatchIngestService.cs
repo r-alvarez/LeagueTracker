@@ -98,7 +98,7 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
             if (withRanks && match.IsRanked)
             {
                 var entries = await ranks.GetEntriesAsync(p.Puuid, TimeSpan.FromHours(ranksAtGameTime ? 1 : 24), ct);
-                if (RankMath.SelectEntryForQueue(entries, info.QueueId) is { } entry)
+                if (RankMath.SelectEntryForQueue(entries, info.QueueId) is { Tier.Length: > 0 } entry)
                 {
                     participant.Tier = entry.Tier;
                     participant.Division = entry.Rank;
@@ -191,6 +191,8 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
 
         match.OpponentChampion = opp?.ChampionName;
         match.EnemyJungler = info.Participants.FirstOrDefault(p => p.TeamId != me.TeamId && p.TeamPosition == "JUNGLE")?.ChampionName;
+        match.AllyJungler = info.Participants.FirstOrDefault(p =>
+            p.TeamId == me.TeamId && p.TeamPosition == "JUNGLE" && p.Puuid != me.Puuid)?.ChampionName;
         match.SkillshotsHit = me.Challenges?.SkillshotsHit;
         match.SkillshotsDodged = me.Challenges?.SkillshotsDodged;
         match.SoloKills = (int)(me.Challenges?.SoloKills ?? 0);
