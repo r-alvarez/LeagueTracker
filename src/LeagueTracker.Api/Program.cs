@@ -33,6 +33,7 @@ builder.Services.AddScoped<TrackedPlayerService>();
 builder.Services.AddScoped<HistorySyncService>();
 builder.Services.AddScoped<ImportService>();
 builder.Services.AddScoped<AnalyticsReprocessService>();
+builder.Services.AddScoped<ChallengesBenchmarkService>();
 builder.Services.AddHostedService<MatchPollerService>();
 
 // Vite dev server origin; irrelevant in production where the SPA is served by this host.
@@ -219,6 +220,11 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, Cancellati
 // Deliberately centred on collapse count and contest quality, not KDA cosmetics.
 app.MapGet("/api/analytics/summary", async (LeagueDbContext db, int lastN = 20, CancellationToken ct = default) =>
     Results.Ok(await Reports.AnalyticsSummaryAsync(db, lastN, ct)));
+
+// Ladder percentiles (Challenges-V1) - how the player ranks vs everyone, the
+// external benchmark the wins-vs-losses analysis can't provide.
+app.MapGet("/api/challenges/percentiles", async (ChallengesBenchmarkService svc, CancellationToken ct) =>
+    await svc.GetAsync(ct) is { } result ? Results.Ok(result) : Results.NoContent());
 
 // The dashboard aggregate: coach-style stats over recent ranked games.
 // lastGames takes precedence over days; neither = whole history.

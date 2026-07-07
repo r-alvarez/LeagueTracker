@@ -34,6 +34,14 @@ public sealed class RiotApiClient(HttpClient http, IOptions<RiotOptions> options
         return JsonSerializer.Deserialize<List<LeagueEntryDto>>(raw, Json) ?? [];
     }
 
+    /// The player's challenge standings vs the ladder (per-challenge level + percentile).
+    public Task<string> GetChallengesPlayerDataRawAsync(string puuid, CancellationToken ct) =>
+        GetStringAsync($"{PlatformBase}/lol/challenges/v1/player-data/by-puuid/{puuid}", ct);
+
+    /// Challenge metadata (id -> localized name/description). Static-ish; cache it.
+    public Task<string> GetChallengesConfigRawAsync(CancellationToken ct) =>
+        GetStringAsync($"{PlatformBase}/lol/challenges/v1/challenges/config", ct);
+
     private async Task<string> GetStringAsync(string url, CancellationToken ct)
     {
         using var resp = await http.GetAsync(url, ct);
