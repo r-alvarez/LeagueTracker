@@ -180,10 +180,30 @@ table.sb td { border-bottom-color: var(--grid); padding: 8px 10px; }
 .vs-jgl .role-icon { opacity: 0.6; }
 
 /* Laning item race: my inventory vs the lane opponent's per checkpoint */
-.item-race { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
-.item-race-row { display: flex; align-items: center; gap: 8px; }
+.sub-h { font-size: 12px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 18px 0 8px; }
+.item-race { display: flex; flex-direction: column; gap: 6px; }
+.item-race-row {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--panel-2); border: 1px solid var(--grid); border-radius: 8px; padding: 6px 10px;
+}
 .item-race-min { width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 .slot.dim { opacity: 0.75; }
+
+/* Build order: each minute is a pill, arrows carry the sequence. */
+.build-order { gap: 6px; align-items: center; }
+.build-group {
+  flex-direction: row; align-items: center; gap: 8px;
+  background: var(--panel-2); border: 1px solid var(--grid); border-radius: 8px; padding: 6px 10px;
+}
+.build-group .mut.sm-text { white-space: nowrap; }
+.build-group + .build-group::before { content: none; }
+.build-order .build-group:not(:first-child) { position: relative; margin-left: 14px; }
+.build-order .build-group:not(:first-child)::after {
+  content: '›'; position: absolute; left: -13px; top: 50%; transform: translateY(-54%);
+  color: var(--muted); font-size: 15px; font-weight: 700;
+}
+.obj-chip.win { color: var(--delta-good); border-color: rgba(63, 185, 80, 0.35); }
+.obj-chip.loss { color: var(--lp-loss); border-color: rgba(240, 85, 106, 0.35); }
 
 /* Runes tab */
 .rune-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
