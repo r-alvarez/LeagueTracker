@@ -111,12 +111,13 @@ export default function DataPage() {
       <div className="card">
         <h2>Exports</h2>
         <p className="mut" style={{ marginTop: 0 }}>
-          Download .zip bundles everything (all four CSVs + <code>summary.json</code>) in one file - the same shapes the
-          PowerShell tooling produced, for the coaching workflows.
+          Download .zip mirrors everything on the screens: per-game stats, the full Riot challenges block, lane
+          checkpoints, all-10 loadouts, deaths, the objective timeline, LP history, and <code>dashboard.json</code>
+          (the computed dashboard views over all games) - for the coaching workflows.
         </p>
         <div className="filters" style={{ margin: 0, flexWrap: 'wrap' }}>
           <a className="action primary" href="/api/export/all.zip" download>Download .zip</a>
-          {['matches.csv', 'deaths.csv', 'ranks.csv', 'lp-history.csv'].map(f => (
+          {['matches.csv', 'challenges.csv', 'lane-checkpoints.csv', 'ranks.csv', 'deaths.csv', 'objectives.csv', 'lp-history.csv'].map(f => (
             <a key={f} className="action" href={`/api/export/${f}`} download>{f}</a>
           ))}
         </div>
