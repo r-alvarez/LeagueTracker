@@ -139,6 +139,12 @@ export default function Dashboard() {
   const o = stats?.overall
   const s = stats?.scope
   const soloDelta = stats?.lpDeltas.find(d => d.queue === 'Solo/Duo')
+  const windowLabel = useMemo(() => {
+    const w = WINDOWS.find(x => x.key === windowKey)!
+    if (w.key === 'all') return `all ${s?.games ?? ''} ranked games`.trim()
+    if ('days' in w) return `the last ${w.days} days (${s?.games ?? 0} games)`
+    return `your last ${w.lastGames} ranked games`
+  }, [windowKey, s?.games])
 
   return (
     <>
@@ -217,7 +223,7 @@ export default function Dashboard() {
 
           <div className="card" style={{ marginBottom: 16 }}>
             <h2>Strengths &amp; weaknesses <span className="mut" style={{ fontWeight: 400 }}>— what separates your wins from losses</span></h2>
-            <ProfileCard profile={stats.profile} />
+            <ProfileCard profile={stats.profile} windowLabel={windowLabel} />
           </div>
 
           {stats.followIn.totalDeaths > 0 && (
