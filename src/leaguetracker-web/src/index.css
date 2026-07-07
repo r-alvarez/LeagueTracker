@@ -192,7 +192,14 @@ table.sb td { border-bottom-color: var(--grid); padding: 8px 10px; }
 /* Champion drill-down row */
 tr.drill td { background: var(--panel-2); padding: 14px 16px; }
 tr.drill table.data td, tr.drill table.data th { background: transparent; }
-.drill-chips { margin: 2px 0 6px; gap: 8px; }
+/* Fixed 3-up grid: six stats land as two clean rows instead of ragged wrap. */
+.drill-chips {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 2px 0 8px;
+}
+.drill-chips .obj-chip {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 8px 12px; border-radius: 8px; font-size: 13px;
+}
 
 /* Stat list: label + hint left, big value right - denser than tiles, calmer
    than a table. Used where a stack of headline numbers shares one card. */

@@ -6,7 +6,9 @@ export default function DataPage() {
   const [status, setStatus] = useState<Status | null>(null)
   const [job, setJob] = useState<JobStatus | null>(null)
   const [rankedTarget, setRankedTarget] = useState('250')
-  const [importPath, setImportPath] = useState('D:\\ScratchPad\\League\\export-20260610-082650')
+  // In the Docker deployment old export folders are mounted read-only at
+  // /imports (see docker-compose.override.yml); host runs use Windows paths.
+  const [importPath, setImportPath] = useState('/imports/export-20260610-082650')
   const pollTimer = useRef<number | null>(null)
 
   useEffect(() => {
