@@ -90,7 +90,22 @@ app.MapGet("/api/matches", async (LeagueDbContext db, int page = 1, int pageSize
         .Skip((Math.Max(1, page) - 1) * Math.Clamp(pageSize, 1, 200)).Take(Math.Clamp(pageSize, 1, 200))
         .ToListAsync(ct);
 
-    return Results.Ok(new { total, items = items.Select(MatchListItem) });
+    // My loadout per row (items + summs) for the list's icon strip.
+    var ids = items.Select(m => m.Id).ToList();
+    var loadouts = (await db.Participants.AsNoTracking()
+            .Where(p => ids.Contains(p.MatchId) && p.IsMe)
+            .Select(p => new { p.MatchId, p.Items, p.Summoner1Id, p.Summoner2Id })
+            .ToListAsync(ct))
+        .ToDictionary(p => p.MatchId);
+
+    return Results.Ok(new
+    {
+        total,
+        items = items.Select(m => MatchListItem(m,
+            loadouts.TryGetValue(m.Id, out var l) ? l.Items : null,
+            loadouts.TryGetValue(m.Id, out var l1) ? l1.Summoner1Id : null,
+            loadouts.TryGetValue(m.Id, out var l2) ? l2.Summoner2Id : null)),
+    });
 });
 
 app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, CancellationToken ct) =>
@@ -289,8 +304,11 @@ app.MapFallbackToFile("index.html");
 
 app.Run();
 
-static object MatchListItem(Match m) => new
+static object MatchListItem(Match m, string? items = null, int? summoner1Id = null, int? summoner2Id = null) => new
 {
+    Items = items,
+    Summoner1Id = summoner1Id,
+    Summoner2Id = summoner2Id,
     m.Id, m.QueueId, m.QueueName, m.IsRanked, m.GameMode,
     Date = m.GameCreationUtc, m.GameEndUtc,
     DurationMin = Math.Round(m.DurationSec / 60, 1),

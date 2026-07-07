@@ -74,6 +74,9 @@ export interface MatchSummary {
   laneGoldDiff10: number | null
   killParticipation: number | null
   soloKills: number
+  items: string | null
+  summoner1Id: number | null
+  summoner2Id: number | null
 }
 
 export interface MatchPage {
