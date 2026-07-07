@@ -39,6 +39,7 @@ public sealed class HistorySyncService(
 
             var processed = 0;
             var skipped = 0;
+            var failed = 0;
             foreach (var matchId in ids)
             {
                 ct.ThrowIfCancellationRequested();
@@ -48,17 +49,37 @@ public sealed class HistorySyncService(
                 }
                 else
                 {
-                    await IngestAsync(matchId, puuid, includeTimeline, includeRanks, ct);
+                    try
+                    {
+                        await IngestAsync(matchId, puuid, includeTimeline, includeRanks, ct);
+                    }
+                    catch (RiotApiException ex) when (ex.IsAuthFailure)
+                    {
+                        throw;   // a dead key stops the run; one broken game must not
+                    }
+                    catch (Exception ex)
+                    {
+                        // Riot occasionally serves corrupt matches (queueId 0, no
+                        // participants). Remember them so neither sync nor poller retries.
+                        failed++;
+                        logger.LogWarning(ex, "Skipping unprocessable match {MatchId}", matchId);
+                        db.ChangeTracker.Clear();
+                        if (await db.KnownMatches.FindAsync([matchId], ct) is null)
+                        {
+                            db.KnownMatches.Add(new KnownMatch { Id = matchId });
+                            await db.SaveChangesAsync(ct);
+                        }
+                    }
                 }
                 processed++;
-                status.Report(processed, ids.Count, $"{processed}/{ids.Count} ({skipped} already present)");
+                status.Report(processed, ids.Count, $"{processed}/{ids.Count} ({skipped} already present, {failed} skipped)");
             }
 
             // Snapshot LP so this sync becomes a bracket for future attribution runs.
             await lp.TakeSnapshotAsync(puuid, ct);
             await AttributeLpFromLedgerAsync(ct);
 
-            status.Finish($"done - {processed} games checked, {processed - skipped} downloaded, {skipped} already present");
+            status.Finish($"done - {processed} games checked, {processed - skipped - failed} downloaded, {skipped} already present, {failed} unprocessable skipped");
         }
         catch (Exception ex)
         {

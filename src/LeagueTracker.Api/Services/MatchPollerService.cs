@@ -76,7 +76,29 @@ public sealed class MatchPollerService(
         foreach (var matchId in recent)
         {
             if (await db.KnownMatches.FindAsync([matchId], ct) is not null) continue;
-            await IngestNewMatchAsync(matchId, puuid, db, riot, ingest, lp, ct);
+            try
+            {
+                await IngestNewMatchAsync(matchId, puuid, db, riot, ingest, lp, ct);
+            }
+            catch (RiotApiException ex) when (ex.IsAuthFailure)
+            {
+                throw;
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Corrupt match payload (no participants / tracked player missing) -
+                // permanent, so remember it rather than retrying every pass.
+                logger.LogWarning(ex, "Skipping unprocessable match {MatchId}", matchId);
+                db.ChangeTracker.Clear();
+                db.KnownMatches.Add(new KnownMatch { Id = matchId });
+                await db.SaveChangesAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                // Transient (network, Riot 5xx) - leave unknown so the next pass retries.
+                logger.LogWarning(ex, "Failed to ingest {MatchId}; will retry next pass", matchId);
+                db.ChangeTracker.Clear();
+            }
         }
     }
 
