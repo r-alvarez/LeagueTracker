@@ -173,6 +173,7 @@ table.sb td { border-bottom-color: var(--grid); padding: 8px 10px; }
 
 /* Role position glyphs + the compact enemy laner/jungler pair */
 .role-icon { vertical-align: middle; opacity: 0.85; flex: 0 0 auto; }
+.vis-icon { vertical-align: -2px; color: var(--muted); }
 .role-tag { font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: 0.04em; }
 .vs-pair { display: inline-flex; align-items: center; gap: 6px; }
 .vs-jgl { display: inline-flex; align-items: center; gap: 2px; }
