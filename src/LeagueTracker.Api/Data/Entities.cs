@@ -94,6 +94,14 @@ public sealed class Match
     /// My skill-up order as comma-separated slots (1=Q 2=W 3=E 4=R).
     public string SkillOrder { get; set; } = "";
 
+    // Macro / improvement-path signals. Riot's full per-game challenges block for
+    // the tracked player is stored verbatim as JSON (~128 pre-computed coaching
+    // metrics) and mined at report time - new metrics need no schema change.
+    public int TotalTimeSpentDead { get; set; }
+    public int LongestTimeSpentLiving { get; set; }
+    public int TotalTimeCcDealt { get; set; }
+    public string ChallengesJson { get; set; } = "";
+
     /// Lane-diff checkpoints vs the same-role enemy at 10/15/20/25 as JSON
     /// ([{min, gold, xp, cs, level, myCs, myLevel}]).
     public string LaneDiffsJson { get; set; } = "";

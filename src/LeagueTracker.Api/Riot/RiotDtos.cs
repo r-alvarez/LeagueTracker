@@ -78,6 +78,9 @@ public sealed class MatchParticipantDto
     public int TripleKills { get; set; }
     public int QuadraKills { get; set; }
     public int PentaKills { get; set; }
+    public int TotalTimeSpentDead { get; set; }
+    public int LongestTimeSpentLiving { get; set; }
+    public int TotalTimeCCDealt { get; set; }
     public int Spell1Casts { get; set; }
     public int Spell2Casts { get; set; }
     public int Spell3Casts { get; set; }

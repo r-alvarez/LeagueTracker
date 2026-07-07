@@ -89,6 +89,7 @@ public sealed class AnalyticsReprocessService(
             existing.PingsJson = MatchIngestService.PingsJsonFor(p);
         }
         MatchIngestService.ApplyMatchDtoStats(match, dto.Info, me);
+        match.ChallengesJson = MatchIngestService.ExtractChallengesJson(matchRaw, puuid);
 
         // Children cascade at the db level, so clearing the parents clears all
         // derived rows before the fresh ones land.

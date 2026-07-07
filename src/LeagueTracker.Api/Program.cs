@@ -47,7 +47,14 @@ using (var scope = app.Services.CreateScope())
     db.Database.EnsureCreated();
     // Additive columns land via idempotent ALTERs - EnsureCreated never alters an
     // existing table, and wiping the db would cost capture-time-only data (ranks, LP).
-    foreach (var alter in new[] { "ALTER TABLE Matches ADD COLUMN AllyJungler TEXT NULL" })
+    foreach (var alter in new[]
+    {
+        "ALTER TABLE Matches ADD COLUMN AllyJungler TEXT NULL",
+        "ALTER TABLE Matches ADD COLUMN TotalTimeSpentDead INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE Matches ADD COLUMN LongestTimeSpentLiving INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE Matches ADD COLUMN TotalTimeCcDealt INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE Matches ADD COLUMN ChallengesJson TEXT NOT NULL DEFAULT ''",
+    })
     {
         try { db.Database.ExecuteSqlRaw(alter); } catch { /* column already exists */ }
     }

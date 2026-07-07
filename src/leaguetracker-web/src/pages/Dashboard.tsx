@@ -5,6 +5,7 @@ import LpLineChart from '../components/LpLineChart'
 import LpPerGameBars from '../components/LpPerGameBars'
 import { LaneGoldChart, RollingWinRateChart } from '../components/TrendCharts'
 import ChampBadge from '../components/ChampBadge'
+import ProfileCard from '../components/ProfileCard'
 import RoleIcon from '../components/RoleIcon'
 
 const QUEUES = ['Solo/Duo', 'Flex'] as const
@@ -213,6 +214,11 @@ export default function Dashboard() {
               </ul>
             </div>
           )}
+
+          <div className="card" style={{ marginBottom: 16 }}>
+            <h2>Strengths &amp; weaknesses <span className="mut" style={{ fontWeight: 400 }}>— what separates your wins from losses</span></h2>
+            <ProfileCard profile={stats.profile} />
+          </div>
 
           {stats.followIn.totalDeaths > 0 && (
             <details className="card" style={{ marginBottom: 16 }}>

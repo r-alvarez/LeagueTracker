@@ -52,6 +52,7 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
             RanksAtGameTime = withRanks && ranksAtGameTime,
         };
         ApplyMatchDtoStats(match, info, me);
+        match.ChallengesJson = ExtractChallengesJson(matchRaw, myPuuid);
 
         foreach (var p in info.Participants)
         {
@@ -205,6 +206,29 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
         match.TripleKills = me.TripleKills;
         match.QuadraKills = me.QuadraKills;
         match.PentaKills = me.PentaKills;
+        match.TotalTimeSpentDead = me.TotalTimeSpentDead;
+        match.LongestTimeSpentLiving = me.LongestTimeSpentLiving;
+        match.TotalTimeCcDealt = me.TotalTimeCCDealt;
+    }
+
+    /// The tracked player's full challenges block, verbatim from the raw match -
+    /// ~128 pre-computed coaching metrics mined at report time. Empty when Riot
+    /// omitted the block (very old matches).
+    public static string ExtractChallengesJson(string matchRaw, string puuid)
+    {
+        using var doc = JsonDocument.Parse(matchRaw);
+        if (!doc.RootElement.TryGetProperty("info", out var info) || !info.TryGetProperty("participants", out var parts))
+        {
+            return "";
+        }
+        foreach (var p in parts.EnumerateArray())
+        {
+            if (p.TryGetProperty("puuid", out var pu) && pu.GetString() == puuid)
+            {
+                return p.TryGetProperty("challenges", out var ch) ? ch.GetRawText() : "";
+            }
+        }
+        return "";
     }
 
     /// Persists the same faithful { matchId, match, timeline } wrapper the
