@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import type { AnalyticsSummary, LpPerGame, LpPoint, SplitRow, Stats, Status } from '../types'
 import LpLineChart from '../components/LpLineChart'
@@ -23,9 +23,10 @@ const signed = (v: number | null | undefined) => (v === null || v === undefined 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
 function SplitTable({ title, rows, champIcons }: { title: string; rows: SplitRow[]; champIcons?: boolean }) {
+  const [open, setOpen] = useState<string | null>(null)
   return (
     <div className="card">
-      <h2>{title}</h2>
+      <h2>{title}{champIcons && <span className="mut" style={{ fontWeight: 400 }}> — click a row for matchups</span>}</h2>
       {rows.length === 0 ? <div className="empty">No games in this window.</div> : (
         <div className="table-scroll">
           <table className="data">
@@ -38,19 +39,54 @@ function SplitTable({ title, rows, champIcons }: { title: string; rows: SplitRow
             </thead>
             <tbody>
               {rows.map(r => (
-                <tr key={r.key}>
-                  <td>{champIcons ? <ChampBadge name={r.key} small /> : r.key}</td>
-                  <td className="num">{r.games}</td>
-                  <td className="num">
-                    <span className="meter" aria-hidden="true"><span style={{ width: `${Math.round(r.winRate * 100)}%` }} /></span>
-                    {pct(r.winRate)}
-                  </td>
-                  <td className="num">{r.kda}</td>
-                  <td className="num">{pct(r.kp)}</td>
-                  <td className="num">{r.csPerMin}</td>
-                  <td className="num">{signed(r.laneGoldAt10)}</td>
-                  <td className="num">{r.deathsPerGame}</td>
-                </tr>
+                <Fragment key={r.key}>
+                  <tr onClick={() => r.detail && setOpen(open === r.key ? null : r.key)}
+                    style={r.detail ? { cursor: 'pointer' } : undefined}>
+                    <td>{champIcons ? <ChampBadge name={r.key} small /> : r.key}</td>
+                    <td className="num">{r.games}</td>
+                    <td className="num">
+                      <span className="meter" aria-hidden="true"><span style={{ width: `${Math.round(r.winRate * 100)}%` }} /></span>
+                      {pct(r.winRate)}
+                    </td>
+                    <td className="num">{r.kda}</td>
+                    <td className="num">{pct(r.kp)}</td>
+                    <td className="num">{r.csPerMin}</td>
+                    <td className="num">{signed(r.laneGoldAt10)}</td>
+                    <td className="num">{r.deathsPerGame}</td>
+                  </tr>
+                  {open === r.key && r.detail && (
+                    <tr className="drill">
+                      <td colSpan={8}>
+                        <div className="drill-chips obj-chips">
+                          <span className="obj-chip">{r.detail.avgKills} / {r.detail.avgDeaths} / {r.detail.avgAssists} <span className="mut">avg score</span></span>
+                          <span className="obj-chip">{r.detail.csAt10} <span className="mut">CS@10</span></span>
+                          <span className="obj-chip">{r.detail.soloKillsPerGame} <span className="mut">solo kills/g</span></span>
+                          <span className="obj-chip">{r.detail.visionPerMin} <span className="mut">vision/m</span></span>
+                          <span className="obj-chip">{r.detail.skillshotsDodgedPerGame} <span className="mut">dodges/g</span></span>
+                          <span className="obj-chip">{Math.round(r.dpm)} <span className="mut">DPM</span></span>
+                        </div>
+                        {r.detail.matchups.length > 0 ? (
+                          <table className="data" style={{ marginTop: 8 }}>
+                            <thead>
+                              <tr><th>Lane matchup (2+ games)</th><th className="num">Games</th><th className="num">WR</th><th className="num">G@10</th><th className="num">KDA</th></tr>
+                            </thead>
+                            <tbody>
+                              {r.detail.matchups.map(mu => (
+                                <tr key={mu.opponent}>
+                                  <td><ChampBadge name={mu.opponent} small /></td>
+                                  <td className="num">{mu.games}</td>
+                                  <td className={`num ${mu.winRate >= 0.5 ? 'win' : 'loss'}`}>{pct(mu.winRate)}</td>
+                                  <td className="num">{signed(mu.laneGoldAt10)}</td>
+                                  <td className="num">{mu.kda}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : <p className="mut" style={{ margin: '8px 0 0' }}>No repeated lane matchups in this window.</p>}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>

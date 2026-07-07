@@ -83,6 +83,16 @@ public sealed class Match
     /// Deaths where I followed a fallen teammate in (see Death.FollowTeammate).
     public int FollowInDeaths { get; set; }
 
+    // Extended laning picture at 15 + the level-2 race vs the lane opponent.
+    public int? CsAt15 { get; set; }
+    public int? LaneGoldDiff15 { get; set; }
+    public int? LaneXpDiff15 { get; set; }
+    public int? LaneCsDiff15 { get; set; }
+    public bool? FirstToLevel2 { get; set; }
+
+    /// My skill-up order as comma-separated slots (1=Q 2=W 3=E 4=R).
+    public string SkillOrder { get; set; } = "";
+
     public List<MatchParticipant> Participants { get; set; } = [];
     public List<Death> DeathEvents { get; set; } = [];
     public List<PositionSample> PositionSamples { get; set; } = [];
@@ -137,6 +147,16 @@ public sealed class MatchParticipant
     public int KeystoneId { get; set; }
     /// Final items, item0..item6 comma-separated.
     public string Items { get; set; } = "";
+    /// Full rune page (styles, selections, stat shards) as JSON, for the runes tab.
+    public string PerksJson { get; set; } = "";
+    public int Spell1Casts { get; set; }
+    public int Spell2Casts { get; set; }
+    public int Spell3Casts { get; set; }
+    public int Spell4Casts { get; set; }
+    public int Summoner1Casts { get; set; }
+    public int Summoner2Casts { get; set; }
+    /// Ping counts by kind as JSON (only non-zero kinds).
+    public string PingsJson { get; set; } = "";
 }
 
 /// One death of the tracked player, extracted from the match timeline:

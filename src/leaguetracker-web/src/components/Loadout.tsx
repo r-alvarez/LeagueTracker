@@ -20,12 +20,15 @@ export default function Loadout({ items, summoner1Id, summoner2Id }: Props) {
     </span>
   )
 
+  const showSumms = summoner1Id !== null || summoner2Id !== null
   return (
     <span className="loadout">
-      <span className="slots">
-        {[summoner1Id, summoner2Id].map((id, i) =>
-          slot(`s${i}`, id ? icons.spell(id) : null, id ? summonerSpell(id) : ''))}
-      </span>
+      {showSumms && (
+        <span className="slots">
+          {[summoner1Id, summoner2Id].map((id, i) =>
+            slot(`s${i}`, id ? icons.spell(id) : null, id ? summonerSpell(id) : ''))}
+        </span>
+      )}
       <span className="slots">
         {itemIds.slice(0, 6).map((id, i) => slot(`i${i}`, icons.item(id), id ? `Item ${id}` : ''))}
         {slot('trinket', icons.item(itemIds[6]), itemIds[6] ? 'Trinket' : '')}

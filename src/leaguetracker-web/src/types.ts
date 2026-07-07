@@ -120,6 +120,33 @@ export interface Participant {
   skillshotsDodged: number | null
   skillshotDodgesLateWindow: number | null
   killParticipation: number | null
+  perksJson: string
+  pingsJson: string
+  spell1Casts: number
+  spell2Casts: number
+  spell3Casts: number
+  spell4Casts: number
+  summoner1Casts: number
+  summoner2Casts: number
+}
+
+export interface Perks {
+  styles: Array<{
+    description: string
+    style: number
+    selections: Array<{ perk: number }>
+  }>
+  statPerks: { offense: number; flex: number; defense: number }
+}
+
+export interface TeamObjectiveCounts {
+  towers: number
+  inhibitors: number
+  dragons: number
+  barons: number
+  heralds: number
+  grubs: number
+  atakhan: number
 }
 
 export interface DeathEvent {
@@ -178,6 +205,21 @@ export interface ObjectiveEventDto {
 export interface MatchDetail {
   summary: MatchSummary
   ranksAtGameTime: boolean
+  mySide: string
+  teamObjectives: { ally: TeamObjectiveCounts; enemy: TeamObjectiveCounts }
+  skillOrder: number[]
+  laning: {
+    csAt10: number | null
+    csAt15: number | null
+    laneGoldDiff10: number | null
+    laneXpDiff10: number | null
+    laneCsDiff10: number | null
+    laneGoldDiff15: number | null
+    laneXpDiff15: number | null
+    laneCsDiff15: number | null
+    firstToLevel2: boolean | null
+  }
+  wards: { wardsPlaced: number; wardsKilled: number; controlWards: number }
   participants: Participant[]
   deaths: DeathEvent[]
   objectives: ObjectiveEventDto[]
@@ -223,6 +265,14 @@ export interface BucketStat {
   winRate: number
 }
 
+export interface MatchupRow {
+  opponent: string
+  games: number
+  winRate: number
+  laneGoldAt10: number | null
+  kda: number
+}
+
 export interface SplitRow {
   key: string
   games: number
@@ -234,6 +284,16 @@ export interface SplitRow {
   dpm: number
   laneGoldAt10: number | null
   deathsPerGame: number
+  detail: {
+    avgKills: number
+    avgDeaths: number
+    avgAssists: number
+    csAt10: number
+    soloKillsPerGame: number
+    visionPerMin: number
+    skillshotsDodgedPerGame: number
+    matchups: MatchupRow[]
+  } | null
 }
 
 export interface SeriesPoint {

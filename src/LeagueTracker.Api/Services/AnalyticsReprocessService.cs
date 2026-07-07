@@ -79,6 +79,14 @@ public sealed class AnalyticsReprocessService(
             existing.SkillshotsDodged = p.Challenges?.SkillshotsDodged;
             existing.SkillshotDodgesLateWindow = p.Challenges?.DodgeSkillShotsSmallWindow;
             existing.KillParticipation = p.Challenges?.KillParticipation;
+            existing.PerksJson = MatchIngestService.PerksJsonFor(p);
+            existing.Spell1Casts = p.Spell1Casts;
+            existing.Spell2Casts = p.Spell2Casts;
+            existing.Spell3Casts = p.Spell3Casts;
+            existing.Spell4Casts = p.Spell4Casts;
+            existing.Summoner1Casts = p.Summoner1Casts;
+            existing.Summoner2Casts = p.Summoner2Casts;
+            existing.PingsJson = MatchIngestService.PingsJsonFor(p);
         }
         MatchIngestService.ApplyMatchDtoStats(match, dto.Info, me);
 

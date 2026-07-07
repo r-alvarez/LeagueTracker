@@ -114,6 +114,80 @@ table.data tbody tr.row-loss:hover td { background: rgba(240, 85, 106, 0.11); }
 }
 .slot img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
+.sm-text { font-size: 11px; }
+
+/* Scoreboard (match detail, General tab) */
+.sb-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+.sb-head h2 { font-size: 16px; }
+.obj-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.obj-chip {
+  font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--border); white-space: nowrap;
+}
+.obj-chip.zero { opacity: 0.45; }
+table.sb td { border-bottom-color: var(--grid); padding: 8px 10px; }
+.sb-player { display: inline-flex; align-items: center; gap: 10px; }
+.sb-name { display: inline-flex; flex-direction: column; line-height: 1.25; }
+.sb-name > span:first-child { font-weight: 600; }
+.champ-frame { position: relative; display: inline-block; flex: 0 0 auto; }
+.champ-frame img, .champ-frame .champ-mono { width: 100%; height: 100%; border-radius: 8px; border: 1px solid var(--border); object-fit: cover; display: block; }
+.champ-frame .lvl {
+  position: absolute; right: -4px; bottom: -4px; min-width: 16px; height: 16px;
+  border-radius: 8px; background: var(--page); border: 1px solid var(--border);
+  font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; padding: 0 3px;
+}
+.rune-pair { display: inline-flex; align-items: center; gap: 3px; }
+.slot.round { border-radius: 50%; background: var(--page); }
+.slot.round.sm { width: 16px; height: 16px; }
+.slot.round.keystone { width: 26px; height: 26px; }
+.dmg-cell { min-width: 130px; }
+.dmgbar { display: block; height: 6px; width: 110px; border-radius: 4px; background: var(--panel-2); overflow: hidden; margin-bottom: 3px; }
+.dmgbar > span { display: block; height: 100%; background: var(--lp-loss); border-radius: 4px; }
+
+/* Details tab: build order, skill order, casts */
+.build-order { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.build-group { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; }
+.slot.sold { position: relative; }
+.slot.sold::after {
+  content: '✕'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--lp-loss); font-weight: 800; background: rgba(14, 17, 22, 0.55); font-size: 12px;
+}
+.slot.sold, .slot.undo { border-color: var(--lp-loss); }
+.slot.undo { opacity: 0.4; }
+.skill-grid { display: flex; flex-direction: column; gap: 4px; overflow-x: auto; }
+.skill-row { display: flex; gap: 3px; align-items: center; }
+.skill-key {
+  width: 22px; height: 22px; border-radius: 5px; background: var(--panel-2); border: 1px solid var(--border);
+  display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; margin-right: 4px; flex: 0 0 auto;
+}
+.skill-key.ult { color: var(--warn); }
+.skill-cell {
+  width: 22px; height: 22px; border-radius: 5px; background: var(--panel-2); border: 1px solid var(--border);
+  display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex: 0 0 auto; opacity: 0.45;
+}
+.skill-cell.taken { opacity: 1; background: var(--series-1); color: #06203f; border-color: var(--series-1); }
+.skill-cell.taken.ult { background: var(--warn); border-color: var(--warn); }
+.cast-row { display: flex; gap: 16px; flex-wrap: wrap; }
+.cast { display: inline-flex; align-items: center; gap: 6px; }
+.cast strong { font-size: 15px; }
+
+/* Runes tab */
+.rune-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+.rune-page {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
+}
+.rune-champ { display: flex; align-items: center; gap: 8px; }
+.rune-page .slots { gap: 4px; }
+.rune-page .slot { width: 24px; height: 24px; }
+.rune-page .slot.keystone { width: 32px; height: 32px; }
+.rune-page .slot.sm { width: 18px; height: 18px; }
+
+/* Champion drill-down row */
+tr.drill td { background: var(--panel-2); }
+tr.drill table.data td, tr.drill table.data th { background: transparent; }
+.drill-chips { margin: 4px 0; }
+
 /* Mini win-rate meter: accent fill on a same-surface track, value alongside. */
 .meter {
   display: inline-block; vertical-align: middle; width: 52px; height: 6px;
