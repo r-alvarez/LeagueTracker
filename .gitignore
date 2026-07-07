@@ -21,3 +21,4 @@ dist/
 src/LeagueTracker.Api/wwwroot/
 
 # Local tooling
+docker-compose.override.yml

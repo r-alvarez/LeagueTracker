@@ -1,0 +1,14 @@
+services:
+  leaguetracker:
+    build: .
+    container_name: leaguetracker
+    ports:
+      - "5170:5170"
+    environment:
+      # Match dates/CSV timestamps render in this zone; LP ledger stays UTC.
+      - TZ=Europe/London
+    volumes:
+      # Everything persistent lives here: SQLite index, raw game files, LP
+      # ledger CSV, and riot-api-key.txt (first line = the key).
+      - ./data:/data
+    restart: unless-stopped
