@@ -177,10 +177,15 @@ function DetailsTab({ detail }: { detail: Detail }) {
     <>
       <div className="grid two-col" style={{ marginBottom: 14 }}>
         <div className="card">
-          <h2>
-            Laning vs {m.opponentChampion ?? 'lane opponent'}
+          <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <ChampIcon name={m.champion} size={24} />
+            <span className="mut" style={{ fontWeight: 400 }}>vs</span>
+            {m.opponentChampion ? <ChampIcon name={m.opponentChampion} size={24} /> : null}
+            <span>Laning{m.opponentChampion ? ` vs ${m.opponentChampion}` : ''}</span>
             {l.firstToLevel2 !== null && (
-              <span className="mut" style={{ fontWeight: 400 }}> — first to level 2: <span className={l.firstToLevel2 ? 'win' : 'loss'}>{l.firstToLevel2 ? 'yes' : 'no'}</span></span>
+              <span className={`obj-chip ${l.firstToLevel2 ? 'win' : 'loss'}`} style={{ fontWeight: 600 }}>
+                {l.firstToLevel2 ? 'first to level 2' : 'second to level 2'}
+              </span>
             )}
           </h2>
           {l.checkpoints && l.checkpoints.length > 0 ? (
@@ -189,7 +194,8 @@ function DetailsTab({ detail }: { detail: Detail }) {
                 <thead>
                   <tr>
                     <th>At</th><th className="num">Gold diff</th><th className="num">XP diff</th>
-                    <th className="num">CS diff</th><th className="num">Level diff</th><th className="num">My CS (lvl)</th>
+                    <th className="num">CS diff</th><th className="num">Level diff</th>
+                    <th className="num">My CS (lvl)</th><th className="num">{m.opponentChampion ?? 'Opp'} CS (lvl)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -201,10 +207,12 @@ function DetailsTab({ detail }: { detail: Detail }) {
                       <td className={`num ${c.cs >= 0 ? 'win' : 'loss'}`}>{signed(c.cs)}</td>
                       <td className={`num ${c.level >= 0 ? 'win' : 'loss'}`}>{signed(c.level)}</td>
                       <td className="num">{c.myCs} <span className="mut sm-text">({c.myLevel})</span></td>
+                      <td className="num mut">{c.oppCs} <span className="sm-text">({c.oppLevel})</span></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <div className="sub-h">Item race</div>
               <div className="item-race">
                 {l.checkpoints.map(c => (
                   <div key={c.min} className="item-race-row">
@@ -226,8 +234,8 @@ function DetailsTab({ detail }: { detail: Detail }) {
                     </span>
                   </div>
                 ))}
-                <span className="mut sm-text">Inventories replayed from the item event log - consumables and undos accounted for.</span>
               </div>
+              <p className="mut sm-text" style={{ margin: '8px 0 0' }}>Inventories replayed from the item event log - consumables and undos accounted for.</p>
             </>
           ) : (
             <div className="empty">
@@ -253,16 +261,14 @@ function DetailsTab({ detail }: { detail: Detail }) {
               </div>
             )
           })()}
-          <div className="card tile">
-            <div className="label">Wards</div>
-            <div className="value">{detail.wards.wardsPlaced}</div>
-            <div className="sub">{detail.wards.wardsKilled} killed · {detail.wards.controlWards} control</div>
-          </div>
-          <div className="card tile">
-            <div className="label">Global stats</div>
-            <div className="value">{(m.cs / m.durationMin).toFixed(1)} <span className="mut" style={{ fontSize: 14 }}>CS/m</span></div>
-            <div className="sub">
-              {(m.visionScore / m.durationMin).toFixed(2)} VS/m · {Math.round(m.damageToChampions / m.durationMin)} DMG/m · {Math.round(m.gold / m.durationMin)} gold/m
+          <div className="card">
+            <h2>My numbers</h2>
+            <div className="stat-list">
+              <div className="stat-row"><span className="k">CS per minute</span><span className="v">{(m.cs / m.durationMin).toFixed(1)}</span></div>
+              <div className="stat-row"><span className="k">Damage per minute</span><span className="v">{Math.round(m.damageToChampions / m.durationMin)}</span></div>
+              <div className="stat-row"><span className="k">Gold per minute</span><span className="v">{Math.round(m.gold / m.durationMin)}</span></div>
+              <div className="stat-row"><span className="k">Vision per minute<small>{m.visionScore} total vision score</small></span><span className="v">{(m.visionScore / m.durationMin).toFixed(2)}</span></div>
+              <div className="stat-row"><span className="k">Wards placed<small>{detail.wards.wardsKilled} killed · {detail.wards.controlWards} control</small></span><span className="v">{detail.wards.wardsPlaced}</span></div>
             </div>
           </div>
         </div>

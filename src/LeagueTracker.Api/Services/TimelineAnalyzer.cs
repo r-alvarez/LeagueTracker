@@ -54,7 +54,8 @@ public static class TimelineAnalyzer
     /// laning table: minutes 10/15/20/25 where the game lasted that long.
     /// Item lists are replayed inventories (purchases minus consumed/sold/undone).
     public sealed record LaneDiffPoint(
-        int Min, int Gold, int Xp, int Cs, int Level, int MyCs, int MyLevel,
+        int Min, int Gold, int Xp, int Cs, int Level,
+        int MyCs, int MyLevel, int OppCs, int OppLevel,
         List<int> MyItems, List<int> OppItems);
 
     private readonly record struct ItemLogEntry(int T, int Pid, string Kind, int ItemId, int BeforeId, int AfterId);
@@ -195,7 +196,7 @@ public static class TimelineAnalyzer
             if (My(frame) is not { } mineAt || Opp(frame) is not { } oppAt) continue;
             laneDiffs.Add(new LaneDiffPoint(minute,
                 mineAt.Gold - oppAt.Gold, mineAt.Xp - oppAt.Xp, mineAt.Cs - oppAt.Cs, mineAt.Level - oppAt.Level,
-                mineAt.Cs, mineAt.Level,
+                mineAt.Cs, mineAt.Level, oppAt.Cs, oppAt.Level,
                 InventoryAt(itemLog, me.ParticipantId, minute * 60),
                 InventoryAt(itemLog, opp!.ParticipantId, minute * 60)));
         }

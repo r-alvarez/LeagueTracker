@@ -149,6 +149,8 @@ export interface LaneDiffCheckpoint {
   level: number
   myCs: number
   myLevel: number
+  oppCs: number
+  oppLevel: number
   myItems: number[]
   oppItems: number[]
 }
