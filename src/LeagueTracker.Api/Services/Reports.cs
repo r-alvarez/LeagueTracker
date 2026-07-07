@@ -356,7 +356,7 @@ public static class Reports
                     Ahead = followIns.Count(d => d.FollowTeamGoldDiff > 1500),
                 },
             },
-            Profile = BuildProfile(matches),
+            Profile = BuildProfileByState(matches),
             ByChampion = SplitBy(m => m.Champion, withDetail: true),
             ByRole = SplitBy(m => m.Position),
             Series = series,
@@ -477,6 +477,21 @@ public static class Reports
     /// Strengths & weaknesses: each metric's average, its average in wins vs
     /// losses, and how strongly it separates the two - a benchmark-free
     /// improvement map built from the player's own games.
+    /// The profile split by game state at 10:00, so wins-vs-losses is compared
+    /// within similar situations. Comparing across ALL games rewards outcomes of
+    /// already being ahead (plates, dragons); comparing within "even or behind"
+    /// isolates what the player actually did to swing a game that wasn't decided.
+    private static object BuildProfileByState(List<Match> matches)
+    {
+        var laneKnown = matches.Where(m => m.LaneGoldDiff10 is not null).ToList();
+        return new
+        {
+            All = BuildProfile(matches),
+            EvenBehind = BuildProfile(laneKnown.Where(m => m.LaneGoldDiff10 < 500).ToList()),
+            Ahead = BuildProfile(laneKnown.Where(m => m.LaneGoldDiff10 >= 500).ToList()),
+        };
+    }
+
     private static object BuildProfile(List<Match> matches)
     {
         // Newest-first in, chronological for the trend sparkline.
@@ -532,7 +547,7 @@ public static class Reports
                 Recent = recent,
             });
         }
-        return rows;
+        return new { Games = matches.Count, Wins = matches.Count(m => m.Win), Metrics = rows };
     }
 
     /// Distinct game patches (major.minor) across stored matches, oldest first.
