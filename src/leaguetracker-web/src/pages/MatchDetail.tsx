@@ -12,6 +12,18 @@ const parsePerks = (json: string): Perks | null => {
   try { return json ? (JSON.parse(json) as Perks) : null } catch { return null }
 }
 
+function VisionIcon() {
+  return (
+    <svg className="vis-icon" viewBox="0 0 24 24" width="14" height="14" aria-label="Vision score" role="img">
+      <title>Vision score</title>
+      <path
+        d="M12 5C6.5 5 2.6 9.4 1.3 11.4a1.1 1.1 0 0 0 0 1.2C2.6 14.6 6.5 19 12 19s9.4-4.4 10.7-6.4a1.1 1.1 0 0 0 0-1.2C21.4 9.4 17.5 5 12 5Zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-2.2a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
 function ChampIcon({ name, size = 34, level }: { name: string; size?: number; level?: number }) {
   const icon = useChampionIcons()(name)
   return (
@@ -105,7 +117,7 @@ function Scoreboard({ title, side, won, players, objectives, maxDamage, duration
                     <span className="dmgbar"><span style={{ width: `${Math.max(3, Math.round((100 * p.damageToChampions) / Math.max(1, maxDamage)))}%` }} /></span>
                     <span className="sm-text">{(p.damageToChampions / 1000).toFixed(1)}K <span className="mut">({dpm}/m)</span></span>
                   </td>
-                  <td className="num">{p.visionScore} <span className="mut sm-text">vis</span></td>
+                  <td className="num">{p.visionScore} <VisionIcon /></td>
                 </tr>
               )
             })}
