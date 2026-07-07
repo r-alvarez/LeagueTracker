@@ -4,6 +4,7 @@ import { api } from '../api'
 import type { MatchSummary } from '../types'
 import ChampBadge from '../components/ChampBadge'
 import Loadout from '../components/Loadout'
+import RoleIcon from '../components/RoleIcon'
 
 const PAGE_SIZE = 25
 
@@ -36,7 +37,7 @@ export default function Matches() {
         <table className="data">
           <thead>
             <tr>
-              <th>Date</th><th>Champion</th><th>Result</th><th>vs Laner</th><th>vs Jungler</th>
+              <th>Date</th><th>Champion</th><th>Result</th><th>vs</th>
               <th className="num">K/D/A</th><th className="num">KP</th>
               <th className="num">CS@10</th><th className="num">G@10</th><th>Build</th><th className="num">Min</th>
               <th>Avg enemy rank</th><th className="num">LP</th>
@@ -46,10 +47,25 @@ export default function Matches() {
             {items.map(m => (
               <tr key={m.id} className={m.win ? 'row-win' : 'row-loss'} style={{ cursor: 'pointer' }} onClick={() => navigate(`/matches/${m.id}`)}>
                 <td><Link to={`/matches/${m.id}`} onClick={e => e.stopPropagation()}>{new Date(m.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</Link></td>
-                <td><ChampBadge name={m.champion} sub={m.position.toLowerCase()} /></td>
+                <td>
+                  <span className="champ">
+                    <ChampBadge name={m.champion} iconOnly />
+                    <RoleIcon role={m.position} />
+                    <span className="champ-name">{m.champion}</span>
+                  </span>
+                </td>
                 <td><span className={m.win ? 'badge win' : 'badge loss'}>{m.win ? 'Victory' : 'Defeat'}</span></td>
-                <td>{m.opponentChampion ? <ChampBadge name={m.opponentChampion} small /> : <span className="mut">—</span>}</td>
-                <td>{m.enemyJungler ? <ChampBadge name={m.enemyJungler} small /> : <span className="mut">—</span>}</td>
+                <td>
+                  <span className="vs-pair">
+                    {m.opponentChampion ? <ChampBadge name={m.opponentChampion} small iconOnly /> : <span className="mut">—</span>}
+                    {m.enemyJungler && (
+                      <span className="vs-jgl">
+                        <ChampBadge name={m.enemyJungler} small iconOnly />
+                        <RoleIcon role="JUNGLE" size={11} />
+                      </span>
+                    )}
+                  </span>
+                </td>
                 <td className="num">{m.kills}/{m.deaths}/{m.assists} <span className="mut">({m.kda})</span></td>
                 <td className="num">{m.killParticipation !== null ? `${Math.round(m.killParticipation * 100)}%` : <span className="mut">—</span>}</td>
                 <td className="num">{m.csAt10 ?? <span className="mut">—</span>}</td>

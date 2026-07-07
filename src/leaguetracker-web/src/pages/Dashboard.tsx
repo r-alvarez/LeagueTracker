@@ -5,6 +5,7 @@ import LpLineChart from '../components/LpLineChart'
 import LpPerGameBars from '../components/LpPerGameBars'
 import { LaneGoldChart, RollingWinRateChart } from '../components/TrendCharts'
 import ChampBadge from '../components/ChampBadge'
+import RoleIcon from '../components/RoleIcon'
 
 const QUEUES = ['Solo/Duo', 'Flex'] as const
 
@@ -46,7 +47,9 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
                 <Fragment key={r.key}>
                   <tr onClick={() => r.detail && setOpen(open === r.key ? null : r.key)}
                     style={r.detail ? { cursor: 'pointer' } : undefined}>
-                    <td>{champIcons ? <ChampBadge name={r.key} small /> : r.key}</td>
+                    <td>{champIcons
+                      ? <ChampBadge name={r.key} small />
+                      : <span className="champ sm"><RoleIcon role={r.key} /> <span className="champ-name">{r.key}</span></span>}</td>
                     <td className="num">{r.games}</td>
                     <td className="num">
                       <span className="meter" aria-hidden="true"><span style={{ width: `${Math.round(r.winRate * 100)}%` }} /></span>
