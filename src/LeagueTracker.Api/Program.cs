@@ -329,7 +329,17 @@ app.MapGet("/api/export/ranks.csv", async (LeagueDbContext db, CancellationToken
 app.MapGet("/api/export/lp-history.csv", async (LeagueDbContext db, CancellationToken ct) =>
     CsvFile("lp-history.csv", await Reports.LpHistoryCsvAsync(db, ct)));
 
-// Everything in one download: the four CSVs plus a machine-readable summary.
+app.MapGet("/api/export/challenges.csv", async (LeagueDbContext db, CancellationToken ct) =>
+    CsvFile("challenges.csv", await Reports.ChallengesCsvAsync(db, ct)));
+
+app.MapGet("/api/export/lane-checkpoints.csv", async (LeagueDbContext db, CancellationToken ct) =>
+    CsvFile("lane-checkpoints.csv", await Reports.LaneCheckpointsCsvAsync(db, ct)));
+
+app.MapGet("/api/export/objectives.csv", async (LeagueDbContext db, CancellationToken ct) =>
+    CsvFile("objectives.csv", await Reports.ObjectivesCsvAsync(db, ct)));
+
+// Everything in one download: every CSV the screens are built from, plus the
+// dashboard aggregate over all games as machine-readable JSON.
 app.MapGet("/api/export/all.zip", async (LeagueDbContext db, LpService lp, TrackedPlayerService player, CancellationToken ct) =>
 {
     var summary = new
@@ -342,8 +352,21 @@ app.MapGet("/api/export/all.zip", async (LeagueDbContext db, LpService lp, Track
         Ranks = new[] { await lp.GetLatestAsync("Solo/Duo", ct), await lp.GetLatestAsync("Flex", ct) }
             .Where(s => s is not null)
             .Select(s => new { s!.Queue, s.Tier, s.Division, s.Lp, s.Wins, s.Losses }),
-        Analytics = await Reports.AnalyticsSummaryAsync(db, 50, ct),
+        Files = new[]
+        {
+            "matches-summary.csv - one row per game, all headline + laning + macro columns",
+            "challenges.csv - Riot's full per-game challenges block (strengths & weaknesses source)",
+            "lane-checkpoints.csv - gold/xp/cs/level diff + item race at 10/15/20/25",
+            "ranks.csv - all 10 participants per game: score, rank, loadout",
+            "deaths.csv - every death: collapse, follow-in, damage, objective context",
+            "objectives.csv - objective timeline per game",
+            "lp-history.csv - LP snapshots over time",
+            "dashboard.json - the full dashboard aggregate over all ranked games",
+        },
     };
+    // The dashboard's computed views (overall, lane state, strengths/weaknesses,
+    // champion/role splits, follow-in) over the entire ranked history.
+    var dashboard = await Reports.StatsAsync(db, days: null, lastGames: null, ct);
 
     using var ms = new MemoryStream();
     using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
@@ -353,11 +376,16 @@ app.MapGet("/api/export/all.zip", async (LeagueDbContext db, LpService lp, Track
             await using var entry = zip.CreateEntry(name).Open();
             await entry.WriteAsync(Encoding.UTF8.GetBytes(content), ct);
         }
+        var jsonOpts = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
         await AddAsync("matches-summary.csv", await Reports.MatchesCsvAsync(db, ct));
-        await AddAsync("deaths.csv", await Reports.DeathsCsvAsync(db, ct));
+        await AddAsync("challenges.csv", await Reports.ChallengesCsvAsync(db, ct));
+        await AddAsync("lane-checkpoints.csv", await Reports.LaneCheckpointsCsvAsync(db, ct));
         await AddAsync("ranks.csv", await Reports.RanksCsvAsync(db, ct));
+        await AddAsync("deaths.csv", await Reports.DeathsCsvAsync(db, ct));
+        await AddAsync("objectives.csv", await Reports.ObjectivesCsvAsync(db, ct));
         await AddAsync("lp-history.csv", await Reports.LpHistoryCsvAsync(db, ct));
-        await AddAsync("summary.json", System.Text.Json.JsonSerializer.Serialize(summary, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        await AddAsync("dashboard.json", System.Text.Json.JsonSerializer.Serialize(dashboard, jsonOpts));
+        await AddAsync("summary.json", System.Text.Json.JsonSerializer.Serialize(summary, jsonOpts));
     }
     return Results.File(ms.ToArray(), "application/zip", $"leaguetracker-export-{DateTime.Now:yyyyMMdd-HHmm}.zip");
 });

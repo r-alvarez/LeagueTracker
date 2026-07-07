@@ -12,25 +12,151 @@ public static class Reports
     public static async Task<string> MatchesCsvAsync(LeagueDbContext db, CancellationToken ct)
     {
         var matches = await db.Matches.AsNoTracking().OrderByDescending(m => m.GameEndUtc).ToListAsync(ct);
+        var i = System.Globalization.CultureInfo.InvariantCulture;
         return Csv(
-            ["MatchId", "Date", "Ranked", "Queue", "QueueId", "GameMode", "DurationMin", "Champion", "Position", "Win",
-             "Kills", "Deaths", "Assists", "KDA", "CS", "Gold", "DmgToChamps", "VisionScore", "Level",
-             "AvgAllyRank", "AvgEnemyRank", "RankGapLP", "AllyRanksIn", "EnemyRanksIn", "LPChange",
-             "SkillshotsHit", "SkillshotsDodged", "TimeInEnemyHalfPct", "AvgNearestAllyDist"],
-            matches.Select(m => new[]
+            ["MatchId", "Date", "Ranked", "Remake", "Queue", "QueueId", "GameMode", "DurationMin", "Champion", "Position", "Win",
+             "OpponentChampion", "AllyJungler", "EnemyJungler",
+             "Kills", "Deaths", "Assists", "KDA", "KillParticipationPct", "SoloKills", "CS", "CsPerMin", "Gold", "GoldPerMin",
+             "DmgToChamps", "DpmEarly", "DpmMid", "DpmLate", "DamageTakenPerMin",
+             "VisionScore", "ControlWards", "WardsPlaced", "WardsKilled", "Level",
+             "CsAt10", "CsAt15", "LaneGoldDiff10", "LaneXpDiff10", "LaneCsDiff10", "LaneGoldDiff15", "FirstToLevel2",
+             "TimeInEnemyHalfPct", "AvgNearestAllyDist", "SkillshotsHit", "SkillshotsDodged",
+             "TripleKills", "QuadraKills", "PentaKills", "TotalTimeSpentDeadSec", "LongestTimeSpentLivingSec", "TotalTimeCcDealtSec", "FollowInDeaths",
+             "AvgAllyRank", "AvgEnemyRank", "RankGapLP", "AllyRanksIn", "EnemyRanksIn", "LPChange"],
+            matches.Select(m =>
             {
-                m.Id, m.GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), m.IsRanked.ToString(), m.QueueName,
-                m.QueueId.ToString(), m.GameMode, Math.Round(m.DurationSec / 60, 1).ToString(), m.Champion, m.Position,
-                m.Win.ToString(), m.Kills.ToString(), m.Deaths.ToString(), m.Assists.ToString(),
-                m.Deaths == 0 ? "Perfect" : Math.Round((m.Kills + m.Assists) / (double)m.Deaths, 2).ToString(),
-                m.Cs.ToString(), m.Gold.ToString(), m.DamageToChampions.ToString(), m.VisionScore.ToString(), m.ChampLevel.ToString(),
-                m.AvgAllyRankValue is { } ally ? RankMath.ToLabel(ally) : "",
-                m.AvgEnemyRankValue is { } enemy ? RankMath.ToLabel(enemy) : "",
-                m is { AvgAllyRankValue: { } a, AvgEnemyRankValue: { } e } ? Math.Round(e - a).ToString() : "",
-                $"{m.AllyRanksKnown}/5", $"{m.EnemyRanksKnown}/5", m.LpChange?.ToString() ?? "",
-                m.SkillshotsHit?.ToString() ?? "", m.SkillshotsDodged?.ToString() ?? "",
-                m.TimeInEnemyHalfPct?.ToString() ?? "", m.AvgNearestAllyDist?.ToString() ?? "",
+                var durMin = Math.Max(1.0, m.DurationSec / 60.0);
+                return new[]
+                {
+                    m.Id, m.GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), m.IsRanked.ToString(), (m.DurationSec < 300).ToString(),
+                    m.QueueName, m.QueueId.ToString(), m.GameMode, Math.Round(durMin, 1).ToString(i), m.Champion, m.Position, m.Win.ToString(),
+                    m.OpponentChampion ?? "", m.AllyJungler ?? "", m.EnemyJungler ?? "",
+                    m.Kills.ToString(), m.Deaths.ToString(), m.Assists.ToString(),
+                    m.Deaths == 0 ? "Perfect" : Math.Round((m.Kills + m.Assists) / (double)m.Deaths, 2).ToString(i),
+                    m.KillParticipation is { } kp ? Math.Round(kp * 100, 1).ToString(i) : "", m.SoloKills.ToString(),
+                    m.Cs.ToString(), Math.Round(m.Cs / durMin, 2).ToString(i), m.Gold.ToString(), Math.Round(m.Gold / durMin).ToString(i),
+                    m.DamageToChampions.ToString(), m.DpmEarly?.ToString(i) ?? "", m.DpmMid?.ToString(i) ?? "", m.DpmLate?.ToString(i) ?? "",
+                    m.DamageTakenPerMin?.ToString(i) ?? "",
+                    m.VisionScore.ToString(), m.ControlWards.ToString(), m.WardsPlaced.ToString(), m.WardsKilled.ToString(), m.ChampLevel.ToString(),
+                    m.CsAt10?.ToString() ?? "", m.CsAt15?.ToString() ?? "",
+                    m.LaneGoldDiff10?.ToString() ?? "", m.LaneXpDiff10?.ToString() ?? "", m.LaneCsDiff10?.ToString() ?? "",
+                    m.LaneGoldDiff15?.ToString() ?? "", m.FirstToLevel2?.ToString() ?? "",
+                    m.TimeInEnemyHalfPct?.ToString(i) ?? "", m.AvgNearestAllyDist?.ToString() ?? "",
+                    m.SkillshotsHit?.ToString() ?? "", m.SkillshotsDodged?.ToString() ?? "",
+                    m.TripleKills.ToString(), m.QuadraKills.ToString(), m.PentaKills.ToString(),
+                    m.TotalTimeSpentDead.ToString(), m.LongestTimeSpentLiving.ToString(), m.TotalTimeCcDealt.ToString(), m.FollowInDeaths.ToString(),
+                    m.AvgAllyRankValue is { } ally ? RankMath.ToLabel(ally) : "",
+                    m.AvgEnemyRankValue is { } enemy ? RankMath.ToLabel(enemy) : "",
+                    m is { AvgAllyRankValue: { } a, AvgEnemyRankValue: { } e } ? Math.Round(e - a).ToString() : "",
+                    $"{m.AllyRanksKnown}/5", $"{m.EnemyRanksKnown}/5", m.LpChange?.ToString() ?? "",
+                };
             }));
+    }
+
+    /// The full per-game challenges block (Riot's ~128 pre-computed metrics), one
+    /// row per game, columns = the union of every challenge field seen. This is
+    /// the raw material behind the Strengths & weaknesses view.
+    public static async Task<string> ChallengesCsvAsync(LeagueDbContext db, CancellationToken ct)
+    {
+        var matches = await db.Matches.AsNoTracking()
+            .Where(m => m.IsRanked && m.ChallengesJson != "")
+            .OrderByDescending(m => m.GameEndUtc).ToListAsync(ct);
+
+        var parsed = new List<(Match M, Dictionary<string, string> Fields)>();
+        var keys = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var m in matches)
+        {
+            var fields = ParseChallengesRaw(m.ChallengesJson);
+            parsed.Add((m, fields));
+            foreach (var k in fields.Keys) keys.Add(k);
+        }
+
+        var keyList = keys.ToList();
+        string[] prefix = ["MatchId", "Date", "Champion", "Position", "Win"];
+        var headers = prefix.Concat(keyList).ToArray();
+        return Csv(headers, parsed.Select(p => (string[])
+            [
+                p.M.Id, p.M.GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), p.M.Champion, p.M.Position, p.M.Win.ToString(),
+                .. keyList.Select(k => p.Fields.TryGetValue(k, out var v) ? v : ""),
+            ]));
+    }
+
+    /// Lane checkpoints (10/15/20/25) vs the same-role enemy, one row per
+    /// checkpoint - the Details-tab laning table and item race as flat data.
+    public static async Task<string> LaneCheckpointsCsvAsync(LeagueDbContext db, CancellationToken ct)
+    {
+        var matches = await db.Matches.AsNoTracking()
+            .Where(m => m.IsRanked && m.LaneDiffsJson != "")
+            .OrderByDescending(m => m.GameEndUtc).ToListAsync(ct);
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var rows = new List<string[]>();
+        foreach (var m in matches)
+        {
+            List<TimelineAnalyzer.LaneDiffPoint>? points;
+            try { points = System.Text.Json.JsonSerializer.Deserialize<List<TimelineAnalyzer.LaneDiffPoint>>(m.LaneDiffsJson, json); }
+            catch { continue; }
+            if (points is null) continue;
+            foreach (var c in points)
+            {
+                rows.Add([
+                    m.Id, m.GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), m.Champion, m.OpponentChampion ?? "",
+                    $"{c.Min}:00", c.Gold.ToString(), c.Xp.ToString(), c.Cs.ToString(), c.Level.ToString(),
+                    c.MyCs.ToString(), c.MyLevel.ToString(), c.OppCs.ToString(), c.OppLevel.ToString(),
+                    string.Join(' ', c.MyItems), string.Join(' ', c.OppItems),
+                ]);
+            }
+        }
+        return Csv(
+            ["MatchId", "Date", "Champion", "Opponent", "At", "GoldDiff", "XpDiff", "CsDiff", "LevelDiff",
+             "MyCs", "MyLevel", "OppCs", "OppLevel", "MyItemIds", "OppItemIds"],
+            rows);
+    }
+
+    /// Objective timeline (BUILDING_KILL / ELITE_MONSTER_KILL) - the Match-detail
+    /// objective table as flat data, killer resolved to a champion name.
+    public static async Task<string> ObjectivesCsvAsync(LeagueDbContext db, CancellationToken ct)
+    {
+        var rows = await db.ObjectiveEvents.AsNoTracking()
+            .Join(db.Matches.AsNoTracking(), o => o.MatchId, m => m.Id, (o, m) => new { o, m })
+            .OrderByDescending(x => x.m.GameEndUtc).ThenBy(x => x.o.TimeSec)
+            .ToListAsync(ct);
+        var champByKey = await db.Participants.AsNoTracking()
+            .Select(p => new { p.MatchId, p.ParticipantId, p.Champion }).ToListAsync(ct);
+        var lookup = champByKey.ToDictionary(x => (x.MatchId, x.ParticipantId), x => x.Champion);
+        return Csv(
+            ["MatchId", "Date", "At", "TimeSec", "Kind", "SubKind", "ByMyTeam", "KillerChampion"],
+            rows.Select(x => new[]
+            {
+                x.o.MatchId, x.m.GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
+                $"{x.o.TimeSec / 60:00}:{x.o.TimeSec % 60:00}", x.o.TimeSec.ToString(),
+                x.o.Kind, x.o.SubKind, x.o.ByMyTeam.ToString(),
+                lookup.GetValueOrDefault((x.o.MatchId, x.o.KillerParticipantId), ""),
+            }));
+    }
+
+    /// Every challenge field as an invariant string (numbers and booleans),
+    /// skipping arrays/objects so the CSV stays rectangular.
+    private static Dictionary<string, string> ParseChallengesRaw(string json)
+    {
+        var d = new Dictionary<string, string>();
+        if (string.IsNullOrEmpty(json)) return d;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                d[prop.Name] = prop.Value.ValueKind switch
+                {
+                    System.Text.Json.JsonValueKind.Number => prop.Value.GetRawText(),
+                    System.Text.Json.JsonValueKind.True => "1",
+                    System.Text.Json.JsonValueKind.False => "0",
+                    _ => null!,
+                } ?? "";
+                if (d[prop.Name] is "") d.Remove(prop.Name);
+            }
+        }
+        catch { /* malformed - skip */ }
+        return d;
     }
 
     public static async Task<string> DeathsCsvAsync(LeagueDbContext db, CancellationToken ct)
@@ -71,15 +197,21 @@ public static class Reports
             .ToListAsync(ct);
         return Csv(
             ["MatchId", "Date", "Queue", "Team", "Position", "RiotId", "Champion", "Win",
-             "Tier", "Division", "LP", "SeasonWins", "SeasonLosses", "WinratePct", "RankValue", "RankQueue"],
+             "Kills", "Deaths", "Assists", "Cs", "Gold", "DamageToChampions", "VisionScore",
+             "Tier", "Division", "LP", "SeasonWins", "SeasonLosses", "WinratePct", "RankValue", "RankQueue",
+             "Summoner1Id", "Summoner2Id", "KeystoneId", "PrimaryStyleId", "SubStyleId", "ItemIds"],
             rows.Select(x => new[]
             {
                 x.p.MatchId, x.m.GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), x.m.QueueName,
                 x.p.IsMe ? "Me" : x.p.IsAlly ? "Ally" : "Enemy", x.p.Position, x.p.RiotId, x.p.Champion, x.p.Win.ToString(),
+                x.p.Kills.ToString(), x.p.Deaths.ToString(), x.p.Assists.ToString(), x.p.Cs.ToString(),
+                x.p.Gold.ToString(), x.p.DamageToChampions.ToString(), x.p.VisionScore.ToString(),
                 x.p.Tier ?? "", x.p.Division ?? "", x.p.Lp?.ToString() ?? "",
                 x.p.SeasonWins?.ToString() ?? "", x.p.SeasonLosses?.ToString() ?? "",
                 x.p is { SeasonWins: int w, SeasonLosses: int l } && w + l > 0 ? Math.Round(100.0 * w / (w + l), 1).ToString() : "",
                 x.p.RankValue?.ToString() ?? "", x.p.RankQueue ?? "",
+                x.p.Summoner1Id.ToString(), x.p.Summoner2Id.ToString(), x.p.KeystoneId.ToString(),
+                x.p.PrimaryStyleId.ToString(), x.p.SubStyleId.ToString(), x.p.Items,
             }));
     }
 
