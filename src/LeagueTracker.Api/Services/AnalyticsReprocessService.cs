@@ -80,8 +80,7 @@ public sealed class AnalyticsReprocessService(
             existing.SkillshotDodgesLateWindow = p.Challenges?.DodgeSkillShotsSmallWindow;
             existing.KillParticipation = p.Challenges?.KillParticipation;
         }
-        match.SkillshotsHit = me.Challenges?.SkillshotsHit;
-        match.SkillshotsDodged = me.Challenges?.SkillshotsDodged;
+        MatchIngestService.ApplyMatchDtoStats(match, dto.Info, me);
 
         // Children cascade at the db level, so clearing the parents clears all
         // derived rows before the fresh ones land.

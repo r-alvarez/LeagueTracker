@@ -68,6 +68,12 @@ export interface MatchSummary {
   avgNearestAllyDist: number | null
   skillshotsHit: number | null
   skillshotsDodged: number | null
+  opponentChampion: string | null
+  enemyJungler: string | null
+  csAt10: number | null
+  laneGoldDiff10: number | null
+  killParticipation: number | null
+  soloKills: number
 }
 
 export interface MatchPage {
@@ -136,6 +142,15 @@ export interface DeathEvent {
   topSourceShare: number | null
   secondsAfterObjective: number | null
   objectiveBefore: string | null
+  zone: string
+  followTeammate: string | null
+  followTeammateRole: string | null
+  followTeammateCaughtBy: string | null
+  followSecondsAfter: number | null
+  followDistance: number | null
+  followAlliesDownBefore: number | null
+  followPureLoss: boolean | null
+  followTeamGoldDiff: number | null
   damageInstances: DamageInstance[]
 }
 
@@ -192,6 +207,96 @@ export interface LpPoint {
   losses: number
   rankValue: number
   label: string
+}
+
+export interface CountedItem {
+  key: string
+  count: number
+  share: number
+}
+
+export interface BucketStat {
+  games: number
+  winRate: number
+}
+
+export interface SplitRow {
+  key: string
+  games: number
+  wins: number
+  winRate: number
+  kda: number
+  kp: number
+  csPerMin: number
+  dpm: number
+  laneGoldAt10: number | null
+  deathsPerGame: number
+}
+
+export interface SeriesPoint {
+  id: string
+  date: string
+  win: boolean
+  n: number
+  rollingWinRate10: number
+  laneGoldAt10: number | null
+  csAt10: number | null
+}
+
+export interface Stats {
+  scope: {
+    games: number
+    wins: number
+    losses: number
+    winRate: number
+    dateFrom: string | null
+    dateTo: string | null
+    champions: number
+  }
+  overall: {
+    kda: number
+    kp: number
+    dpm: number
+    gpm: number
+    csPerMin: number
+    csAt10: number
+    laneGoldAt10: number | null
+    laneCsAt10: number | null
+    laneGoldAt10ByRole: { role: string; avg: number }[]
+    visionPerMin: number
+    controlWardsPerGame: number
+    deathsPerGame: number
+    deathsPre10: number
+    deaths10To20: number
+    deathsPost20: number
+    soloKillsPerGame: number
+    dpmEarly: number
+    dpmMid: number
+    dpmLate: number
+    damageTakenPerMin: number
+    triples: number
+    quadras: number
+    pentas: number
+    skillshotsHitPerGame: number
+    skillshotsDodgedPerGame: number
+  }
+  winrateByLaneState: { ahead: BucketStat; even: BucketStat; behind: BucketStat }
+  deathZones: CountedItem[]
+  topKillers: CountedItem[]
+  followIn: {
+    totalDeaths: number
+    followIns: number
+    rate: number
+    pureLoss: number
+    twoPlusDown: number
+    byRole: CountedItem[]
+    goldState: { behind: number; even: number; ahead: number }
+  }
+  byChampion: SplitRow[]
+  byRole: SplitRow[]
+  series: SeriesPoint[]
+  lpDeltas: { queue: string; last7: number | null; last30: number | null }[]
+  observations: string[]
 }
 
 export interface LpPerGame {

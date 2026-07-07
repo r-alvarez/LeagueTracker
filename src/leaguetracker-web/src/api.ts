@@ -1,4 +1,4 @@
-import type { AnalyticsSummary, JobStatus, LpPerGame, LpPoint, MatchDetail, MatchPage, Status } from './types'
+import type { AnalyticsSummary, JobStatus, LpPerGame, LpPoint, MatchDetail, MatchPage, Stats, Status } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const resp = await fetch(url)
@@ -23,5 +23,12 @@ export const api = {
   syncHistory: (rankedTarget: number) => post<JobStatus>(`/api/sync/history?rankedTarget=${rankedTarget}`),
   importFolder: (path: string) => post<JobStatus>(`/api/import?path=${encodeURIComponent(path)}`),
   analytics: (lastN: number) => get<AnalyticsSummary>(`/api/analytics/summary?lastN=${lastN}`),
+  stats: (opts: { days?: number; lastGames?: number }) => {
+    const params = new URLSearchParams()
+    if (opts.days) params.set('days', String(opts.days))
+    if (opts.lastGames) params.set('lastGames', String(opts.lastGames))
+    const qs = params.toString()
+    return get<Stats>(`/api/stats${qs ? `?${qs}` : ''}`)
+  },
   reprocess: () => post<JobStatus>('/api/analytics/reprocess'),
 }

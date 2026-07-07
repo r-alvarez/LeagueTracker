@@ -71,6 +71,13 @@ public sealed class MatchParticipantDto
     public int ChampLevel { get; set; }
     public int Summoner1Id { get; set; }
     public int Summoner2Id { get; set; }
+    public int DetectorWardsPlaced { get; set; }
+    public int WardsPlaced { get; set; }
+    public int WardsKilled { get; set; }
+    public int TotalDamageTaken { get; set; }
+    public int TripleKills { get; set; }
+    public int QuadraKills { get; set; }
+    public int PentaKills { get; set; }
     public int Item0 { get; set; }
     public int Item1 { get; set; }
     public int Item2 { get; set; }
@@ -115,4 +122,8 @@ public sealed class ChallengesDto
     public int? SkillshotsDodged { get; set; }
     public int? DodgeSkillShotsSmallWindow { get; set; }
     public double? KillParticipation { get; set; }
+    public double? SoloKills { get; set; }
+    public double? ControlWardsPlaced { get; set; }
+    public double? DamagePerMinute { get; set; }
+    public double? TeamDamagePercentage { get; set; }
 }

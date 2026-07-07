@@ -35,26 +35,29 @@ export default function Matches() {
         <table className="data">
           <thead>
             <tr>
-              <th>Date</th><th>Queue</th><th>Champion</th><th>Result</th>
-              <th className="num">K/D/A</th><th className="num">KDA</th><th className="num">CS</th>
-              <th className="num">Vision</th><th className="num">Min</th>
-              <th>Avg enemy rank</th><th className="num">Gap</th><th className="num">LP</th>
+              <th>Date</th><th>Champion</th><th>Result</th><th>vs Laner</th><th>vs Jungler</th>
+              <th className="num">K/D/A</th><th className="num">KDA</th><th className="num">KP</th>
+              <th className="num">CS@10</th><th className="num">G@10</th><th className="num">Min</th>
+              <th>Avg enemy rank</th><th className="num">LP</th>
             </tr>
           </thead>
           <tbody>
             {items.map(m => (
               <tr key={m.id} className={m.win ? 'row-win' : 'row-loss'} style={{ cursor: 'pointer' }} onClick={() => navigate(`/matches/${m.id}`)}>
                 <td><Link to={`/matches/${m.id}`} onClick={e => e.stopPropagation()}>{new Date(m.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</Link></td>
-                <td className="mut">{m.queueName.replace('Ranked ', '')}</td>
                 <td><ChampBadge name={m.champion} sub={m.position.toLowerCase()} /></td>
                 <td><span className={m.win ? 'badge win' : 'badge loss'}>{m.win ? 'Victory' : 'Defeat'}</span></td>
+                <td>{m.opponentChampion ? <ChampBadge name={m.opponentChampion} small /> : <span className="mut">—</span>}</td>
+                <td>{m.enemyJungler ? <ChampBadge name={m.enemyJungler} small /> : <span className="mut">—</span>}</td>
                 <td className="num">{m.kills}/{m.deaths}/{m.assists}</td>
                 <td className="num">{m.kda}</td>
-                <td className="num">{m.cs}</td>
-                <td className="num">{m.visionScore}</td>
+                <td className="num">{m.killParticipation !== null ? `${Math.round(m.killParticipation * 100)}%` : <span className="mut">—</span>}</td>
+                <td className="num">{m.csAt10 ?? <span className="mut">—</span>}</td>
+                <td className="num">{m.laneGoldDiff10 !== null
+                  ? <span className={m.laneGoldDiff10 >= 0 ? 'win' : 'loss'}>{m.laneGoldDiff10 > 0 ? '+' : ''}{m.laneGoldDiff10}</span>
+                  : <span className="mut">—</span>}</td>
                 <td className="num">{m.durationMin.toFixed(0)}</td>
                 <td>{m.avgEnemyRank ?? <span className="mut">—</span>}</td>
-                <td className="num">{m.rankGapLp !== null ? (m.rankGapLp > 0 ? `+${m.rankGapLp}` : m.rankGapLp) : <span className="mut">—</span>}</td>
                 <td className="num">{m.lpChange !== null ? <span className={m.lpChange >= 0 ? 'win' : 'loss'}>{m.lpChange >= 0 ? '+' : ''}{m.lpChange}</span> : <span className="mut">—</span>}</td>
               </tr>
             ))}
