@@ -1,0 +1,11 @@
+.git
+data
+riot-api-key.txt
+**/bin
+**/obj
+**/node_modules
+src/LeagueTracker.Api/wwwroot
+src/leaguetracker-web/dist
+*.db
+*.db-shm
+*.db-wal
