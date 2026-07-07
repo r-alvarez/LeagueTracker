@@ -299,8 +299,8 @@ export default function Dashboard() {
                   <span className="v">{stats.winrateByLaneState.trajectory.deficitsRecoveredAt20.recovered}<span className="mut"> / {stats.winrateByLaneState.trajectory.deficitsRecoveredAt20.of}</span></span>
                 </div>
                 <div className="stat-row">
-                  <span className="k">Thrown vs comeback<small>lost from ahead @10 / won from behind @10</small></span>
-                  <span className="v"><span className="loss">{stats.winrateByLaneState.trajectory.thrownFromAhead}</span> / <span className="win">{stats.winrateByLaneState.trajectory.comebackWins}</span></span>
+                  <span className="k">Leads at 20:00 → wins<small>any game ≥ +500 vs your laner at 20:00</small></span>
+                  <span className="v">{stats.winrateByLaneState.trajectory.leadsAt20Won.won}<span className="mut"> / {stats.winrateByLaneState.trajectory.leadsAt20Won.of}</span></span>
                 </div>
               </div>
             </div>

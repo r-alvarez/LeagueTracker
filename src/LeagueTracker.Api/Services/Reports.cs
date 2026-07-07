@@ -192,12 +192,15 @@ public static class Reports
         }
         var aheadWith20 = ahead.Select(m => GoldAt(m, 20)).Where(g => g is not null).Select(g => g!.Value).ToList();
         var behindWith20 = behind.Select(m => GoldAt(m, 20)).Where(g => g is not null).Select(g => g!.Value).ToList();
+        var leadsAt20 = matches
+            .Select(m => new { m.Win, Gold = GoldAt(m, 20) })
+            .Where(x => x.Gold >= 500)
+            .ToList();
         var laneTrajectory = new
         {
             LeadsHeldAt20 = new { Held = aheadWith20.Count(g => g >= 500), Of = aheadWith20.Count },
             DeficitsRecoveredAt20 = new { Recovered = behindWith20.Count(g => g > -500), Of = behindWith20.Count },
-            ThrownFromAhead = ahead.Count(m => !m.Win),
-            ComebackWins = behind.Count(m => m.Win),
+            LeadsAt20Won = new { Won = leadsAt20.Count(x => x.Win), Of = leadsAt20.Count },
         };
         var at15 = new
         {
