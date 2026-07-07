@@ -291,8 +291,7 @@ export interface LaneStateStats {
   trajectory: {
     leadsHeldAt20: { held: number; of: number }
     deficitsRecoveredAt20: { recovered: number; of: number }
-    thrownFromAhead: number
-    comebackWins: number
+    leadsAt20Won: { won: number; of: number }
   }
 }
 
