@@ -16,6 +16,16 @@ cd src\LeagueTracker.Api
 dotnet run                      # http://localhost:5170 (API + built SPA)
 ```
 
+Or the whole stack in Docker (app + a Caddy reverse proxy for a friendly
+hostname):
+
+```powershell
+docker compose up -d            # http://leaguetracker.localhost (and :5170)
+```
+
+Add `127.0.0.1  leaguetracker.localhost` to your hosts file so the name
+resolves for every client (browsers already resolve `*.localhost` to loopback).
+
 Front-end development (hot reload, proxies /api to the running API):
 
 ```powershell
