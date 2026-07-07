@@ -102,6 +102,18 @@ public sealed class Match
     public int TotalTimeCcDealt { get; set; }
     public string ChallengesJson { get; set; } = "";
 
+    // Macro / vision / spike signals derived from the timeline (all coarse - 60s frames).
+    public int? AvgUnspentGold { get; set; }
+    public int? MaxUnspentGold { get; set; }
+    public int? FirstWardSec { get; set; }
+    public int? FirstControlWardSec { get; set; }
+    public int WardsFirst10 { get; set; }
+    public int? Level6LeadSec { get; set; }
+    public int? Level11LeadSec { get; set; }
+    public int? Level16LeadSec { get; set; }
+    public int FriendlyEpicObjectives { get; set; }
+    public int ObjectivesPresentFor { get; set; }
+
     /// Lane-diff checkpoints vs the same-role enemy at 10/15/20/25 as JSON
     /// ([{min, gold, xp, cs, level, myCs, myLevel}]).
     public string LaneDiffsJson { get; set; } = "";

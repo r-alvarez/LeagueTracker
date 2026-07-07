@@ -54,6 +54,16 @@ using (var scope = app.Services.CreateScope())
         "ALTER TABLE Matches ADD COLUMN LongestTimeSpentLiving INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE Matches ADD COLUMN TotalTimeCcDealt INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE Matches ADD COLUMN ChallengesJson TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE Matches ADD COLUMN AvgUnspentGold INTEGER NULL",
+        "ALTER TABLE Matches ADD COLUMN MaxUnspentGold INTEGER NULL",
+        "ALTER TABLE Matches ADD COLUMN FirstWardSec INTEGER NULL",
+        "ALTER TABLE Matches ADD COLUMN FirstControlWardSec INTEGER NULL",
+        "ALTER TABLE Matches ADD COLUMN WardsFirst10 INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE Matches ADD COLUMN Level6LeadSec INTEGER NULL",
+        "ALTER TABLE Matches ADD COLUMN Level11LeadSec INTEGER NULL",
+        "ALTER TABLE Matches ADD COLUMN Level16LeadSec INTEGER NULL",
+        "ALTER TABLE Matches ADD COLUMN FriendlyEpicObjectives INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE Matches ADD COLUMN ObjectivesPresentFor INTEGER NOT NULL DEFAULT 0",
     })
     {
         try { db.Database.ExecuteSqlRaw(alter); } catch { /* column already exists */ }
@@ -164,6 +174,13 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, Cancellati
                 : (object?)null,
         },
         Wards = new { match.WardsPlaced, match.WardsKilled, match.ControlWards },
+        Macro = new
+        {
+            match.AvgUnspentGold, match.MaxUnspentGold,
+            match.FirstWardSec, match.FirstControlWardSec, match.WardsFirst10,
+            match.Level6LeadSec, match.Level11LeadSec, match.Level16LeadSec,
+            match.FriendlyEpicObjectives, match.ObjectivesPresentFor,
+        },
         Participants = match.Participants.Select(p => new
         {
             p.ParticipantId, p.RiotId, p.Champion, p.Position, p.TeamId, p.IsMe, p.IsAlly, p.Win,

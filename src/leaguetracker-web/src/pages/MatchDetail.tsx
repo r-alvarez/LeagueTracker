@@ -143,11 +143,16 @@ function damageSummary(d: DeathEvent): string {
   return `${d.damageInstanceCount} hits, ${Math.round(d.topSourceShare * 100)}% ${d.topSource} (${style})`
 }
 
+const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+const leadFmt = (s: number | null) => (s === null ? '—' : `${s > 0 ? '+' : ''}${s}s`)
+const leadClass = (s: number | null) => (s === null ? 'mut' : s >= 0 ? 'win' : 'loss')
+
 function DetailsTab({ detail }: { detail: Detail }) {
   const icons = useLoadoutIcons()
   const me = detail.participants.find(p => p.isMe)
   const m = detail.summary
   const l = detail.laning
+  const macro = detail.macro
 
   const pings = useMemo(() => {
     try { return me?.pingsJson ? (Object.entries(JSON.parse(me.pingsJson)) as Array<[string, number]>) : [] } catch { return [] }
@@ -269,6 +274,32 @@ function DetailsTab({ detail }: { detail: Detail }) {
               <div className="stat-row"><span className="k">Gold per minute</span><span className="v">{Math.round(m.gold / m.durationMin)}</span></div>
               <div className="stat-row"><span className="k">Vision per minute<small>{m.visionScore} total vision score</small></span><span className="v">{(m.visionScore / m.durationMin).toFixed(2)}</span></div>
               <div className="stat-row"><span className="k">Wards placed<small>{detail.wards.wardsKilled} killed · {detail.wards.controlWards} control</small></span><span className="v">{detail.wards.wardsPlaced}</span></div>
+            </div>
+          </div>
+
+          <div className="card">
+            <h2>Macro, vision &amp; spikes</h2>
+            <div className="stat-list">
+              <div className="stat-row">
+                <span className="k">Gold left unspent<small>avg carried without spending{macro.maxUnspentGold ? ` · peaked at ${macro.maxUnspentGold}` : ''}</small></span>
+                <span className={`v ${(macro.avgUnspentGold ?? 0) > 800 ? 'loss' : ''}`}>{macro.avgUnspentGold ?? '—'}</span>
+              </div>
+              <div className="stat-row">
+                <span className="k">First control ward<small>{macro.wardsFirst10} wards placed in first 10 min</small></span>
+                <span className="v">{macro.firstControlWardSec !== null ? mmss(macro.firstControlWardSec) : <span className="mut">none</span>}</span>
+              </div>
+              <div className="stat-row">
+                <span className="k">Level 6 lead vs lane<small>+ = you hit your ult first</small></span>
+                <span className={`v ${leadClass(macro.level6LeadSec)}`}>{leadFmt(macro.level6LeadSec)}</span>
+              </div>
+              <div className="stat-row">
+                <span className="k">Level 11 / 16 lead</span>
+                <span className={`v ${leadClass(macro.level11LeadSec)}`} style={{ fontSize: 15 }}>{leadFmt(macro.level11LeadSec)} <span className="mut">/</span> <span className={leadClass(macro.level16LeadSec)}>{leadFmt(macro.level16LeadSec)}</span></span>
+              </div>
+              <div className="stat-row">
+                <span className="k">Objective presence<small>epic objectives you were near when your team took them</small></span>
+                <span className="v">{macro.friendlyEpicObjectives > 0 ? `${macro.objectivesPresentFor}/${macro.friendlyEpicObjectives}` : <span className="mut">none taken</span>}</span>
+              </div>
             </div>
           </div>
         </div>
