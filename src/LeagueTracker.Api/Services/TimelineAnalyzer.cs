@@ -28,6 +28,20 @@ public sealed class TimelineAnalysis
     public double? DpmEarly { get; init; }
     public double? DpmMid { get; init; }
     public double? DpmLate { get; init; }
+    // Unspent gold (macro): what I walked around without spending.
+    public int? AvgUnspentGold { get; init; }
+    public int? MaxUnspentGold { get; init; }
+    // Ward cadence (vision): when and how much proactive vision I set up.
+    public int? FirstWardSec { get; init; }
+    public int? FirstControlWardSec { get; init; }
+    public int WardsFirst10 { get; init; }
+    // Power-spike level timing vs the lane opponent (seconds; + = I hit it first).
+    public int? Level6LeadSec { get; init; }
+    public int? Level11LeadSec { get; init; }
+    public int? Level16LeadSec { get; init; }
+    // Objective presence: friendly epic objectives I was actually near when taken.
+    public int FriendlyEpicObjectives { get; init; }
+    public int ObjectivesPresentFor { get; init; }
 }
 
 /// Everything derivable from one timeline pass. Frames arrive every 60s, so any
@@ -48,7 +62,9 @@ public static class TimelineAnalyzer
     private const int FollowNearUnits = 2500;
     private const int FollowTradeAfterSec = 10;
 
-    private sealed record FrameStats(int Cs, int Gold, int Xp, int Level, int DmgToChamps);
+    private const int ObjectiveNearUnits = 2500;
+
+    private sealed record FrameStats(int Cs, int Gold, int Xp, int Level, int CurrentGold, int DmgToChamps);
 
     /// One lane-diff checkpoint (mine minus the same-role enemy's) for the
     /// laning table: minutes 10/15/20/25 where the game lasted that long.
@@ -88,8 +104,9 @@ public static class TimelineAnalyzer
         var itemEvents = new List<ItemEvent>();
         var deaths = new List<Death>();
         var skillOrder = new List<int>();
-        var levelTwoAt = new Dictionary<int, int>();   // pid -> seconds when reaching level 2
+        var levelAt = new Dictionary<(int Pid, int Level), int>();   // when each player reached each level
         var itemLog = new List<ItemLogEntry>();        // mine + lane opponent's, for inventory replay
+        var myWardSecs = new List<(int Sec, string Type)>();         // wards I placed
 
         var opp = info.Participants.FirstOrDefault(p =>
             p.TeamId != me.TeamId && p.TeamPosition == me.TeamPosition && me.TeamPosition is { Length: > 0 });
@@ -109,10 +126,15 @@ public static class TimelineAnalyzer
                         }
                         break;
                     case "LEVEL_UP":
-                        if (ev.TryGetProperty("level", out var lu) && lu.GetInt32() == 2
-                            && ev.TryGetProperty("participantId", out var lp))
+                        if (ev.TryGetProperty("level", out var lu) && ev.TryGetProperty("participantId", out var lp))
                         {
-                            levelTwoAt.TryAdd(lp.GetInt32(), TimeSecOf(ev));
+                            levelAt.TryAdd((lp.GetInt32(), lu.GetInt32()), TimeSecOf(ev));
+                        }
+                        break;
+                    case "WARD_PLACED":
+                        if (ev.TryGetProperty("creatorId", out var wc) && wc.GetInt32() == me.ParticipantId)
+                        {
+                            myWardSecs.Add((TimeSecOf(ev), ev.TryGetProperty("wardType", out var wt) ? wt.GetString() ?? "" : ""));
                         }
                         break;
                     case "CHAMPION_KILL":
@@ -183,10 +205,38 @@ public static class TimelineAnalyzer
         var my20 = My(f20);
         var myEnd = My(last);
 
-        bool? firstToLevel2 = null;
-        if (opp is not null && levelTwoAt.TryGetValue(me.ParticipantId, out var mine2))
+        // Power-spike level timing vs the lane opponent (+ seconds = I hit it first).
+        int? LevelLead(int level)
         {
-            firstToLevel2 = !levelTwoAt.TryGetValue(opp.ParticipantId, out var theirs2) || mine2 < theirs2;
+            if (opp is null || !levelAt.TryGetValue((me.ParticipantId, level), out var mineSec)) return null;
+            return levelAt.TryGetValue((opp.ParticipantId, level), out var theirsSec) ? theirsSec - mineSec : mineSec;
+        }
+        var firstToLevel2 = LevelLead(2) is { } l2 ? l2 >= 0 : (bool?)null;
+
+        // Ward cadence (excludes the auto-undo/placed-then-replaced noise by just
+        // taking earliest placements; blue trinket is a sweeper, not vision).
+        var visionWards = myWardSecs.Where(w => w.Type is not "TEEMO_MUSHROOM" and not "UNDEFINED").ToList();
+        int? firstWardSec = visionWards is { Count: > 0 } ? visionWards.Min(w => w.Sec) : null;
+        var controlWardSecs = myWardSecs.Where(w => w.Type == "CONTROL_WARD").Select(w => w.Sec).ToList();
+        int? firstControlWardSec = controlWardSecs is { Count: > 0 } ? controlWardSecs.Min() : null;
+        var wardsFirst10 = visionWards.Count(w => w.Sec < 600);
+
+        // Unspent gold across the game (skip the base-camp opening frames).
+        var goldFrames = frames.Where(f => f.TimeSec >= 90 && f.Stats.ContainsKey(me.ParticipantId))
+            .Select(f => f.Stats[me.ParticipantId].CurrentGold).ToList();
+        int? avgUnspentGold = goldFrames is { Count: > 0 } ? (int)goldFrames.Average() : null;
+        int? maxUnspentGold = goldFrames is { Count: > 0 } ? goldFrames.Max() : null;
+
+        // Objective presence: friendly epic objectives I was actually near when taken.
+        var friendlyEpics = objectives.Where(o => o.ByMyTeam && o.Kind is "DRAGON" or "BARON" or "HERALD" or "GRUBS" or "ATAKHAN").ToList();
+        var objectivesPresentFor = 0;
+        foreach (var obj in friendlyEpics)
+        {
+            var pos = InterpolatedPosition(frames, me.ParticipantId, obj.TimeSec);
+            if (pos is { } p && Math.Sqrt(Math.Pow(p.X - obj.X, 2) + Math.Pow(p.Y - obj.Y, 2)) <= ObjectiveNearUnits)
+            {
+                objectivesPresentFor++;
+            }
         }
 
         var laneDiffs = new List<LaneDiffPoint>();
@@ -230,6 +280,16 @@ public static class TimelineAnalyzer
             DpmEarly = dpmEarly,
             DpmMid = dpmMid,
             DpmLate = dpmLate,
+            AvgUnspentGold = avgUnspentGold,
+            MaxUnspentGold = maxUnspentGold,
+            FirstWardSec = firstWardSec,
+            FirstControlWardSec = firstControlWardSec,
+            WardsFirst10 = wardsFirst10,
+            Level6LeadSec = LevelLead(6),
+            Level11LeadSec = LevelLead(11),
+            Level16LeadSec = LevelLead(16),
+            FriendlyEpicObjectives = friendlyEpics.Count,
+            ObjectivesPresentFor = objectivesPresentFor,
         };
     }
 
@@ -300,11 +360,12 @@ public static class TimelineAnalyzer
                 var cs = (prop.Value.TryGetProperty("minionsKilled", out var mk) ? mk.GetInt32() : 0)
                        + (prop.Value.TryGetProperty("jungleMinionsKilled", out var jk) ? jk.GetInt32() : 0);
                 var gold = prop.Value.TryGetProperty("totalGold", out var tg) ? tg.GetInt32() : 0;
+                var currentGold = prop.Value.TryGetProperty("currentGold", out var cg) ? cg.GetInt32() : 0;
                 var xp = prop.Value.TryGetProperty("xp", out var xpEl) ? xpEl.GetInt32() : 0;
                 var level = prop.Value.TryGetProperty("level", out var lvl) ? lvl.GetInt32() : 0;
                 var dmg = prop.Value.TryGetProperty("damageStats", out var ds)
                     && ds.TryGetProperty("totalDamageDoneToChampions", out var dd) ? dd.GetInt32() : 0;
-                stats[pid] = new FrameStats(cs, gold, xp, level, dmg);
+                stats[pid] = new FrameStats(cs, gold, xp, level, currentGold, dmg);
             }
             frames.Add(new Frame(TimeSecOf(frame), positions, stats));
         }
@@ -313,6 +374,21 @@ public static class TimelineAnalyzer
 
     private static Frame? FrameAtMinute(List<Frame> frames, int minute) =>
         frames.FirstOrDefault(f => Math.Abs(f.TimeSec - minute * 60) <= 2);
+
+    /// A player's position at an arbitrary second, linearly interpolated between
+    /// the two bounding 60s frames (an estimate, like every position query here).
+    private static (int X, int Y)? InterpolatedPosition(List<Frame> frames, int pid, int atSec)
+    {
+        var before = frames.LastOrDefault(f => f.TimeSec <= atSec);
+        var after = frames.FirstOrDefault(f => f.TimeSec > atSec);
+        (int, int)? p0 = before is not null && before.Positions.TryGetValue(pid, out var b) ? b : null;
+        (int, int)? p1 = after is not null && after.Positions.TryGetValue(pid, out var a) ? a : null;
+        if (p0 is null || p1 is null) return p0 ?? p1;
+        var span = after!.TimeSec - before!.TimeSec;
+        var alpha = span <= 0 ? 0 : (double)(atSec - before.TimeSec) / span;
+        return ((int)(p0.Value.Item1 + (p1.Value.Item1 - p0.Value.Item1) * alpha),
+                (int)(p0.Value.Item2 + (p1.Value.Item2 - p0.Value.Item2) * alpha));
+    }
 
     /// Replays a player's item transactions to a point in time. Consumed
     /// components arrive as ITEM_DESTROYED; UNDO reverses its recorded before/

@@ -218,9 +218,23 @@ export interface ObjectiveEventDto {
   killer: string | null
 }
 
+export interface MatchMacro {
+  avgUnspentGold: number | null
+  maxUnspentGold: number | null
+  firstWardSec: number | null
+  firstControlWardSec: number | null
+  wardsFirst10: number
+  level6LeadSec: number | null
+  level11LeadSec: number | null
+  level16LeadSec: number | null
+  friendlyEpicObjectives: number
+  objectivesPresentFor: number
+}
+
 export interface MatchDetail {
   summary: MatchSummary
   ranksAtGameTime: boolean
+  macro: MatchMacro
   mySide: string
   teamObjectives: { ally: TeamObjectiveCounts; enemy: TeamObjectiveCounts }
   skillOrder: number[]

@@ -155,6 +155,16 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
         match.FirstToLevel2 = analysis.FirstToLevel2;
         match.LaneDiffsJson = analysis.LaneDiffs is { Count: > 0 } ? JsonSerializer.Serialize(analysis.LaneDiffs, WebJson) : "";
         match.SkillOrder = analysis.SkillOrder;
+        match.AvgUnspentGold = analysis.AvgUnspentGold;
+        match.MaxUnspentGold = analysis.MaxUnspentGold;
+        match.FirstWardSec = analysis.FirstWardSec;
+        match.FirstControlWardSec = analysis.FirstControlWardSec;
+        match.WardsFirst10 = analysis.WardsFirst10;
+        match.Level6LeadSec = analysis.Level6LeadSec;
+        match.Level11LeadSec = analysis.Level11LeadSec;
+        match.Level16LeadSec = analysis.Level16LeadSec;
+        match.FriendlyEpicObjectives = analysis.FriendlyEpicObjectives;
+        match.ObjectivesPresentFor = analysis.ObjectivesPresentFor;
         match.DpmEarly = analysis.DpmEarly;
         match.DpmMid = analysis.DpmMid;
         match.DpmLate = analysis.DpmLate;

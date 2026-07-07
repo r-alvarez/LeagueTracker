@@ -22,6 +22,8 @@ public static class Reports
              "CsAt10", "CsAt15", "LaneGoldDiff10", "LaneXpDiff10", "LaneCsDiff10", "LaneGoldDiff15", "FirstToLevel2",
              "TimeInEnemyHalfPct", "AvgNearestAllyDist", "SkillshotsHit", "SkillshotsDodged",
              "TripleKills", "QuadraKills", "PentaKills", "TotalTimeSpentDeadSec", "LongestTimeSpentLivingSec", "TotalTimeCcDealtSec", "FollowInDeaths",
+             "AvgUnspentGold", "MaxUnspentGold", "FirstWardSec", "FirstControlWardSec", "WardsFirst10",
+             "Level6LeadSec", "Level11LeadSec", "Level16LeadSec", "FriendlyEpicObjectives", "ObjectivesPresentFor",
              "AvgAllyRank", "AvgEnemyRank", "RankGapLP", "AllyRanksIn", "EnemyRanksIn", "LPChange"],
             matches.Select(m =>
             {
@@ -45,6 +47,10 @@ public static class Reports
                     m.SkillshotsHit?.ToString() ?? "", m.SkillshotsDodged?.ToString() ?? "",
                     m.TripleKills.ToString(), m.QuadraKills.ToString(), m.PentaKills.ToString(),
                     m.TotalTimeSpentDead.ToString(), m.LongestTimeSpentLiving.ToString(), m.TotalTimeCcDealt.ToString(), m.FollowInDeaths.ToString(),
+                    m.AvgUnspentGold?.ToString() ?? "", m.MaxUnspentGold?.ToString() ?? "",
+                    m.FirstWardSec?.ToString() ?? "", m.FirstControlWardSec?.ToString() ?? "", m.WardsFirst10.ToString(),
+                    m.Level6LeadSec?.ToString() ?? "", m.Level11LeadSec?.ToString() ?? "", m.Level16LeadSec?.ToString() ?? "",
+                    m.FriendlyEpicObjectives.ToString(), m.ObjectivesPresentFor.ToString(),
                     m.AvgAllyRankValue is { } ally ? RankMath.ToLabel(ally) : "",
                     m.AvgEnemyRankValue is { } enemy ? RankMath.ToLabel(enemy) : "",
                     m is { AvgAllyRankValue: { } a, AvgEnemyRankValue: { } e } ? Math.Round(e - a).ToString() : "",
@@ -580,6 +586,12 @@ public static class Reports
         new("killsOnOtherLanesEarlyJungleAsLaner", "Early roam kills", "Macro", "", true, "Kills you got in OTHER lanes early as a laner - i.e. roaming. For a mid main this is the main way a lane lead becomes a map lead."),
         new("totalTimeSpentDead", "Time spent dead", "Macro", "sec", false, "Total time on the grey screen. You can't influence anything while dead - lower is better, and it's where thrown games hide."),
         new("totalTimeCcDealt", "CC dealt to enemies", "Combat", "sec", true, "Total seconds of crowd control you applied to enemy champions. Enabling your team by locking targets down."),
+        // Derived from the timeline (60s frames, so estimates).
+        new("avgUnspentGold", "Gold left unspent", "Macro", "gold", false, "Average gold you were carrying without spending. Sitting on gold (especially 1000+) is dead value - back and buy, or hold a component intentionally, but don't hoard."),
+        new("firstControlWardSec", "First control ward", "Vision", "sec", false, "How early you place your first control ward. Earlier is better - a control ward is the cheapest lasting vision in the game and often gets bought last."),
+        new("wardsFirst10", "Wards placed in first 10 min", "Vision", "", true, "Proactive vision you set up in the laning phase. Warding early prevents the ganks that snowball against you."),
+        new("level6LeadSec", "Level 6 lead vs lane", "Laning", "sec", true, "How many seconds before (or after) your lane opponent you hit level 6. Getting your ultimate first is an all-in window."),
+        new("objectivePresenceRate", "Objective presence", "Objectives", "%", true, "Share of your team's epic objectives (dragons/baron/herald/grubs) you were actually near when taken. Being there is how a mid converts a lead into the map."),
     ];
 
     private static Dictionary<string, double> MetricsFor(Match m)
@@ -603,6 +615,12 @@ public static class Reports
         // Top-level participant fields injected under the same keys the catalog uses.
         d["totalTimeSpentDead"] = m.TotalTimeSpentDead;
         d["totalTimeCcDealt"] = m.TotalTimeCcDealt;
+        // Timeline-derived signals - only present when the game had the data.
+        if (m.AvgUnspentGold is { } aug) d["avgUnspentGold"] = aug;
+        if (m.FirstControlWardSec is { } fcw) d["firstControlWardSec"] = fcw;
+        d["wardsFirst10"] = m.WardsFirst10;
+        if (m.Level6LeadSec is { } l6) d["level6LeadSec"] = l6;
+        if (m.FriendlyEpicObjectives > 0) d["objectivePresenceRate"] = (double)m.ObjectivesPresentFor / m.FriendlyEpicObjectives;
         return d;
     }
 
