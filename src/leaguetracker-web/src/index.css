@@ -1,0 +1,143 @@
+/* League Coach dark theme, carried over. Chart marks use --series-1/--lp-loss,
+   validated (CVD + contrast) against the panel surface with the dataviz checks;
+   the lighter --accent is UI chrome only, never a chart mark. */
+:root {
+  --page: #0e1116;
+  --surface: #161b22;
+  --panel-2: #1c2230;
+  --ink: #e6edf3;
+  --ink-2: #aeb9c7;
+  --muted: #8b97a7;
+  --grid: #232a38;
+  --baseline: #2a3140;
+  --border: #2a3140;
+  --accent: #4f9cf9;
+  --series-1: #3d8ef3;
+  --lp-gain: #3d8ef3;
+  --lp-loss: #f0556a;
+  --delta-good: #3fb950;
+  --delta-bad: #f0556a;
+  --warn: #e3b341;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+a { color: inherit; }
+
+.shell { max-width: 1180px; margin: 0 auto; padding: 0 20px 48px; }
+
+.topbar { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding: 18px 0 4px; }
+.topbar h1 { font-size: 21px; font-weight: 700; margin: 0; }
+.topbar .player { color: var(--accent); font-weight: 600; }
+.topbar .sub { color: var(--muted); font-size: 13px; }
+
+nav.tabs { display: flex; gap: 4px; margin: 10px 0 22px; border-bottom: 1px solid var(--border); }
+nav.tabs a {
+  color: var(--muted); text-decoration: none; padding: 9px 14px; font-weight: 600;
+  border-bottom: 2px solid transparent;
+}
+nav.tabs a:hover { color: var(--ink); }
+nav.tabs a.active { color: var(--ink); border-bottom-color: var(--accent); }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.card h2 { font-size: 15px; font-weight: 650; margin: 0 0 10px; }
+
+.grid { display: grid; gap: 14px; }
+.tiles { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.two-col { grid-template-columns: 3fr 2fr; }
+@media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+
+.tile .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.tile .value { font-size: 24px; font-weight: 700; margin-top: 3px; }
+.tile .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+.filters { display: flex; gap: 8px; align-items: center; margin: 0 0 14px; flex-wrap: wrap; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel-2); }
+.seg button {
+  border: 0; background: transparent; color: var(--muted);
+  padding: 5px 14px; font: inherit; font-weight: 600; cursor: pointer;
+}
+.seg button.on { background: var(--surface); color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
+
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data th {
+  text-align: left; font-weight: 600; font-size: 12px; color: var(--muted);
+  padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap;
+  position: sticky; top: 0; background: var(--surface); z-index: 2;
+}
+table.data td { padding: 7px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+table.data td.num, table.data th.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.data tbody tr:hover td { background: var(--panel-2); }
+table.data a { text-decoration: none; color: var(--ink); }
+table.data a:hover { text-decoration: underline; }
+.table-scroll { overflow-x: auto; }
+
+tr.row-win td:first-child { box-shadow: inset 3px 0 var(--delta-good); }
+tr.row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
+
+.badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+.badge.win { background: rgba(63, 185, 80, 0.14); color: var(--delta-good); }
+.badge.loss { background: rgba(240, 85, 106, 0.14); color: var(--lp-loss); }
+
+.win { color: var(--delta-good); font-weight: 600; }
+.loss { color: var(--lp-loss); font-weight: 600; }
+.mut { color: var(--muted); }
+.me-row td { background: rgba(79, 156, 249, 0.08); }
+
+/* Champion badge: DataDragon icon with a monogram fallback so an offline CDN
+   never breaks the layout. */
+.champ { display: inline-flex; align-items: center; gap: 8px; }
+.champ.sm { gap: 5px; }
+.champ-img, .champ-mono { width: 28px; height: 28px; border-radius: 7px; flex: 0 0 auto; border: 1px solid var(--border); object-fit: cover; }
+.champ.sm .champ-img, .champ.sm .champ-mono { width: 20px; height: 20px; border-radius: 5px; }
+.champ-mono { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--ink-2); }
+.champ.sm .champ-mono { font-size: 9px; }
+.champ-name { font-weight: 600; }
+
+.viz-tooltip {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); font-size: 13px;
+}
+.viz-tooltip .v { font-weight: 700; font-size: 14px; }
+.viz-tooltip .l { color: var(--ink-2); }
+
+button.action {
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--ink);
+  border-radius: 8px; padding: 7px 14px; font: inherit; font-weight: 700; cursor: pointer;
+}
+button.action:hover { border-color: var(--muted); }
+button.action:disabled { opacity: 0.5; cursor: default; }
+button.action.primary, a.action.primary { background: var(--accent); color: #06203f; border-color: var(--accent); }
+a.action {
+  display: inline-block; border: 1px solid var(--border); background: var(--panel-2); color: var(--ink);
+  border-radius: 8px; padding: 7px 14px; font-weight: 700; text-decoration: none;
+}
+a.action:hover { border-color: var(--muted); }
+
+input.text {
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--ink);
+  border-radius: 8px; padding: 7px 10px; font: inherit; min-width: 100px;
+}
+
+code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+
+.pager { display: flex; gap: 8px; align-items: center; margin-top: 12px; color: var(--ink-2); }
+
+.footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+
+.empty { color: var(--muted); padding: 24px 0; text-align: center; }
