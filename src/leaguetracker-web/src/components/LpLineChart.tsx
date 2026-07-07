@@ -1,4 +1,4 @@
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { LpPoint } from '../types'
 import { rankLabel, rankTicks } from '../rank'
 
@@ -38,7 +38,7 @@ export default function LpLineChart({ points }: Props) {
 
   return (
     <ResponsiveContainer width="100%" height={260}>
-      <LineChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 8 }}>
+      <AreaChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 8 }}>
         <CartesianGrid stroke="var(--grid)" strokeWidth={1} vertical={false} />
         <XAxis
           dataKey="t"
@@ -60,18 +60,19 @@ export default function LpLineChart({ points }: Props) {
           width={92}
         />
         <Tooltip content={<LpTooltip />} cursor={{ stroke: 'var(--baseline)', strokeWidth: 1 }} />
-        <Line
-          type="stepAfter"
+        <Area
+          type="monotone"
           dataKey="rankValue"
           stroke="var(--series-1)"
           strokeWidth={2}
+          fill="var(--series-1)"
+          fillOpacity={0.1}
           strokeLinejoin="round"
           strokeLinecap="round"
-          dot={false}
           activeDot={{ r: 5, fill: 'var(--series-1)', stroke: 'var(--surface)', strokeWidth: 2 }}
           isAnimationActive={false}
         />
-      </LineChart>
+      </AreaChart>
     </ResponsiveContainer>
   )
 }

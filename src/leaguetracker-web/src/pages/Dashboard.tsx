@@ -12,6 +12,7 @@ const WINDOWS = [
   { key: '7d', label: 'Last 7d', days: 7 },
   { key: '15d', label: '15d', days: 15 },
   { key: '30d', label: '30d', days: 30 },
+  { key: '60d', label: '60d', days: 60 },
   { key: '10g', label: 'Last 10', lastGames: 10 },
   { key: '20g', label: '20', lastGames: 20 },
   { key: '30g', label: '30', lastGames: 30 },
@@ -40,7 +41,10 @@ function SplitTable({ title, rows, champIcons }: { title: string; rows: SplitRow
                 <tr key={r.key}>
                   <td>{champIcons ? <ChampBadge name={r.key} small /> : r.key}</td>
                   <td className="num">{r.games}</td>
-                  <td className={`num ${r.winRate >= 0.5 ? 'win' : 'loss'}`}>{pct(r.winRate)}</td>
+                  <td className="num">
+                    <span className="meter" aria-hidden="true"><span style={{ width: `${Math.round(r.winRate * 100)}%` }} /></span>
+                    {pct(r.winRate)}
+                  </td>
                   <td className="num">{r.kda}</td>
                   <td className="num">{pct(r.kp)}</td>
                   <td className="num">{r.csPerMin}</td>

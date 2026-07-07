@@ -1,4 +1,4 @@
-import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { SeriesPoint } from '../types'
 
 interface TooltipProps {
@@ -24,18 +24,18 @@ export function RollingWinRateChart({ series }: { series: SeriesPoint[] }) {
   if (series.length < 3) return <div className="empty">Not enough games in this window.</div>
   return (
     <ResponsiveContainer width="100%" height={230}>
-      <LineChart data={series} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+      <AreaChart data={series} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
         <CartesianGrid stroke="var(--grid)" strokeWidth={1} vertical={false} />
         <XAxis dataKey="n" tick={{ fill: 'var(--muted)', fontSize: 12 }} stroke="var(--baseline)" tickLine={false} />
         <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={(v: number) => `${v}%`}
           tick={{ fill: 'var(--muted)', fontSize: 12 }} stroke="transparent" tickLine={false} width={44} />
         <Tooltip content={<WinRateTooltip />} cursor={{ stroke: 'var(--baseline)', strokeWidth: 1 }} />
         <ReferenceLine y={50} stroke="var(--baseline)" strokeDasharray="4 4" />
-        <Line type="stepAfter" dataKey="rollingWinRate10" stroke="var(--chart-green)" strokeWidth={2}
-          strokeLinejoin="round" strokeLinecap="round" dot={false}
+        <Area type="monotone" dataKey="rollingWinRate10" stroke="var(--chart-green)" strokeWidth={2}
+          fill="var(--chart-green)" fillOpacity={0.1} strokeLinejoin="round" strokeLinecap="round"
           activeDot={{ r: 5, fill: 'var(--chart-green)', stroke: 'var(--surface)', strokeWidth: 2 }}
           isAnimationActive={false} />
-      </LineChart>
+      </AreaChart>
     </ResponsiveContainer>
   )
 }

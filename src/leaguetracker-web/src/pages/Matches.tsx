@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import type { MatchSummary } from '../types'
 import ChampBadge from '../components/ChampBadge'
+import Loadout from '../components/Loadout'
 
 const PAGE_SIZE = 25
 
@@ -36,8 +37,8 @@ export default function Matches() {
           <thead>
             <tr>
               <th>Date</th><th>Champion</th><th>Result</th><th>vs Laner</th><th>vs Jungler</th>
-              <th className="num">K/D/A</th><th className="num">KDA</th><th className="num">KP</th>
-              <th className="num">CS@10</th><th className="num">G@10</th><th className="num">Min</th>
+              <th className="num">K/D/A</th><th className="num">KP</th>
+              <th className="num">CS@10</th><th className="num">G@10</th><th>Build</th><th className="num">Min</th>
               <th>Avg enemy rank</th><th className="num">LP</th>
             </tr>
           </thead>
@@ -49,13 +50,13 @@ export default function Matches() {
                 <td><span className={m.win ? 'badge win' : 'badge loss'}>{m.win ? 'Victory' : 'Defeat'}</span></td>
                 <td>{m.opponentChampion ? <ChampBadge name={m.opponentChampion} small /> : <span className="mut">—</span>}</td>
                 <td>{m.enemyJungler ? <ChampBadge name={m.enemyJungler} small /> : <span className="mut">—</span>}</td>
-                <td className="num">{m.kills}/{m.deaths}/{m.assists}</td>
-                <td className="num">{m.kda}</td>
+                <td className="num">{m.kills}/{m.deaths}/{m.assists} <span className="mut">({m.kda})</span></td>
                 <td className="num">{m.killParticipation !== null ? `${Math.round(m.killParticipation * 100)}%` : <span className="mut">—</span>}</td>
                 <td className="num">{m.csAt10 ?? <span className="mut">—</span>}</td>
                 <td className="num">{m.laneGoldDiff10 !== null
                   ? <span className={m.laneGoldDiff10 >= 0 ? 'win' : 'loss'}>{m.laneGoldDiff10 > 0 ? '+' : ''}{m.laneGoldDiff10}</span>
                   : <span className="mut">—</span>}</td>
+                <td><Loadout items={m.items} summoner1Id={m.summoner1Id} summoner2Id={m.summoner2Id} /></td>
                 <td className="num">{m.durationMin.toFixed(0)}</td>
                 <td>{m.avgEnemyRank ?? <span className="mut">—</span>}</td>
                 <td className="num">{m.lpChange !== null ? <span className={m.lpChange >= 0 ? 'win' : 'loss'}>{m.lpChange >= 0 ? '+' : ''}{m.lpChange}</span> : <span className="mut">—</span>}</td>
