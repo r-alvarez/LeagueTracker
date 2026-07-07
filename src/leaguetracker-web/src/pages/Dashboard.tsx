@@ -264,15 +264,45 @@ export default function Dashboard() {
 
           <div className="grid two-col" style={{ marginBottom: 16 }}>
             <div className="card">
-              <h2>Win rate by lane state @10</h2>
+              <h2>Lane state <span className="mut" style={{ fontWeight: 400 }}>— gold vs your laner, ±500</span></h2>
               <table className="data">
-                <thead><tr><th>State</th><th className="num">Games</th><th className="num">Win rate</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>State</th>
+                    <th className="num">@10 W-L</th><th className="num">WR</th>
+                    <th className="num">@15 W-L</th><th className="num">WR</th>
+                  </tr>
+                </thead>
                 <tbody>
-                  <tr><td className="win">Ahead (≥ +500)</td><td className="num">{stats.winrateByLaneState.ahead.games}</td><td className="num">{pct(stats.winrateByLaneState.ahead.winRate)}</td></tr>
-                  <tr><td>Even (±500)</td><td className="num">{stats.winrateByLaneState.even.games}</td><td className="num">{pct(stats.winrateByLaneState.even.winRate)}</td></tr>
-                  <tr><td className="loss">Behind (≤ −500)</td><td className="num">{stats.winrateByLaneState.behind.games}</td><td className="num">{pct(stats.winrateByLaneState.behind.winRate)}</td></tr>
+                  {([
+                    ['Ahead', 'win', stats.winrateByLaneState.ahead, stats.winrateByLaneState.at15.ahead],
+                    ['Even', '', stats.winrateByLaneState.even, stats.winrateByLaneState.at15.even],
+                    ['Behind', 'loss', stats.winrateByLaneState.behind, stats.winrateByLaneState.at15.behind],
+                  ] as const).map(([label, cls, b10, b15]) => (
+                    <tr key={label}>
+                      <td className={cls}>{label}</td>
+                      <td className="num">{b10.wins}-{b10.games - b10.wins}</td>
+                      <td className="num">{b10.games > 0 ? pct(b10.winRate) : '—'}</td>
+                      <td className="num">{b15.wins}-{b15.games - b15.wins}</td>
+                      <td className="num">{b15.games > 0 ? pct(b15.winRate) : '—'}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
+              <div className="stat-list" style={{ marginTop: 10 }}>
+                <div className="stat-row">
+                  <span className="k">Leads held to 20:00<small>still ≥ +500 vs your laner</small></span>
+                  <span className="v">{stats.winrateByLaneState.trajectory.leadsHeldAt20.held}<span className="mut"> / {stats.winrateByLaneState.trajectory.leadsHeldAt20.of}</span></span>
+                </div>
+                <div className="stat-row">
+                  <span className="k">Deficits recovered by 20:00<small>back above −500</small></span>
+                  <span className="v">{stats.winrateByLaneState.trajectory.deficitsRecoveredAt20.recovered}<span className="mut"> / {stats.winrateByLaneState.trajectory.deficitsRecoveredAt20.of}</span></span>
+                </div>
+                <div className="stat-row">
+                  <span className="k">Thrown vs comeback<small>lost from ahead @10 / won from behind @10</small></span>
+                  <span className="v"><span className="loss">{stats.winrateByLaneState.trajectory.thrownFromAhead}</span> / <span className="win">{stats.winrateByLaneState.trajectory.comebackWins}</span></span>
+                </div>
+              </div>
             </div>
             <div className="card">
               <h2>Where you die</h2>
