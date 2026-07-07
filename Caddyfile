@@ -1,0 +1,6 @@
+# Plain HTTP on port 80 - no TLS, so no browser cert warnings for a local tool.
+# The http:// scheme prefix stops Caddy from trying to provision a certificate.
+http://leaguetracker.localhost {
+	encode gzip zstd
+	reverse_proxy leaguetracker:5170
+}

@@ -2,7 +2,10 @@ services:
   leaguetracker:
     build: .
     container_name: leaguetracker
+    expose:
+      - "5170"
     ports:
+      # Direct access stays available at localhost:5170 alongside the friendly name.
       - "5170:5170"
     environment:
       # Match dates/CSV timestamps render in this zone; LP ledger stays UTC.
@@ -11,4 +14,18 @@ services:
       # Everything persistent lives here: SQLite index, raw game files, LP
       # ledger CSV, and riot-api-key.txt (first line = the key).
       - ./data:/data
+    restart: unless-stopped
+
+  # Reverse proxy so the app is reachable at http://leaguetracker.localhost
+  # (no port). Browsers resolve *.localhost to loopback; a hosts entry makes it
+  # bulletproof for non-browser clients too.
+  proxy:
+    image: caddy:2-alpine
+    container_name: leaguetracker-proxy
+    depends_on:
+      - leaguetracker
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
     restart: unless-stopped
