@@ -54,6 +54,35 @@ public sealed class Match
     public int? SkillshotsHit { get; set; }
     public int? SkillshotsDodged { get; set; }
 
+    // Laning context vs the same-role enemy, from the timeline minute-frames.
+    public string? OpponentChampion { get; set; }
+    public string? EnemyJungler { get; set; }
+    public int? CsAt10 { get; set; }
+    public int? CsAt14 { get; set; }
+    public int? LaneGoldDiff10 { get; set; }
+    public int? LaneXpDiff10 { get; set; }
+    public int? LaneCsDiff10 { get; set; }
+
+    // Impact numbers (Riot challenges verbatim where present, computed fallback otherwise).
+    public int SoloKills { get; set; }
+    public double? KillParticipation { get; set; }
+    public int ControlWards { get; set; }
+    public int WardsPlaced { get; set; }
+    public int WardsKilled { get; set; }
+    public double? DamageTakenPerMin { get; set; }
+    public int TripleKills { get; set; }
+    public int QuadraKills { get; set; }
+    public int PentaKills { get; set; }
+
+    // Phase-split damage to champions per minute (0-10 / 10-20 / 20+), from the
+    // timeline's cumulative damageStats.
+    public double? DpmEarly { get; set; }
+    public double? DpmMid { get; set; }
+    public double? DpmLate { get; set; }
+
+    /// Deaths where I followed a fallen teammate in (see Death.FollowTeammate).
+    public int FollowInDeaths { get; set; }
+
     public List<MatchParticipant> Participants { get; set; } = [];
     public List<Death> DeathEvents { get; set; } = [];
     public List<PositionSample> PositionSamples { get; set; } = [];
@@ -151,6 +180,22 @@ public sealed class Death
     // Overstay signal: this death came shortly after my team took an objective.
     public int? SecondsAfterObjective { get; set; }
     public string? ObjectiveBefore { get; set; }
+
+    /// Approximate Summoner's Rift zone of the death position.
+    public string Zone { get; set; } = "";
+
+    // Follow-in: a teammate fell within 15s before me, within 2500 units of
+    // their death spot - the "following teammates in" pattern. Null = not one.
+    public string? FollowTeammate { get; set; }
+    public string? FollowTeammateRole { get; set; }
+    public string? FollowTeammateCaughtBy { get; set; }
+    public int? FollowSecondsAfter { get; set; }
+    public int? FollowDistance { get; set; }
+    public int? FollowAlliesDownBefore { get; set; }
+    /// True when no enemy died from the trigger until 10s after my death - we got nothing back.
+    public bool? FollowPureLoss { get; set; }
+    /// Team gold lead (mine - theirs) at the frame before the death.
+    public int? FollowTeamGoldDiff { get; set; }
 
     public List<DeathDamage> DamageInstances { get; set; } = [];
 }

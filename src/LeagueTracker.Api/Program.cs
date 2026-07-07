@@ -125,7 +125,9 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, Cancellati
             d.Bounty, d.Shutdown, d.MyLevel, d.MyTotalGold, d.MyCs,
             d.EnemiesNearDeath, d.AlliesNearDeath, d.NearestAllyDist,
             d.TotalDamageReceived, d.DamageInstanceCount, d.TopSource, d.TopSourceShare,
-            d.SecondsAfterObjective, d.ObjectiveBefore,
+            d.SecondsAfterObjective, d.ObjectiveBefore, d.Zone,
+            d.FollowTeammate, d.FollowTeammateRole, d.FollowTeammateCaughtBy, d.FollowSecondsAfter,
+            d.FollowDistance, d.FollowAlliesDownBefore, d.FollowPureLoss, d.FollowTeamGoldDiff,
             DamageInstances = d.DamageInstances.Select(i => new { i.Source, i.SpellName, i.Physical, i.Magic, i.TrueDamage, i.Total }),
         }),
         Objectives = match.ObjectiveEvents.Select(o => new
@@ -142,6 +144,11 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, Cancellati
 // Deliberately centred on collapse count and contest quality, not KDA cosmetics.
 app.MapGet("/api/analytics/summary", async (LeagueDbContext db, int lastN = 20, CancellationToken ct = default) =>
     Results.Ok(await Reports.AnalyticsSummaryAsync(db, lastN, ct)));
+
+// The dashboard aggregate: coach-style stats over recent ranked games.
+// lastGames takes precedence over days; neither = whole history.
+app.MapGet("/api/stats", async (LeagueDbContext db, int? days, int? lastGames, CancellationToken ct) =>
+    Results.Ok(await Reports.StatsAsync(db, days, lastGames, ct)));
 app.MapPost("/api/analytics/reprocess", (IServiceScopeFactory scopeFactory, JobStatusService jobs) =>
 {
     if (!jobs.TryStart("reprocess")) return Results.Conflict(jobs.Snapshot());
@@ -297,6 +304,7 @@ static object MatchListItem(Match m) => new
     m.LpChange, m.LpBefore, m.LpAfter,
     m.TimeInEnemyHalfPct, m.AvgNearestAllyDist,
     m.SkillshotsHit, m.SkillshotsDodged,
+    m.OpponentChampion, m.EnemyJungler, m.CsAt10, m.LaneGoldDiff10, m.KillParticipation, m.SoloKills,
 };
 
 static IResult CsvFile(string fileName, string csv) =>

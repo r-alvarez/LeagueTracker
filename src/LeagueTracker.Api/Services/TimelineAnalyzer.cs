@@ -13,6 +13,14 @@ public sealed class TimelineAnalysis
     public List<ItemEvent> ItemEvents { get; init; } = [];
     public double? TimeInEnemyHalfPct { get; init; }
     public int? AvgNearestAllyDist { get; init; }
+    public int? CsAt10 { get; init; }
+    public int? CsAt14 { get; init; }
+    public int? LaneGoldDiff10 { get; init; }
+    public int? LaneXpDiff10 { get; init; }
+    public int? LaneCsDiff10 { get; init; }
+    public double? DpmEarly { get; init; }
+    public double? DpmMid { get; init; }
+    public double? DpmLate { get; init; }
 }
 
 /// Everything derivable from one timeline pass. Frames arrive every 60s, so any
@@ -27,7 +35,15 @@ public static class TimelineAnalyzer
     /// A death within this window after a friendly objective reads as overstay-to-force-more.
     private const int PostObjectiveWindowSec = 90;
 
-    private sealed record Frame(int TimeSec, Dictionary<int, (int X, int Y)> Positions);
+    // Follow-in parameters: a teammate fell within this many seconds before me,
+    // within this range of THEIR death spot; "traded" looks ahead this long.
+    private const int FollowWindowSec = 15;
+    private const int FollowNearUnits = 2500;
+    private const int FollowTradeAfterSec = 10;
+
+    private sealed record FrameStats(int Cs, int Gold, int Xp, int DmgToChamps);
+
+    private sealed record Frame(int TimeSec, Dictionary<int, (int X, int Y)> Positions, Dictionary<int, FrameStats> Stats);
 
     public static TimelineAnalysis Analyze(string timelineRaw, MatchInfoDto info, MatchParticipantDto me)
     {
@@ -92,13 +108,37 @@ public static class TimelineAnalyzer
             }
         }
 
+        var pidToTeam = info.Participants.ToDictionary(p => p.ParticipantId, p => p.TeamId);
+        var pidToRole = info.Participants.ToDictionary(p => p.ParticipantId, p => RoleLabel(p.TeamPosition));
+
         foreach (var death in deaths)
         {
+            death.Zone = MapZones.Classify(death.X, death.Y);
             EnrichWithConvergence(death, frames, enemyPids, allyPids);
             EnrichWithObjectiveContext(death, objectives);
+            EnrichWithFollowIn(death, kills, frames, me, champByPid, pidToTeam, pidToRole);
         }
 
         var (enemyHalfPct, avgNearestAlly) = MovementMetrics(frames, me, allyPids);
+
+        // Lane diffs vs the same-role enemy, read from the minute-frames.
+        var opp = info.Participants.FirstOrDefault(p =>
+            p.TeamId != me.TeamId && p.TeamPosition == me.TeamPosition && me.TeamPosition is { Length: > 0 });
+        var f10 = FrameAtMinute(frames, 10);
+        var f14 = FrameAtMinute(frames, 14);
+        var f20 = FrameAtMinute(frames, 20);
+        var last = frames.Count > 0 ? frames[^1] : null;
+        FrameStats? My(Frame? f) => f is not null && f.Stats.TryGetValue(me.ParticipantId, out var s) ? s : null;
+        FrameStats? Opp(Frame? f) => opp is not null && f is not null && f.Stats.TryGetValue(opp.ParticipantId, out var s) ? s : null;
+
+        var (my10, opp10) = (My(f10), Opp(f10));
+        var my20 = My(f20);
+        var myEnd = My(last);
+
+        double? dpmEarly = my10 is not null ? Math.Round(my10.DmgToChamps / 10.0, 1) : null;
+        double? dpmMid = my10 is not null && my20 is not null ? Math.Round((my20.DmgToChamps - my10.DmgToChamps) / 10.0, 1) : null;
+        double? dpmLate = my20 is not null && myEnd is not null && last!.TimeSec > 20 * 60 + 30
+            ? Math.Round((myEnd.DmgToChamps - my20.DmgToChamps) / ((last.TimeSec - 1200) / 60.0), 1) : null;
 
         return new TimelineAnalysis
         {
@@ -109,7 +149,64 @@ public static class TimelineAnalyzer
             ItemEvents = itemEvents,
             TimeInEnemyHalfPct = enemyHalfPct,
             AvgNearestAllyDist = avgNearestAlly,
+            CsAt10 = my10?.Cs,
+            CsAt14 = My(f14)?.Cs,
+            LaneGoldDiff10 = my10 is not null && opp10 is not null ? my10.Gold - opp10.Gold : null,
+            LaneXpDiff10 = my10 is not null && opp10 is not null ? my10.Xp - opp10.Xp : null,
+            LaneCsDiff10 = my10 is not null && opp10 is not null ? my10.Cs - opp10.Cs : null,
+            DpmEarly = dpmEarly,
+            DpmMid = dpmMid,
+            DpmLate = dpmLate,
         };
+    }
+
+    private static string RoleLabel(string pos) => pos switch
+    {
+        "TOP" => "Top", "JUNGLE" => "Jungle", "MIDDLE" => "Mid", "BOTTOM" => "ADC", "UTILITY" => "Support",
+        _ => pos is { Length: > 0 } ? pos : "?",
+    };
+
+    /// Did I walk in right after a teammate fell? Trigger = the most recent ally
+    /// death inside the window; it counts when I died near THEIR death spot.
+    private static void EnrichWithFollowIn(
+        Death death, List<KillEvent> kills, List<Frame> frames, MatchParticipantDto me,
+        Dictionary<int, string> champByPid, Dictionary<int, int> pidToTeam, Dictionary<int, string> pidToRole)
+    {
+        var alliesBefore = kills
+            .Where(k => k.VictimParticipantId != me.ParticipantId
+                && pidToTeam.GetValueOrDefault(k.VictimParticipantId) == me.TeamId
+                && k.TimeSec >= death.TimeSec - FollowWindowSec && k.TimeSec < death.TimeSec)
+            .OrderBy(k => k.TimeSec)
+            .ToList();
+        if (alliesBefore is not { Count: > 0 }) return;
+
+        var trigger = alliesBefore[^1];
+        var distance = (int)Math.Round(Math.Sqrt(Math.Pow(death.X - trigger.X, 2) + Math.Pow(death.Y - trigger.Y, 2)));
+        if (distance > FollowNearUnits) return;
+
+        var traded = kills.Any(k => pidToTeam.GetValueOrDefault(k.VictimParticipantId) != me.TeamId
+            && k.TimeSec >= trigger.TimeSec && k.TimeSec <= death.TimeSec + FollowTradeAfterSec);
+
+        death.FollowTeammate = champByPid.GetValueOrDefault(trigger.VictimParticipantId, "?");
+        death.FollowTeammateRole = pidToRole.GetValueOrDefault(trigger.VictimParticipantId, "?");
+        death.FollowTeammateCaughtBy = trigger.KillerParticipantId > 0
+            ? champByPid.GetValueOrDefault(trigger.KillerParticipantId, "minion/turret") : "minion/turret";
+        death.FollowSecondsAfter = death.TimeSec - trigger.TimeSec;
+        death.FollowDistance = distance;
+        death.FollowAlliesDownBefore = alliesBefore.Count;
+        death.FollowPureLoss = !traded;
+
+        var frameBefore = frames.LastOrDefault(f => f.TimeSec <= death.TimeSec);
+        if (frameBefore is not null)
+        {
+            var mine = 0;
+            var theirs = 0;
+            foreach (var (pid, stats) in frameBefore.Stats)
+            {
+                if (pidToTeam.GetValueOrDefault(pid) == me.TeamId) mine += stats.Gold; else theirs += stats.Gold;
+            }
+            death.FollowTeamGoldDiff = mine - theirs;
+        }
     }
 
     private static List<Frame> ParseFrames(JsonElement framesEl)
@@ -119,17 +216,29 @@ public static class TimelineAnalyzer
         {
             if (!frame.TryGetProperty("participantFrames", out var pf)) continue;
             var positions = new Dictionary<int, (int, int)>();
+            var stats = new Dictionary<int, FrameStats>();
             foreach (var prop in pf.EnumerateObject())
             {
+                var pid = int.Parse(prop.Name);
                 if (prop.Value.TryGetProperty("position", out var pos))
                 {
-                    positions[int.Parse(prop.Name)] = (pos.GetProperty("x").GetInt32(), pos.GetProperty("y").GetInt32());
+                    positions[pid] = (pos.GetProperty("x").GetInt32(), pos.GetProperty("y").GetInt32());
                 }
+                var cs = (prop.Value.TryGetProperty("minionsKilled", out var mk) ? mk.GetInt32() : 0)
+                       + (prop.Value.TryGetProperty("jungleMinionsKilled", out var jk) ? jk.GetInt32() : 0);
+                var gold = prop.Value.TryGetProperty("totalGold", out var tg) ? tg.GetInt32() : 0;
+                var xp = prop.Value.TryGetProperty("xp", out var xpEl) ? xpEl.GetInt32() : 0;
+                var dmg = prop.Value.TryGetProperty("damageStats", out var ds)
+                    && ds.TryGetProperty("totalDamageDoneToChampions", out var dd) ? dd.GetInt32() : 0;
+                stats[pid] = new FrameStats(cs, gold, xp, dmg);
             }
-            frames.Add(new Frame(TimeSecOf(frame), positions));
+            frames.Add(new Frame(TimeSecOf(frame), positions, stats));
         }
         return frames;
     }
+
+    private static Frame? FrameAtMinute(List<Frame> frames, int minute) =>
+        frames.FirstOrDefault(f => Math.Abs(f.TimeSec - minute * 60) <= 2);
 
     private static KillEvent ParseKill(JsonElement ev) => new()
     {

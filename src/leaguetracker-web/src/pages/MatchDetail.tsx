@@ -75,7 +75,11 @@ export default function MatchDetail() {
           <div className="value">
             <span className={m.win ? 'win' : 'loss'}>{m.win ? 'Victory' : 'Defeat'}</span> — {m.champion}
           </div>
-          <div className="sub">{m.kills}/{m.deaths}/{m.assists} · {m.durationMin.toFixed(0)} min · {m.cs} CS</div>
+          <div className="sub">
+            {m.kills}/{m.deaths}/{m.assists} · {m.durationMin.toFixed(0)} min · {m.cs} CS
+            {m.opponentChampion && ` · vs ${m.opponentChampion}`}
+            {m.laneGoldDiff10 !== null && ` · ${m.laneGoldDiff10 > 0 ? '+' : ''}${m.laneGoldDiff10}g @10`}
+          </div>
         </div>
         <div className="card tile">
           <div className="label">Team ranks {detail.ranksAtGameTime ? '(at game time)' : '(as of capture)'}</div>
@@ -108,22 +112,25 @@ export default function MatchDetail() {
             <table className="data">
               <thead>
                 <tr>
-                  <th>Time</th><th>Killed by</th><th>Damage taken</th>
-                  <th className="num">Enemies near</th><th className="num">Allies near</th><th className="num">Nearest ally</th>
-                  <th>After objective</th><th className="num">My level</th><th className="num">My gold</th>
+                  <th>Time</th><th>Zone</th><th>Killed by</th><th>Damage taken</th>
+                  <th className="num">Enemies near</th><th className="num">Allies near</th>
+                  <th>Follow-in</th><th>After objective</th><th className="num">My level</th><th className="num">My gold</th>
                 </tr>
               </thead>
               <tbody>
                 {deaths.map(d => (
                   <tr key={d.timeSec}>
                     <td className="num">{d.gameTime}</td>
+                    <td className="mut">{d.zone || '—'}</td>
                     <td>{d.killedBy}{d.assistedBy && <span className="mut"> +{d.assistedBy}</span>}</td>
                     <td>{damageSummary(d)}</td>
                     <td className="num">{d.enemiesNearDeath !== null
                       ? <span className={d.enemiesNearDeath >= 3 ? 'loss' : ''}>{d.enemiesNearDeath}</span>
                       : <span className="mut">—</span>}</td>
                     <td className="num">{d.alliesNearDeath ?? <span className="mut">—</span>}</td>
-                    <td className="num">{d.nearestAllyDist !== null ? `${d.nearestAllyDist}u` : <span className="mut">—</span>}</td>
+                    <td>{d.followTeammate
+                      ? <span className={d.followPureLoss ? 'loss' : ''}>after {d.followTeammate} +{d.followSecondsAfter}s{d.followPureLoss ? ' (nothing back)' : ''}</span>
+                      : <span className="mut">—</span>}</td>
                     <td>{d.secondsAfterObjective !== null
                       ? <span className="loss">{d.objectiveBefore} +{d.secondsAfterObjective}s</span>
                       : <span className="mut">—</span>}</td>

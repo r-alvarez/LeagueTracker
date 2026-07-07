@@ -50,9 +50,8 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
             VisionScore = me.VisionScore,
             ChampLevel = me.ChampLevel,
             RanksAtGameTime = withRanks && ranksAtGameTime,
-            SkillshotsHit = me.Challenges?.SkillshotsHit,
-            SkillshotsDodged = me.Challenges?.SkillshotsDodged,
         };
+        ApplyMatchDtoStats(match, info, me);
 
         foreach (var p in info.Participants)
         {
@@ -135,6 +134,41 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
         match.ItemEvents = analysis.ItemEvents;
         match.TimeInEnemyHalfPct = analysis.TimeInEnemyHalfPct;
         match.AvgNearestAllyDist = analysis.AvgNearestAllyDist;
+        match.CsAt10 = analysis.CsAt10;
+        match.CsAt14 = analysis.CsAt14;
+        match.LaneGoldDiff10 = analysis.LaneGoldDiff10;
+        match.LaneXpDiff10 = analysis.LaneXpDiff10;
+        match.LaneCsDiff10 = analysis.LaneCsDiff10;
+        match.DpmEarly = analysis.DpmEarly;
+        match.DpmMid = analysis.DpmMid;
+        match.DpmLate = analysis.DpmLate;
+        match.FollowInDeaths = analysis.Deaths.Count(d => d.FollowTeammate is not null);
+    }
+
+    /// Match-level stats read straight from the match payload (no timeline) -
+    /// Riot challenge numbers verbatim where present, computed fallback otherwise.
+    /// Shared by ingest and reprocess so history stays consistent with live capture.
+    public static void ApplyMatchDtoStats(Match match, MatchInfoDto info, MatchParticipantDto me)
+    {
+        var opp = info.Participants.FirstOrDefault(p =>
+            p.TeamId != me.TeamId && p.TeamPosition == me.TeamPosition && me.TeamPosition is { Length: > 0 });
+        var teamKills = info.Participants.Where(p => p.TeamId == me.TeamId).Sum(p => p.Kills);
+        var durMin = Math.Max(1.0, info.DurationSeconds / 60.0);
+
+        match.OpponentChampion = opp?.ChampionName;
+        match.EnemyJungler = info.Participants.FirstOrDefault(p => p.TeamId != me.TeamId && p.TeamPosition == "JUNGLE")?.ChampionName;
+        match.SkillshotsHit = me.Challenges?.SkillshotsHit;
+        match.SkillshotsDodged = me.Challenges?.SkillshotsDodged;
+        match.SoloKills = (int)(me.Challenges?.SoloKills ?? 0);
+        match.KillParticipation = me.Challenges?.KillParticipation
+            ?? (teamKills > 0 ? Math.Round((me.Kills + me.Assists) / (double)teamKills, 3) : null);
+        match.ControlWards = me.DetectorWardsPlaced > 0 ? me.DetectorWardsPlaced : (int)(me.Challenges?.ControlWardsPlaced ?? 0);
+        match.WardsPlaced = me.WardsPlaced;
+        match.WardsKilled = me.WardsKilled;
+        match.DamageTakenPerMin = Math.Round(me.TotalDamageTaken / durMin, 1);
+        match.TripleKills = me.TripleKills;
+        match.QuadraKills = me.QuadraKills;
+        match.PentaKills = me.PentaKills;
     }
 
     /// Persists the same faithful { matchId, match, timeline } wrapper the
