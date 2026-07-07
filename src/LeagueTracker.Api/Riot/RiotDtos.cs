@@ -78,6 +78,26 @@ public sealed class MatchParticipantDto
     public int TripleKills { get; set; }
     public int QuadraKills { get; set; }
     public int PentaKills { get; set; }
+    public int Spell1Casts { get; set; }
+    public int Spell2Casts { get; set; }
+    public int Spell3Casts { get; set; }
+    public int Spell4Casts { get; set; }
+    public int Summoner1Casts { get; set; }
+    public int Summoner2Casts { get; set; }
+    public int AllInPings { get; set; }
+    public int AssistMePings { get; set; }
+    public int CommandPings { get; set; }
+    public int DangerPings { get; set; }
+    public int EnemyMissingPings { get; set; }
+    public int EnemyVisionPings { get; set; }
+    public int GetBackPings { get; set; }
+    public int HoldPings { get; set; }
+    public int NeedVisionPings { get; set; }
+    public int OnMyWayPings { get; set; }
+    public int PushPings { get; set; }
+    public int RetreatPings { get; set; }
+    public int VisionClearedPings { get; set; }
+    public int BasicPings { get; set; }
     public int Item0 { get; set; }
     public int Item1 { get; set; }
     public int Item2 { get; set; }
@@ -100,6 +120,14 @@ public sealed class MatchParticipantDto
 public sealed class PerksDto
 {
     public List<PerkStyleDto> Styles { get; set; } = [];
+    public StatPerksDto StatPerks { get; set; } = new();
+}
+
+public sealed class StatPerksDto
+{
+    public int Offense { get; set; }
+    public int Flex { get; set; }
+    public int Defense { get; set; }
 }
 
 public sealed class PerkStyleDto

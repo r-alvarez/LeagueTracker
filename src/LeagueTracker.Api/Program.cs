@@ -119,10 +119,32 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, Cancellati
     if (match is null) return Results.NotFound();
 
     var champByPid = match.Participants.ToDictionary(p => p.ParticipantId, p => p.Champion);
+    object TeamObjectives(bool mine) => new
+    {
+        Towers = match.ObjectiveEvents.Count(o => o.Kind == "TOWER" && o.ByMyTeam == mine),
+        Inhibitors = match.ObjectiveEvents.Count(o => o.Kind == "INHIBITOR" && o.ByMyTeam == mine),
+        Dragons = match.ObjectiveEvents.Count(o => o.Kind == "DRAGON" && o.ByMyTeam == mine),
+        Barons = match.ObjectiveEvents.Count(o => o.Kind == "BARON" && o.ByMyTeam == mine),
+        Heralds = match.ObjectiveEvents.Count(o => o.Kind == "HERALD" && o.ByMyTeam == mine),
+        Grubs = match.ObjectiveEvents.Count(o => o.Kind == "GRUBS" && o.ByMyTeam == mine),
+        Atakhan = match.ObjectiveEvents.Count(o => o.Kind == "ATAKHAN" && o.ByMyTeam == mine),
+    };
+
     return Results.Ok(new
     {
         Summary = MatchListItem(match),
         match.RanksAtGameTime,
+        MySide = match.Participants.FirstOrDefault(p => p.IsMe)?.TeamId == 100 ? "Blue" : "Red",
+        TeamObjectives = new { Ally = TeamObjectives(true), Enemy = TeamObjectives(false) },
+        SkillOrder = match.SkillOrder is { Length: > 0 } ? match.SkillOrder.Split(',').Select(int.Parse).ToArray() : [],
+        Laning = new
+        {
+            match.CsAt10, match.CsAt15,
+            match.LaneGoldDiff10, match.LaneXpDiff10, match.LaneCsDiff10,
+            match.LaneGoldDiff15, match.LaneXpDiff15, match.LaneCsDiff15,
+            match.FirstToLevel2,
+        },
+        Wards = new { match.WardsPlaced, match.WardsKilled, match.ControlWards },
         Participants = match.Participants.Select(p => new
         {
             p.ParticipantId, p.RiotId, p.Champion, p.Position, p.TeamId, p.IsMe, p.IsAlly, p.Win,
@@ -132,6 +154,8 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, Cancellati
             WinratePct = p is { SeasonWins: int w, SeasonLosses: int l } && w + l > 0 ? Math.Round(100.0 * w / (w + l), 1) : (double?)null,
             p.Summoner1Id, p.Summoner2Id, p.PrimaryStyleId, p.SubStyleId, p.KeystoneId, p.Items,
             p.SkillshotsHit, p.SkillshotsDodged, p.SkillshotDodgesLateWindow, p.KillParticipation,
+            p.PerksJson, p.PingsJson,
+            p.Spell1Casts, p.Spell2Casts, p.Spell3Casts, p.Spell4Casts, p.Summoner1Casts, p.Summoner2Casts,
         }),
         Deaths = match.DeathEvents.Select(d => new
         {

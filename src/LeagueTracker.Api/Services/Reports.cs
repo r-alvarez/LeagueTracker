@@ -168,7 +168,7 @@ public static class Reports
         var behind = withLane.Where(m => m.LaneGoldDiff10 <= -500).ToList();
         var even = withLane.Where(m => m.LaneGoldDiff10 is > -500 and < 500).ToList();
 
-        List<object> SplitBy(Func<Match, string> key) => matches
+        List<object> SplitBy(Func<Match, string> key, bool withDetail = false) => matches
             .GroupBy(key).Where(g => g.Key is { Length: > 0 })
             .Select(g => new
             {
@@ -184,6 +184,34 @@ public static class Reports
                     ? (int?)Math.Round(Avg(g.Where(m => m.LaneGoldDiff10 is not null).Select(m => (double)m.LaneGoldDiff10!)))
                     : null,
                 DeathsPerGame = Math.Round(Avg(g.Select(m => (double)m.Deaths)), 2),
+                // Drill-down extras: score-line averages and lane matchups.
+                Detail = withDetail
+                    ? (object?)new
+                    {
+                        AvgKills = Math.Round(Avg(g.Select(m => (double)m.Kills)), 1),
+                        AvgDeaths = Math.Round(Avg(g.Select(m => (double)m.Deaths)), 1),
+                        AvgAssists = Math.Round(Avg(g.Select(m => (double)m.Assists)), 1),
+                        CsAt10 = Math.Round(Avg(g.Where(m => m.CsAt10 is not null).Select(m => (double)m.CsAt10!)), 1),
+                        SoloKillsPerGame = Math.Round(Avg(g.Select(m => (double)m.SoloKills)), 2),
+                        VisionPerMin = Math.Round(Avg(g.Select(m => m.VisionScore / DurMin(m))), 2),
+                        SkillshotsDodgedPerGame = Math.Round(Avg(g.Where(m => m.SkillshotsDodged is not null).Select(m => (double)m.SkillshotsDodged!)), 1),
+                        Matchups = g.Where(m => m.OpponentChampion is not null)
+                            .GroupBy(m => m.OpponentChampion!)
+                            .Where(x => x.Count() >= 2)
+                            .Select(x => new
+                            {
+                                Opponent = x.Key,
+                                Games = x.Count(),
+                                WinRate = Math.Round(x.Count(m => m.Win) / (double)x.Count(), 3),
+                                LaneGoldAt10 = x.Any(m => m.LaneGoldDiff10 is not null)
+                                    ? (int?)Math.Round(Avg(x.Where(m => m.LaneGoldDiff10 is not null).Select(m => (double)m.LaneGoldDiff10!)))
+                                    : null,
+                                Kda = Math.Round(Avg(x.Select(Kda)), 2),
+                            })
+                            .OrderByDescending(x => x.Games).ThenBy(x => x.WinRate)
+                            .Take(10).ToList(),
+                    }
+                    : null,
             })
             .OrderByDescending(s => s.Games).Cast<object>().ToList();
 
@@ -287,7 +315,7 @@ public static class Reports
                     Ahead = followIns.Count(d => d.FollowTeamGoldDiff > 1500),
                 },
             },
-            ByChampion = SplitBy(m => m.Champion),
+            ByChampion = SplitBy(m => m.Champion, withDetail: true),
             ByRole = SplitBy(m => m.Position),
             Series = series,
             LpDeltas = lpDeltas,

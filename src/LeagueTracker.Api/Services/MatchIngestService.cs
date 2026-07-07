@@ -85,6 +85,14 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
                 SkillshotsDodged = p.Challenges?.SkillshotsDodged,
                 SkillshotDodgesLateWindow = p.Challenges?.DodgeSkillShotsSmallWindow,
                 KillParticipation = p.Challenges?.KillParticipation,
+                PerksJson = PerksJsonFor(p),
+                Spell1Casts = p.Spell1Casts,
+                Spell2Casts = p.Spell2Casts,
+                Spell3Casts = p.Spell3Casts,
+                Spell4Casts = p.Spell4Casts,
+                Summoner1Casts = p.Summoner1Casts,
+                Summoner2Casts = p.Summoner2Casts,
+                PingsJson = PingsJsonFor(p),
             };
 
             if (withRanks && match.IsRanked)
@@ -136,13 +144,38 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
         match.AvgNearestAllyDist = analysis.AvgNearestAllyDist;
         match.CsAt10 = analysis.CsAt10;
         match.CsAt14 = analysis.CsAt14;
+        match.CsAt15 = analysis.CsAt15;
         match.LaneGoldDiff10 = analysis.LaneGoldDiff10;
         match.LaneXpDiff10 = analysis.LaneXpDiff10;
         match.LaneCsDiff10 = analysis.LaneCsDiff10;
+        match.LaneGoldDiff15 = analysis.LaneGoldDiff15;
+        match.LaneXpDiff15 = analysis.LaneXpDiff15;
+        match.LaneCsDiff15 = analysis.LaneCsDiff15;
+        match.FirstToLevel2 = analysis.FirstToLevel2;
+        match.SkillOrder = analysis.SkillOrder;
         match.DpmEarly = analysis.DpmEarly;
         match.DpmMid = analysis.DpmMid;
         match.DpmLate = analysis.DpmLate;
         match.FollowInDeaths = analysis.Deaths.Count(d => d.FollowTeammate is not null);
+    }
+
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
+    public static string PerksJsonFor(MatchParticipantDto p) =>
+        p.Perks is null ? "" : JsonSerializer.Serialize(p.Perks, WebJson);
+
+    public static string PingsJsonFor(MatchParticipantDto p)
+    {
+        var pings = new Dictionary<string, int>
+        {
+            ["On my way"] = p.OnMyWayPings, ["Missing"] = p.EnemyMissingPings, ["Danger"] = p.DangerPings,
+            ["Get back"] = p.GetBackPings, ["Assist me"] = p.AssistMePings, ["All in"] = p.AllInPings,
+            ["Push"] = p.PushPings, ["Hold"] = p.HoldPings, ["Retreat"] = p.RetreatPings,
+            ["Need vision"] = p.NeedVisionPings, ["Enemy vision"] = p.EnemyVisionPings,
+            ["Vision cleared"] = p.VisionClearedPings, ["Command"] = p.CommandPings, ["Generic"] = p.BasicPings,
+        };
+        var nonZero = pings.Where(kv => kv.Value > 0).ToDictionary(kv => kv.Key, kv => kv.Value);
+        return nonZero is { Count: > 0 } ? JsonSerializer.Serialize(nonZero) : "";
     }
 
     /// Match-level stats read straight from the match payload (no timeline) -

@@ -15,9 +15,15 @@ public sealed class TimelineAnalysis
     public int? AvgNearestAllyDist { get; init; }
     public int? CsAt10 { get; init; }
     public int? CsAt14 { get; init; }
+    public int? CsAt15 { get; init; }
     public int? LaneGoldDiff10 { get; init; }
     public int? LaneXpDiff10 { get; init; }
     public int? LaneCsDiff10 { get; init; }
+    public int? LaneGoldDiff15 { get; init; }
+    public int? LaneXpDiff15 { get; init; }
+    public int? LaneCsDiff15 { get; init; }
+    public bool? FirstToLevel2 { get; init; }
+    public string SkillOrder { get; init; } = "";
     public double? DpmEarly { get; init; }
     public double? DpmMid { get; init; }
     public double? DpmLate { get; init; }
@@ -70,6 +76,8 @@ public static class TimelineAnalyzer
         var objectives = new List<ObjectiveEvent>();
         var itemEvents = new List<ItemEvent>();
         var deaths = new List<Death>();
+        var skillOrder = new List<int>();
+        var levelTwoAt = new Dictionary<int, int>();   // pid -> seconds when reaching level 2
 
         foreach (var frame in framesEl.EnumerateArray())
         {
@@ -78,6 +86,20 @@ public static class TimelineAnalyzer
             {
                 switch (ev.GetProperty("type").GetString())
                 {
+                    case "SKILL_LEVEL_UP":
+                        if (ev.TryGetProperty("participantId", out var sp) && sp.GetInt32() == me.ParticipantId
+                            && ev.TryGetProperty("skillSlot", out var slot))
+                        {
+                            skillOrder.Add(slot.GetInt32());
+                        }
+                        break;
+                    case "LEVEL_UP":
+                        if (ev.TryGetProperty("level", out var lu) && lu.GetInt32() == 2
+                            && ev.TryGetProperty("participantId", out var lp))
+                        {
+                            levelTwoAt.TryAdd(lp.GetInt32(), TimeSecOf(ev));
+                        }
+                        break;
                     case "CHAMPION_KILL":
                         var kill = ParseKill(ev);
                         kills.Add(kill);
@@ -126,14 +148,22 @@ public static class TimelineAnalyzer
             p.TeamId != me.TeamId && p.TeamPosition == me.TeamPosition && me.TeamPosition is { Length: > 0 });
         var f10 = FrameAtMinute(frames, 10);
         var f14 = FrameAtMinute(frames, 14);
+        var f15 = FrameAtMinute(frames, 15);
         var f20 = FrameAtMinute(frames, 20);
         var last = frames.Count > 0 ? frames[^1] : null;
         FrameStats? My(Frame? f) => f is not null && f.Stats.TryGetValue(me.ParticipantId, out var s) ? s : null;
         FrameStats? Opp(Frame? f) => opp is not null && f is not null && f.Stats.TryGetValue(opp.ParticipantId, out var s) ? s : null;
 
         var (my10, opp10) = (My(f10), Opp(f10));
+        var (my15, opp15) = (My(f15), Opp(f15));
         var my20 = My(f20);
         var myEnd = My(last);
+
+        bool? firstToLevel2 = null;
+        if (opp is not null && levelTwoAt.TryGetValue(me.ParticipantId, out var mine2))
+        {
+            firstToLevel2 = !levelTwoAt.TryGetValue(opp.ParticipantId, out var theirs2) || mine2 < theirs2;
+        }
 
         double? dpmEarly = my10 is not null ? Math.Round(my10.DmgToChamps / 10.0, 1) : null;
         double? dpmMid = my10 is not null && my20 is not null ? Math.Round((my20.DmgToChamps - my10.DmgToChamps) / 10.0, 1) : null;
@@ -151,9 +181,15 @@ public static class TimelineAnalyzer
             AvgNearestAllyDist = avgNearestAlly,
             CsAt10 = my10?.Cs,
             CsAt14 = My(f14)?.Cs,
+            CsAt15 = my15?.Cs,
             LaneGoldDiff10 = my10 is not null && opp10 is not null ? my10.Gold - opp10.Gold : null,
             LaneXpDiff10 = my10 is not null && opp10 is not null ? my10.Xp - opp10.Xp : null,
             LaneCsDiff10 = my10 is not null && opp10 is not null ? my10.Cs - opp10.Cs : null,
+            LaneGoldDiff15 = my15 is not null && opp15 is not null ? my15.Gold - opp15.Gold : null,
+            LaneXpDiff15 = my15 is not null && opp15 is not null ? my15.Xp - opp15.Xp : null,
+            LaneCsDiff15 = my15 is not null && opp15 is not null ? my15.Cs - opp15.Cs : null,
+            FirstToLevel2 = firstToLevel2,
+            SkillOrder = string.Join(',', skillOrder),
             DpmEarly = dpmEarly,
             DpmMid = dpmMid,
             DpmLate = dpmLate,
