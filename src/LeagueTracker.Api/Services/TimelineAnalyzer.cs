@@ -23,6 +23,7 @@ public sealed class TimelineAnalysis
     public int? LaneXpDiff15 { get; init; }
     public int? LaneCsDiff15 { get; init; }
     public bool? FirstToLevel2 { get; init; }
+    public List<TimelineAnalyzer.LaneDiffPoint> LaneDiffs { get; init; } = [];
     public string SkillOrder { get; init; } = "";
     public double? DpmEarly { get; init; }
     public double? DpmMid { get; init; }
@@ -47,7 +48,16 @@ public static class TimelineAnalyzer
     private const int FollowNearUnits = 2500;
     private const int FollowTradeAfterSec = 10;
 
-    private sealed record FrameStats(int Cs, int Gold, int Xp, int DmgToChamps);
+    private sealed record FrameStats(int Cs, int Gold, int Xp, int Level, int DmgToChamps);
+
+    /// One lane-diff checkpoint (mine minus the same-role enemy's) for the
+    /// laning table: minutes 10/15/20/25 where the game lasted that long.
+    /// Item lists are replayed inventories (purchases minus consumed/sold/undone).
+    public sealed record LaneDiffPoint(
+        int Min, int Gold, int Xp, int Cs, int Level, int MyCs, int MyLevel,
+        List<int> MyItems, List<int> OppItems);
+
+    private readonly record struct ItemLogEntry(int T, int Pid, string Kind, int ItemId, int BeforeId, int AfterId);
 
     private sealed record Frame(int TimeSec, Dictionary<int, (int X, int Y)> Positions, Dictionary<int, FrameStats> Stats);
 
@@ -78,6 +88,10 @@ public static class TimelineAnalyzer
         var deaths = new List<Death>();
         var skillOrder = new List<int>();
         var levelTwoAt = new Dictionary<int, int>();   // pid -> seconds when reaching level 2
+        var itemLog = new List<ItemLogEntry>();        // mine + lane opponent's, for inventory replay
+
+        var opp = info.Participants.FirstOrDefault(p =>
+            p.TeamId != me.TeamId && p.TeamPosition == me.TeamPosition && me.TeamPosition is { Length: > 0 });
 
         foreach (var frame in framesEl.EnumerateArray())
         {
@@ -114,18 +128,29 @@ public static class TimelineAnalyzer
                     case "ELITE_MONSTER_KILL":
                         objectives.Add(ParseMonsterKill(ev, me.TeamId));
                         break;
-                    case "ITEM_PURCHASED" or "ITEM_SOLD" or "ITEM_UNDO":
-                        if (ev.TryGetProperty("participantId", out var ip) && ip.GetInt32() == me.ParticipantId)
+                    case "ITEM_PURCHASED" or "ITEM_SOLD" or "ITEM_UNDO" or "ITEM_DESTROYED":
+                    {
+                        if (!ev.TryGetProperty("participantId", out var ip)) break;
+                        var pid = ip.GetInt32();
+                        var kind = ev.GetProperty("type").GetString()!;
+                        var itemId = ev.TryGetProperty("itemId", out var ii) ? ii.GetInt32() : 0;
+                        var beforeId = ev.TryGetProperty("beforeId", out var bi) ? bi.GetInt32() : 0;
+                        var afterId = ev.TryGetProperty("afterId", out var ai) ? ai.GetInt32() : 0;
+                        if (pid == me.ParticipantId && kind is not "ITEM_DESTROYED")
                         {
                             itemEvents.Add(new ItemEvent
                             {
                                 TimeSec = TimeSecOf(ev),
-                                Kind = ev.GetProperty("type").GetString()!.Replace("ITEM_", ""),
-                                ItemId = ev.TryGetProperty("itemId", out var ii) ? ii.GetInt32()
-                                    : ev.TryGetProperty("beforeId", out var bi) ? bi.GetInt32() : 0,
+                                Kind = kind.Replace("ITEM_", ""),
+                                ItemId = itemId != 0 ? itemId : beforeId,
                             });
                         }
+                        if (pid == me.ParticipantId || pid == opp?.ParticipantId)
+                        {
+                            itemLog.Add(new ItemLogEntry(TimeSecOf(ev), pid, kind, itemId, beforeId, afterId));
+                        }
                         break;
+                    }
                 }
             }
         }
@@ -144,8 +169,6 @@ public static class TimelineAnalyzer
         var (enemyHalfPct, avgNearestAlly) = MovementMetrics(frames, me, allyPids);
 
         // Lane diffs vs the same-role enemy, read from the minute-frames.
-        var opp = info.Participants.FirstOrDefault(p =>
-            p.TeamId != me.TeamId && p.TeamPosition == me.TeamPosition && me.TeamPosition is { Length: > 0 });
         var f10 = FrameAtMinute(frames, 10);
         var f14 = FrameAtMinute(frames, 14);
         var f15 = FrameAtMinute(frames, 15);
@@ -163,6 +186,18 @@ public static class TimelineAnalyzer
         if (opp is not null && levelTwoAt.TryGetValue(me.ParticipantId, out var mine2))
         {
             firstToLevel2 = !levelTwoAt.TryGetValue(opp.ParticipantId, out var theirs2) || mine2 < theirs2;
+        }
+
+        var laneDiffs = new List<LaneDiffPoint>();
+        foreach (var minute in (int[])[10, 15, 20, 25])
+        {
+            var frame = FrameAtMinute(frames, minute);
+            if (My(frame) is not { } mineAt || Opp(frame) is not { } oppAt) continue;
+            laneDiffs.Add(new LaneDiffPoint(minute,
+                mineAt.Gold - oppAt.Gold, mineAt.Xp - oppAt.Xp, mineAt.Cs - oppAt.Cs, mineAt.Level - oppAt.Level,
+                mineAt.Cs, mineAt.Level,
+                InventoryAt(itemLog, me.ParticipantId, minute * 60),
+                InventoryAt(itemLog, opp!.ParticipantId, minute * 60)));
         }
 
         double? dpmEarly = my10 is not null ? Math.Round(my10.DmgToChamps / 10.0, 1) : null;
@@ -189,6 +224,7 @@ public static class TimelineAnalyzer
             LaneXpDiff15 = my15 is not null && opp15 is not null ? my15.Xp - opp15.Xp : null,
             LaneCsDiff15 = my15 is not null && opp15 is not null ? my15.Cs - opp15.Cs : null,
             FirstToLevel2 = firstToLevel2,
+            LaneDiffs = laneDiffs,
             SkillOrder = string.Join(',', skillOrder),
             DpmEarly = dpmEarly,
             DpmMid = dpmMid,
@@ -264,9 +300,10 @@ public static class TimelineAnalyzer
                        + (prop.Value.TryGetProperty("jungleMinionsKilled", out var jk) ? jk.GetInt32() : 0);
                 var gold = prop.Value.TryGetProperty("totalGold", out var tg) ? tg.GetInt32() : 0;
                 var xp = prop.Value.TryGetProperty("xp", out var xpEl) ? xpEl.GetInt32() : 0;
+                var level = prop.Value.TryGetProperty("level", out var lvl) ? lvl.GetInt32() : 0;
                 var dmg = prop.Value.TryGetProperty("damageStats", out var ds)
                     && ds.TryGetProperty("totalDamageDoneToChampions", out var dd) ? dd.GetInt32() : 0;
-                stats[pid] = new FrameStats(cs, gold, xp, dmg);
+                stats[pid] = new FrameStats(cs, gold, xp, level, dmg);
             }
             frames.Add(new Frame(TimeSecOf(frame), positions, stats));
         }
@@ -275,6 +312,35 @@ public static class TimelineAnalyzer
 
     private static Frame? FrameAtMinute(List<Frame> frames, int minute) =>
         frames.FirstOrDefault(f => Math.Abs(f.TimeSec - minute * 60) <= 2);
+
+    /// Replays a player's item transactions to a point in time. Consumed
+    /// components arrive as ITEM_DESTROYED; UNDO reverses its recorded before/
+    /// after pair. An estimate, but a faithful one.
+    private static List<int> InventoryAt(List<ItemLogEntry> log, int pid, int atSec)
+    {
+        var inventory = new List<int>();
+        foreach (var e in log.Where(e => e.Pid == pid && e.T <= atSec).OrderBy(e => e.T))
+        {
+            switch (e.Kind)
+            {
+                case "ITEM_PURCHASED":
+                    if (e.ItemId > 0) inventory.Add(e.ItemId);
+                    break;
+                case "ITEM_DESTROYED" or "ITEM_SOLD":
+                    inventory.Remove(e.ItemId);
+                    break;
+                case "ITEM_UNDO":
+                    if (e.BeforeId > 0)
+                    {
+                        var idx = inventory.LastIndexOf(e.BeforeId);
+                        if (idx >= 0) inventory.RemoveAt(idx);
+                    }
+                    if (e.AfterId > 0) inventory.Add(e.AfterId);
+                    break;
+            }
+        }
+        return inventory;
+    }
 
     private static KillEvent ParseKill(JsonElement ev) => new()
     {

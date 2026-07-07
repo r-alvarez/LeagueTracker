@@ -16,6 +16,9 @@ const WINDOWS = [
   { key: '10g', label: 'Last 10', lastGames: 10 },
   { key: '20g', label: '20', lastGames: 20 },
   { key: '30g', label: '30', lastGames: 30 },
+  { key: '40g', label: '40', lastGames: 40 },
+  { key: '50g', label: '50', lastGames: 50 },
+  { key: '100g', label: '100', lastGames: 100 },
   { key: 'all', label: 'All' },
 ] as const
 

@@ -93,6 +93,10 @@ public sealed class Match
     /// My skill-up order as comma-separated slots (1=Q 2=W 3=E 4=R).
     public string SkillOrder { get; set; } = "";
 
+    /// Lane-diff checkpoints vs the same-role enemy at 10/15/20/25 as JSON
+    /// ([{min, gold, xp, cs, level, myCs, myLevel}]).
+    public string LaneDiffsJson { get; set; } = "";
+
     public List<MatchParticipant> Participants { get; set; } = [];
     public List<Death> DeathEvents { get; set; } = [];
     public List<PositionSample> PositionSamples { get; set; } = [];
