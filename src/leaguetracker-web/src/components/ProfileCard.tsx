@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { ProfileMetric } from '../types'
+import type { ProfileGroup, ProfileMetric } from '../types'
 
 function fmt(v: number | null, unit: string): string {
   if (v === null) return '—'
@@ -40,32 +40,58 @@ function Sparkline({ values, unit }: { values: number[]; unit: string }) {
   )
 }
 
-function verdict(m: ProfileMetric): string {
+const STATES = [
+  { key: 'evenBehind', label: 'Even or behind @10', blurb: 'Games that were NOT decided by laning — what you did differently in the ones you won. This is the controllable, causal view.' },
+  { key: 'ahead', label: 'Ahead @10', blurb: 'Games where you had a laning lead — what separates the ones you converted from the ones you threw.' },
+  { key: 'all', label: 'All games', blurb: 'Every game. Warning: metrics like plates and dragons are largely OUTCOMES of already being ahead, so this view overstates them — use the game-state views for causes.' },
+] as const
+
+function verdict(m: ProfileMetric, state: string): string {
   const sep = m.separationPct ?? 0
   const dir = m.higherIsBetter ? 'higher' : 'lower'
-  if (Math.abs(sep) < 8) return 'About the same in wins and losses — not a deciding factor for you right now.'
-  if (sep > 0) return `You post a ${dir} number when you win — this looks like one of your win conditions. Doing it more should move your win rate.`
-  return `This is worse in your wins than losses, which usually means it scales with game length rather than being a real strength — read it with the trend, not the gap alone.`
+  if (Math.abs(sep) < 8) return 'About the same in wins and losses — not a deciding factor for you in these games.'
+  if (sep > 0) {
+    const causal = state === 'all'
+      ? ' (but in "all games" this may partly be an outcome of already being ahead — confirm it in the even-or-behind view)'
+      : ' — since these games started on level terms, this is genuinely something you did to win them'
+    return `You post a ${dir} number when you win${causal}. A real lever to lean into.`
+  }
+  return 'This is worse in your wins than losses, which usually means it scales with game length rather than being a weakness — read the trend, not the gap alone.'
 }
 
-export default function ProfileCard({ profile, windowLabel }: { profile: ProfileMetric[]; windowLabel: string }) {
+export default function ProfileCard({ profile, windowLabel }: { profile: { all: ProfileGroup; evenBehind: ProfileGroup; ahead: ProfileGroup }; windowLabel: string }) {
   const [cat, setCat] = useState<(typeof CATEGORIES)[number]>('All')
+  const [state, setState] = useState<(typeof STATES)[number]['key']>('evenBehind')
   const [open, setOpen] = useState<string | null>(null)
 
+  const group = profile[state]
+  const stateDef = STATES.find(s => s.key === state)!
+
   const rows = useMemo(
-    () => profile
+    () => (group?.metrics ?? [])
       .filter(m => cat === 'All' || m.category === cat)
       .filter(m => m.separationPct !== null)
       .sort((a, b) => (b.separationPct ?? 0) - (a.separationPct ?? 0)),
-    [profile, cat],
+    [group, cat],
   )
 
-  if (profile.length === 0) {
+  if (!profile.all || profile.all.metrics.length === 0) {
     return <div className="empty">No challenge data yet — reprocess games on the Data page.</div>
   }
 
   return (
     <>
+      <div className="filters" style={{ margin: '0 0 6px' }}>
+        <div className="seg">
+          {STATES.map(sdef => (
+            <button key={sdef.key} className={sdef.key === state ? 'on' : ''} onClick={() => { setState(sdef.key); setOpen(null) }}>
+              {sdef.label} <span className="mut">({profile[sdef.key].wins}-{profile[sdef.key].games - profile[sdef.key].wins})</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="mut sm-text" style={{ margin: '0 0 12px' }}>{stateDef.blurb}</p>
+
       <div className="filters" style={{ margin: '0 0 12px' }}>
         <div className="seg">
           {CATEGORIES.map(c => (
@@ -74,6 +100,10 @@ export default function ProfileCard({ profile, windowLabel }: { profile: Profile
         </div>
         <span className="mut sm-text">click a row for the meaning + trend · avg in wins / losses on the right</span>
       </div>
+
+      {group.games < 4 && (
+        <div className="empty">Only {group.games} {stateDef.label.toLowerCase()} games in this window — widen the window (top of page) for a reliable read.</div>
+      )}
 
       <div className="profile-list">
         {rows.map(m => {
@@ -108,9 +138,9 @@ export default function ProfileCard({ profile, windowLabel }: { profile: Profile
                     <div className="tile"><div className="label">In your losses</div><div className="value loss">{fmt(m.avgLosses, m.unit)}</div></div>
                     <div className="tile"><div className="label">Overall avg</div><div className="value">{fmt(m.avg, m.unit)}</div><div className="sub">{m.games} games · {m.higherIsBetter ? 'higher is better' : 'lower is better'}</div></div>
                   </div>
-                  <div className="sub-h">Trend across this window</div>
+                  <div className="sub-h">Trend across these games</div>
                   <Sparkline values={m.recent} unit={m.unit} />
-                  <p className="mut sm-text" style={{ margin: '10px 0 0' }}>{verdict(m)}</p>
+                  <p className="mut sm-text" style={{ margin: '10px 0 0' }}>{verdict(m, state)}</p>
                 </div>
               )}
             </div>
@@ -118,8 +148,8 @@ export default function ProfileCard({ profile, windowLabel }: { profile: Profile
         })}
       </div>
       <p className="mut sm-text" style={{ margin: '12px 0 0' }}>
-        Averaged over {windowLabel}. Green/right = you do more of it when you win (lean in); red/left = shows up more in losses.
-        Riot pre-computes these; raw counts scale a little with game length, so click through and check the trend.
+        {stateDef.label} games from {windowLabel}, wins vs losses. Green/right = you do more of it when you win.
+        Comparing within a game state (not across all games) keeps this from just rewarding the snowball you already had.
       </p>
     </>
   )

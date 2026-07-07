@@ -310,6 +310,12 @@ export interface ProfileMetric {
   recent: number[]
 }
 
+export interface ProfileGroup {
+  games: number
+  wins: number
+  metrics: ProfileMetric[]
+}
+
 export interface MatchupRow {
   opponent: string
   games: number
@@ -400,7 +406,11 @@ export interface Stats {
     byRole: CountedItem[]
     goldState: { behind: number; even: number; ahead: number }
   }
-  profile: ProfileMetric[]
+  profile: {
+    all: ProfileGroup
+    evenBehind: ProfileGroup
+    ahead: ProfileGroup
+  }
   byChampion: SplitRow[]
   byRole: SplitRow[]
   series: SeriesPoint[]
