@@ -143,6 +143,9 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, Cancellati
             match.LaneGoldDiff10, match.LaneXpDiff10, match.LaneCsDiff10,
             match.LaneGoldDiff15, match.LaneXpDiff15, match.LaneCsDiff15,
             match.FirstToLevel2,
+            Checkpoints = match.LaneDiffsJson is { Length: > 0 }
+                ? System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(match.LaneDiffsJson)
+                : (object?)null,
         },
         Wards = new { match.WardsPlaced, match.WardsKilled, match.ControlWards },
         Participants = match.Participants.Select(p => new

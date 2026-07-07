@@ -154,27 +154,80 @@ function DetailsTab({ detail }: { detail: Detail }) {
 
   return (
     <>
-      <div className="grid tiles" style={{ marginBottom: 14 }}>
-        <div className="card tile">
-          <div className="label">Laning at 15 {l.laneGoldDiff15 === null && '(at 10)'}</div>
-          <div className="value">
-            {signed(l.laneGoldDiff15 ?? l.laneGoldDiff10)} <span className="mut" style={{ fontSize: 14 }}>gold</span>
-          </div>
-          <div className="sub">
-            cs {signed(l.laneCsDiff15 ?? l.laneCsDiff10)} · xp {signed(l.laneXpDiff15 ?? l.laneXpDiff10)}
-            {l.firstToLevel2 !== null && ` · first to lvl 2: ${l.firstToLevel2 ? 'yes' : 'no'}`}
-          </div>
+      <div className="grid two-col" style={{ marginBottom: 14 }}>
+        <div className="card">
+          <h2>
+            Laning vs {m.opponentChampion ?? 'lane opponent'}
+            {l.firstToLevel2 !== null && (
+              <span className="mut" style={{ fontWeight: 400 }}> — first to level 2: <span className={l.firstToLevel2 ? 'win' : 'loss'}>{l.firstToLevel2 ? 'yes' : 'no'}</span></span>
+            )}
+          </h2>
+          {l.checkpoints && l.checkpoints.length > 0 ? (
+            <>
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>At</th><th className="num">Gold diff</th><th className="num">XP diff</th>
+                    <th className="num">CS diff</th><th className="num">Level diff</th><th className="num">My CS (lvl)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {l.checkpoints.map(c => (
+                    <tr key={c.min}>
+                      <td className="num">{c.min}:00</td>
+                      <td className={`num ${c.gold >= 0 ? 'win' : 'loss'}`}>{signed(c.gold)}</td>
+                      <td className={`num ${c.xp >= 0 ? 'win' : 'loss'}`}>{signed(c.xp)}</td>
+                      <td className={`num ${c.cs >= 0 ? 'win' : 'loss'}`}>{signed(c.cs)}</td>
+                      <td className={`num ${c.level >= 0 ? 'win' : 'loss'}`}>{signed(c.level)}</td>
+                      <td className="num">{c.myCs} <span className="mut sm-text">({c.myLevel})</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="item-race">
+                {l.checkpoints.map(c => (
+                  <div key={c.min} className="item-race-row">
+                    <span className="mut sm-text item-race-min">{c.min}:00</span>
+                    <span className="slots">
+                      {c.myItems.map((id, i) => (
+                        <span key={i} className="slot" title={`Item ${id}`}>
+                          {icons.item(id) && <img src={icons.item(id)!} alt="" loading="lazy" />}
+                        </span>
+                      ))}
+                    </span>
+                    <span className="mut sm-text">vs</span>
+                    <span className="slots">
+                      {c.oppItems.map((id, i) => (
+                        <span key={i} className="slot dim" title={`Item ${id}`}>
+                          {icons.item(id) && <img src={icons.item(id)!} alt="" loading="lazy" />}
+                        </span>
+                      ))}
+                    </span>
+                  </div>
+                ))}
+                <span className="mut sm-text">Inventories replayed from the item event log - consumables and undos accounted for.</span>
+              </div>
+            </>
+          ) : (
+            <div className="empty">
+              {l.laneGoldDiff10 !== null
+                ? `@10 only: ${signed(l.laneGoldDiff10)} gold · ${signed(l.laneCsDiff10)} cs · ${signed(l.laneXpDiff10)} xp`
+                : 'No lane opponent or timeline for this game.'}
+            </div>
+          )}
         </div>
-        <div className="card tile">
-          <div className="label">Wards</div>
-          <div className="value">{detail.wards.wardsPlaced}</div>
-          <div className="sub">{detail.wards.wardsKilled} killed · {detail.wards.controlWards} control</div>
-        </div>
-        <div className="card tile">
-          <div className="label">Global stats</div>
-          <div className="value">{(m.cs / m.durationMin).toFixed(1)} <span className="mut" style={{ fontSize: 14 }}>CS/m</span></div>
-          <div className="sub">
-            {(m.visionScore / m.durationMin).toFixed(2)} VS/m · {Math.round(m.damageToChampions / m.durationMin)} DMG/m · {Math.round(m.gold / m.durationMin)} gold/m
+        <div className="grid" style={{ alignContent: 'start' }}>
+          <div className="card tile">
+            <div className="label">Wards</div>
+            <div className="value">{detail.wards.wardsPlaced}</div>
+            <div className="sub">{detail.wards.wardsKilled} killed · {detail.wards.controlWards} control</div>
+          </div>
+          <div className="card tile">
+            <div className="label">Global stats</div>
+            <div className="value">{(m.cs / m.durationMin).toFixed(1)} <span className="mut" style={{ fontSize: 14 }}>CS/m</span></div>
+            <div className="sub">
+              {(m.visionScore / m.durationMin).toFixed(2)} VS/m · {Math.round(m.damageToChampions / m.durationMin)} DMG/m · {Math.round(m.gold / m.durationMin)} gold/m
+            </div>
           </div>
         </div>
       </div>

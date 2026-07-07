@@ -171,6 +171,12 @@ table.sb td { border-bottom-color: var(--grid); padding: 8px 10px; }
 .cast { display: inline-flex; align-items: center; gap: 6px; }
 .cast strong { font-size: 15px; }
 
+/* Laning item race: my inventory vs the lane opponent's per checkpoint */
+.item-race { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.item-race-row { display: flex; align-items: center; gap: 8px; }
+.item-race-min { width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+.slot.dim { opacity: 0.75; }
+
 /* Runes tab */
 .rune-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
 .rune-page {

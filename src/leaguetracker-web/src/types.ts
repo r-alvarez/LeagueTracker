@@ -139,6 +139,18 @@ export interface Perks {
   statPerks: { offense: number; flex: number; defense: number }
 }
 
+export interface LaneDiffCheckpoint {
+  min: number
+  gold: number
+  xp: number
+  cs: number
+  level: number
+  myCs: number
+  myLevel: number
+  myItems: number[]
+  oppItems: number[]
+}
+
 export interface TeamObjectiveCounts {
   towers: number
   inhibitors: number
@@ -218,6 +230,7 @@ export interface MatchDetail {
     laneXpDiff15: number | null
     laneCsDiff15: number | null
     firstToLevel2: boolean | null
+    checkpoints: LaneDiffCheckpoint[] | null
   }
   wards: { wardsPlaced: number; wardsKilled: number; controlWards: number }
   participants: Participant[]
