@@ -60,14 +60,14 @@ nav.tabs a.active { color: var(--ink); border-bottom-color: var(--accent); }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 16px 18px;
+  padding: 18px 20px;
   transition: border-color 0.15s ease;
 }
 .card:hover { border-color: color-mix(in srgb, var(--muted) 40%, var(--border)); }
-.card h2 { font-size: 15px; font-weight: 650; margin: 0 0 10px; }
+.card h2 { font-size: 15px; font-weight: 650; margin: 0 0 14px; }
 
-.grid { display: grid; gap: 14px; }
-.tiles { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.grid { display: grid; gap: 16px; }
+.tiles { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .two-col { grid-template-columns: 3fr 2fr; }
 @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
 
@@ -86,10 +86,10 @@ nav.tabs a.active { color: var(--ink); border-bottom-color: var(--accent); }
 table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.data th {
   text-align: left; font-weight: 600; font-size: 12px; color: var(--muted);
-  padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap;
+  padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap;
   position: sticky; top: 0; background: var(--surface); z-index: 2;
 }
-table.data td { padding: 7px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+table.data td { padding: 10px 12px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
 table.data td.num, table.data th.num { text-align: right; font-variant-numeric: tabular-nums; }
 table.data tbody tr:hover td { background: var(--panel-2); }
 table.data a { text-decoration: none; color: var(--ink); }
@@ -190,9 +190,19 @@ table.sb td { border-bottom-color: var(--grid); padding: 8px 10px; }
 .rune-page .slot.sm { width: 18px; height: 18px; }
 
 /* Champion drill-down row */
-tr.drill td { background: var(--panel-2); }
+tr.drill td { background: var(--panel-2); padding: 14px 16px; }
 tr.drill table.data td, tr.drill table.data th { background: transparent; }
-.drill-chips { margin: 4px 0; }
+.drill-chips { margin: 2px 0 6px; gap: 8px; }
+
+/* Stat list: label + hint left, big value right - denser than tiles, calmer
+   than a table. Used where a stack of headline numbers shares one card. */
+.stat-list { display: flex; flex-direction: column; }
+.stat-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--grid); }
+.stat-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.stat-row:first-child { padding-top: 2px; }
+.stat-row .k { color: var(--ink-2); }
+.stat-row .k small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
+.stat-row .v { font-size: 20px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* Mini win-rate meter: accent fill on a same-surface track, value alongside. */
 .meter {

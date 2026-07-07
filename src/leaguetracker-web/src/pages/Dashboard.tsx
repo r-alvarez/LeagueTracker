@@ -25,7 +25,7 @@ const WINDOWS = [
 const signed = (v: number | null | undefined) => (v === null || v === undefined ? '—' : `${v > 0 ? '+' : ''}${v}`)
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
-function SplitTable({ title, rows, champIcons }: { title: string; rows: SplitRow[]; champIcons?: boolean }) {
+function SplitTable({ title, rows, champIcons, compact }: { title: string; rows: SplitRow[]; champIcons?: boolean; compact?: boolean }) {
   const [open, setOpen] = useState<string | null>(null)
   return (
     <div className="card">
@@ -36,8 +36,9 @@ function SplitTable({ title, rows, champIcons }: { title: string; rows: SplitRow
             <thead>
               <tr>
                 <th>{champIcons ? 'Champion' : 'Role'}</th><th className="num">Games</th><th className="num">WR</th>
-                <th className="num">KDA</th><th className="num">KP</th><th className="num">CS/m</th>
-                <th className="num">G@10</th><th className="num">Deaths</th>
+                <th className="num">KDA</th>
+                {!compact && <><th className="num">KP</th><th className="num">CS/m</th><th className="num">G@10</th></>}
+                <th className="num">Deaths</th>
               </tr>
             </thead>
             <tbody>
@@ -52,9 +53,11 @@ function SplitTable({ title, rows, champIcons }: { title: string; rows: SplitRow
                       {pct(r.winRate)}
                     </td>
                     <td className="num">{r.kda}</td>
-                    <td className="num">{pct(r.kp)}</td>
-                    <td className="num">{r.csPerMin}</td>
-                    <td className="num">{signed(r.laneGoldAt10)}</td>
+                    {!compact && <>
+                      <td className="num">{pct(r.kp)}</td>
+                      <td className="num">{r.csPerMin}</td>
+                      <td className="num">{signed(r.laneGoldAt10)}</td>
+                    </>}
                     <td className="num">{r.deathsPerGame}</td>
                   </tr>
                   {open === r.key && r.detail && (
@@ -147,7 +150,7 @@ export default function Dashboard() {
 
       {stats && s && o && (
         <>
-          <div className="grid tiles" style={{ marginBottom: 14 }}>
+          <div className="grid tiles" style={{ marginBottom: 16 }}>
             <div className="card tile">
               <div className="label">Record</div>
               <div className="value">{s.wins}-{s.losses}</div>
@@ -200,7 +203,7 @@ export default function Dashboard() {
           </div>
 
           {stats.observations.length > 0 && (
-            <div className="card" style={{ marginBottom: 14 }}>
+            <div className="card" style={{ marginBottom: 16 }}>
               <h2>Key observations</h2>
               <ul style={{ margin: '4px 0', paddingLeft: 18 }}>
                 {stats.observations.map(obs => <li key={obs} style={{ margin: '4px 0' }}>{obs}</li>)}
@@ -209,7 +212,7 @@ export default function Dashboard() {
           )}
 
           {stats.followIn.totalDeaths > 0 && (
-            <details className="card" style={{ marginBottom: 14 }}>
+            <details className="card" style={{ marginBottom: 16 }}>
               <summary style={{ cursor: 'pointer', fontWeight: 650 }}>
                 Death context — following teammates in ({stats.followIn.followIns} of {stats.followIn.totalDeaths} deaths, {pct(stats.followIn.rate)})
               </summary>
@@ -245,7 +248,7 @@ export default function Dashboard() {
             </details>
           )}
 
-          <div className="grid two-col" style={{ marginBottom: 14 }}>
+          <div className="grid two-col" style={{ marginBottom: 16 }}>
             <div className="card">
               <h2>Rolling win rate (last 10)</h2>
               <RollingWinRateChart series={stats.series} />
@@ -256,7 +259,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="grid two-col" style={{ marginBottom: 14 }}>
+          <div className="grid two-col" style={{ marginBottom: 16 }}>
             <div className="card">
               <h2>Win rate by lane state @10</h2>
               <table className="data">
@@ -283,47 +286,43 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="grid two-col" style={{ marginBottom: 14 }}>
+          <div className="grid two-col" style={{ marginBottom: 16 }}>
             <SplitTable title="Champion performance" rows={stats.byChampion} champIcons />
-            <SplitTable title="Role performance" rows={stats.byRole} />
+            <div className="grid" style={{ alignContent: 'start' }}>
+              <SplitTable title="Role performance" rows={stats.byRole} compact />
+              {deaths && deaths.games > 0 && (
+                <div className="card">
+                  <h2>Collapse profile <span className="mut" style={{ fontWeight: 400 }}>— last {deaths.games} ranked, {deaths.totalDeaths} deaths</span></h2>
+                  <div className="stat-list">
+                    <div className="stat-row">
+                      <span className="k">Collapse deaths<small>3+ enemies actually there · avg {deaths.avgEnemiesNearDeath ?? '—'} near each death</small></span>
+                      <span className="v">{deaths.collapseDeaths}</span>
+                    </div>
+                    <div className="stat-row">
+                      <span className="k">No ally in range<small>nearest ally avg {deaths.avgNearestAllyDistAtDeath ?? '—'} units away</small></span>
+                      <span className="v">{deaths.isolatedDeaths}</span>
+                    </div>
+                    <div className="stat-row">
+                      <span className="k">Right after an objective<small>within 90s of your team taking one</small></span>
+                      <span className="v">{deaths.postObjectiveDeaths}</span>
+                    </div>
+                    <div className="stat-row">
+                      <span className="k">Burst vs whittled<small>one source ≥70% of the damage vs ground down</small></span>
+                      <span className="v">{deaths.burstDeaths} / {deaths.totalDeaths - deaths.burstDeaths}</span>
+                    </div>
+                    <div className="stat-row">
+                      <span className="k">Time in enemy half<small>nearest ally all game: {deaths.avgNearestAllyDistOverall.toFixed(0)} units</small></span>
+                      <span className="v">{deaths.avgTimeInEnemyHalfPct.toFixed(0)}%</span>
+                    </div>
+                  </div>
+                  <p className="mut sm-text" style={{ margin: '10px 0 0' }}>
+                    Positions between the 60s frames are interpolated - estimates, not gospel.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         </>
-      )}
-
-      {deaths && deaths.games > 0 && (
-        <div className="card" style={{ marginBottom: 14 }}>
-          <h2>Collapse profile — last {deaths.games} ranked games ({deaths.totalDeaths} deaths)</h2>
-          <div className="grid tiles">
-            <div className="tile">
-              <div className="label">Collapse deaths (3+ enemies actually there)</div>
-              <div className="value">{deaths.collapseDeaths}</div>
-              <div className="sub">avg {deaths.avgEnemiesNearDeath ?? '—'} enemies near each death</div>
-            </div>
-            <div className="tile">
-              <div className="label">Died with no ally in range</div>
-              <div className="value">{deaths.isolatedDeaths}</div>
-              <div className="sub">nearest ally avg {deaths.avgNearestAllyDistAtDeath ?? '—'} units away</div>
-            </div>
-            <div className="tile">
-              <div className="label">Within 90s of taking an objective</div>
-              <div className="value">{deaths.postObjectiveDeaths}</div>
-              <div className="sub">overstayed to force more</div>
-            </div>
-            <div className="tile">
-              <div className="label">Burst vs whittled</div>
-              <div className="value">{deaths.burstDeaths} / {deaths.totalDeaths - deaths.burstDeaths}</div>
-              <div className="sub">one source ≥70% of the damage vs ground down</div>
-            </div>
-            <div className="tile">
-              <div className="label">Time in enemy half</div>
-              <div className="value">{deaths.avgTimeInEnemyHalfPct.toFixed(0)}%</div>
-              <div className="sub">avg nearest ally all game: {deaths.avgNearestAllyDistOverall.toFixed(0)} units</div>
-            </div>
-          </div>
-          <p className="mut" style={{ marginBottom: 0 }}>
-            Positions between the 60s timeline frames are interpolated - treat near-counts as estimates, not gospel.
-          </p>
-        </div>
       )}
 
       <div className="filters">
