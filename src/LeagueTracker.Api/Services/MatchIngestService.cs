@@ -96,7 +96,10 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
                 PingsJson = PingsJsonFor(p),
             };
 
-            if (withRanks && match.IsRanked)
+            // Ranks for every queue, not just ranked - players carry a rank into
+            // normals too, and seeing the lobby's ranks there is useful. The queue
+            // maps to Solo/Duo for non-ranked games (Flex as fallback).
+            if (withRanks)
             {
                 var entries = await ranks.GetEntriesAsync(p.Puuid, TimeSpan.FromHours(ranksAtGameTime ? 1 : 24), ct);
                 if (RankMath.SelectEntryForQueue(entries, info.QueueId) is { Tier.Length: > 0 } entry)

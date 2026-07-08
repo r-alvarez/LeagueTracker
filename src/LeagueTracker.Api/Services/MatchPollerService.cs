@@ -70,7 +70,9 @@ public sealed class MatchPollerService(
             return;
         }
 
-        var recent = await riot.GetMatchIdsAsync(puuid, 0, 5, rankedOnly: false, ct);
+        // Look back 15, not 5: if the key was expired for a stretch (dev keys die
+        // every 24h), several games can pile up unseen before it's refreshed.
+        var recent = await riot.GetMatchIdsAsync(puuid, 0, 15, rankedOnly: false, ct);
         recent.Reverse();   // oldest first, so multi-game bursts stay in order
 
         foreach (var matchId in recent)
