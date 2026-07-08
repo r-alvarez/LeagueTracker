@@ -125,9 +125,10 @@ public sealed class HistorySyncService(
         try
         {
             var cutoff = DateTime.UtcNow.AddDays(-Math.Clamp(days, 1, 60));
+            // Any queue - normals carry player ranks too; repair whatever's missing.
             var candidates = await db.Matches
                 .Include(m => m.Participants)
-                .Where(m => m.IsRanked && m.GameEndUtc >= cutoff)
+                .Where(m => m.GameEndUtc >= cutoff)
                 .OrderByDescending(m => m.GameEndUtc)
                 .ToListAsync(ct);
             candidates = candidates.Where(m => m.Participants.Count(p => string.IsNullOrEmpty(p.Tier)) >= 5).ToList();
