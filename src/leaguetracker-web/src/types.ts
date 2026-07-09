@@ -406,6 +406,7 @@ export interface LensTile {
   higherIsBetter: boolean
   value: number | null
   old: number | null
+  series: (number | null)[]
 }
 
 export interface LensSub {
@@ -429,6 +430,7 @@ export interface LensResponse {
   window: number
   hasBaseline: boolean
   winrate: number
+  recentWins: boolean[]
   topChampion: string | null
   topChampionOld: string | null
   categories: LensCategory[]
