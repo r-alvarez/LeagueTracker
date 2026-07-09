@@ -147,6 +147,11 @@ public sealed class LensService(LeagueDbContext db)
             s.Key, s.Label, s.Desc, s.Unit, s.Decimals, s.HigherIsBetter,
             Value = Mean(recent, s.Key) is { } v ? Math.Round(v, s.Decimals) : (double?)null,
             Old = hasBaseline && Mean(baseline, s.Key) is { } o ? Math.Round(o, s.Decimals) : (double?)null,
+            // Per-game values across the window, oldest first - feeds the tile
+            // sparkline and the trend chart, which is the detail's real payload.
+            Series = recent.AsEnumerable().Reverse()
+                .Select(r => r.TryGetValue(s.Key, out var g) ? Math.Round(g, s.Decimals) : (double?)null)
+                .ToList(),
         };
 
         double? ScoreOf(IEnumerable<Spec> specs)
@@ -185,6 +190,7 @@ public sealed class LensService(LeagueDbContext db)
             Window = window,
             HasBaseline = hasBaseline,
             Winrate = winrate,
+            RecentWins = recentMatches.AsEnumerable().Reverse().Select(m => m.Win).ToList(),
             TopChampion = TopChampion(recentMatches),
             TopChampionOld = hasBaseline ? TopChampion(baselineMatches) : null,
             Categories = categories,
