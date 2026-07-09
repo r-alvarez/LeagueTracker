@@ -21,11 +21,16 @@ function Portrait({ name, level, small }: { name: string; level?: number; small?
 
 const shortQueue = (q: string) => q.replace(/^Ranked\s+/, '').replace(/^Normal\s+/, '')
 
-function TinyChamp({ name }: { name: string }) {
+const ROLE_WORD: Record<string, string> = { JUNGLE: 'jungler', UTILITY: 'support', BOTTOM: 'bot carry', MIDDLE: 'mid laner' }
+
+/// The small companion icon riding a portrait's corner (my jungler / support / carry).
+function Companion({ name, role }: { name: string; role: string | null }) {
   const icon = useChampionIcons()(name)
-  return icon
-    ? <img className="champ-img" src={icon} alt={name} title={name} loading="lazy" />
-    : <span className="champ-mono" title={name}>{name.slice(0, 2).toUpperCase()}</span>
+  return (
+    <span className="companion" title={`${name}${role ? ` (${ROLE_WORD[role] ?? role.toLowerCase()})` : ''}`}>
+      {icon ? <img src={icon} alt={name} loading="lazy" /> : <span className="champ-mono">{name.slice(0, 1)}</span>}
+    </span>
+  )
 }
 
 function Row({ m }: { m: MatchSummary }) {
@@ -45,20 +50,25 @@ function Row({ m }: { m: MatchSummary }) {
 
       <div className="mr-champ">
         <span className="mr-duel">
-          <Portrait name={m.champion} level={m.champLevel} />
+          <span className="duo">
+            <Portrait name={m.champion} level={m.champLevel} />
+            {m.myCompanion && <Companion name={m.myCompanion} role={m.companionRole} />}
+          </span>
           {m.opponentChampion && (
             <>
               <span className="vs-badge">vs</span>
-              <Portrait name={m.opponentChampion} small />
+              <span className="duo">
+                <Portrait name={m.opponentChampion} small />
+                {m.enemyCompanion && <Companion name={m.enemyCompanion} role={m.companionRole} />}
+              </span>
             </>
           )}
         </span>
         <span className="mr-vs">
           <span className="name">{m.champion} <RoleIcon role={m.position} size={12} /></span>
-          {m.opponentChampion && <span className="opp">vs {m.opponentChampion}</span>}
-          {m.enemyJungler && (
-            <span className="opp">jgl <TinyChamp name={m.enemyJungler} /><span style={{ opacity: 0.7 }}>vs</span>{m.allyJungler ? <TinyChamp name={m.allyJungler} /> : '—'}</span>
-          )}
+          {m.opponentChampion
+            ? <span className="opp">vs {m.opponentChampion}</span>
+            : <span className="opp">{shortQueue(m.queueName)}</span>}
         </span>
       </div>
 

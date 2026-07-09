@@ -134,23 +134,40 @@ app.MapGet("/api/matches", async (LeagueDbContext db, ReplayArchiveService repla
         .Skip((Math.Max(1, page) - 1) * Math.Clamp(pageSize, 1, 200)).Take(Math.Clamp(pageSize, 1, 200))
         .ToListAsync(ct);
 
-    // My loadout per row (items + summs) for the list's icon strip.
+    // Per-row participant context: my loadout, plus the role companions for the
+    // dpm-style matchup block (mid/top pair with junglers, bot with supports,
+    // support with bot carries, junglers with mid).
     var ids = items.Select(m => m.Id).ToList();
-    var loadouts = (await db.Participants.AsNoTracking()
-            .Where(p => ids.Contains(p.MatchId) && p.IsMe)
-            .Select(p => new { p.MatchId, p.Items, p.Summoner1Id, p.Summoner2Id })
+    var participants = (await db.Participants.AsNoTracking()
+            .Where(p => ids.Contains(p.MatchId))
+            .Select(p => new { p.MatchId, p.Champion, p.Position, p.IsAlly, p.IsMe, p.Items, p.Summoner1Id, p.Summoner2Id })
             .ToListAsync(ct))
-        .ToDictionary(p => p.MatchId);
+        .GroupBy(p => p.MatchId)
+        .ToDictionary(g => g.Key, g => g.ToList());
+
+    static string CompanionRole(string myPosition) => myPosition switch
+    {
+        "BOTTOM" => "UTILITY",
+        "UTILITY" => "BOTTOM",
+        "JUNGLE" => "MIDDLE",
+        _ => "JUNGLE",
+    };
 
     var archived = replays.ArchivedMatchIds();
     return Results.Ok(new
     {
         total,
-        items = items.Select(m => MatchListItem(m,
-            loadouts.TryGetValue(m.Id, out var l) ? l.Items : null,
-            loadouts.TryGetValue(m.Id, out var l1) ? l1.Summoner1Id : null,
-            loadouts.TryGetValue(m.Id, out var l2) ? l2.Summoner2Id : null,
-            archived.Contains(m.Id))),
+        items = items.Select(m =>
+        {
+            var ps = participants.GetValueOrDefault(m.Id);
+            var mine = ps?.FirstOrDefault(p => p.IsMe);
+            var role = CompanionRole(m.Position);
+            return MatchListItem(m, mine?.Items, mine?.Summoner1Id, mine?.Summoner2Id,
+                archived.Contains(m.Id),
+                myCompanion: ps?.FirstOrDefault(p => p.IsAlly && !p.IsMe && p.Position == role)?.Champion,
+                enemyCompanion: ps?.FirstOrDefault(p => !p.IsAlly && p.Position == role)?.Champion,
+                companionRole: role);
+        }),
     });
 });
 
@@ -638,12 +655,16 @@ app.MapFallbackToFile("index.html");
 
 app.Run();
 
-static object MatchListItem(Match m, string? items = null, int? summoner1Id = null, int? summoner2Id = null, bool hasReplay = false) => new
+static object MatchListItem(Match m, string? items = null, int? summoner1Id = null, int? summoner2Id = null, bool hasReplay = false,
+    string? myCompanion = null, string? enemyCompanion = null, string? companionRole = null) => new
 {
     Items = items,
     Summoner1Id = summoner1Id,
     Summoner2Id = summoner2Id,
     HasReplay = hasReplay,
+    MyCompanion = myCompanion,
+    EnemyCompanion = enemyCompanion,
+    CompanionRole = companionRole,
     m.Id, m.QueueId, m.QueueName, m.IsRanked, m.GameMode,
     Date = m.GameCreationUtc, m.GameEndUtc,
     DurationMin = Math.Round(m.DurationSec / 60, 1),
