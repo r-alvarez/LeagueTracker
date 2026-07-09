@@ -9,14 +9,24 @@ const LEVEL_COLOR: Record<string, string> = {
   GOLD: 'var(--warn)', SILVER: 'var(--muted)', BRONZE: 'var(--muted)', IRON: 'var(--muted)',
 }
 
+// Shares are 0–1 fractions of the playerbase at-or-above a level; readable as "top X%".
+const pct = (share: number) => (share < 0.01 ? '<1%' : `${Math.round(share * 100)}%`)
+
 function Row({ c }: { c: ChallengeRow }) {
   // Riot's percentile is 0–1 with higher = better standing; render as "top X%".
   const topPct = c.percentile !== null ? Math.max(1, Math.round((1 - c.percentile) * 100)) : null
+  const context = [
+    c.levelShare !== null ? `${c.level} = top ${pct(c.levelShare)} of players` : null,
+    c.nextLevel !== null && c.nextLevelShare !== null ? `next: ${c.nextLevel} = top ${pct(c.nextLevelShare)}` : null,
+  ].filter(Boolean).join(' · ')
   return (
-    <div className="profile-row" title={c.description}>
+    <div className="profile-row" title={context ? `${c.description}\n${context}` : c.description}>
       <span className="profile-label">
         {c.name}
-        <span className="cat-chip" style={{ color: LEVEL_COLOR[c.level] ?? 'var(--muted)' }}>{c.level}</span>
+        <span className="cat-chip" style={{ color: LEVEL_COLOR[c.level] ?? 'var(--muted)' }}>
+          {c.level}
+          {c.levelShare !== null && <span className="mut sm-text"> · top {pct(c.levelShare)}</span>}
+        </span>
       </span>
       <span className="profile-bar">
         <span className="fill" style={{
@@ -43,8 +53,8 @@ export default function ChallengesCard() {
         <h2>Vs the ladder <span className="mut" style={{ fontWeight: 400 }}>— percentile benchmarking</span></h2>
         <p className="mut" style={{ margin: 0 }}>
           This ranks you against every player using Riot's Challenges API — the one benchmark the wins-vs-losses view can't
-          give. It needs an API key with <strong>Challenges-V1</strong> access, which your current development key doesn't
-          have (the endpoint returns 401). It lights up automatically once your personal/production key is approved.
+          give. Nothing has been fetched from Riot yet; it fills in automatically once the first challenges refresh succeeds
+          (check the API key and server logs if this persists).
         </p>
       </div>
     )
