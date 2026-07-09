@@ -432,3 +432,35 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
   .match-row { grid-template-columns: 82px 190px 120px 1fr 86px; }
   .mr-minis, .mr-links { display: none; }
 }
+
+/* In-game-style hover cards for items and runes. */
+.rich-tip { position: relative; display: inline-flex; }
+.rich-tip-card {
+  display: none; position: absolute; z-index: 30; bottom: calc(100% + 8px); left: 50%;
+  transform: translateX(-50%); width: max-content; max-width: 280px;
+  background: #0b0e13; border: 1px solid var(--baseline); border-radius: 10px;
+  padding: 10px 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  flex-direction: column; gap: 4px; font-size: 12px; line-height: 1.45;
+  pointer-events: none; white-space: normal;
+}
+.rich-tip:hover .rich-tip-card { display: flex; }
+.tip-title { font-weight: 700; font-size: 13px; color: var(--ink); }
+.tip-gold { color: var(--warn); font-weight: 700; font-size: 12px; }
+.tip-stat { color: var(--tier-diamond); font-weight: 600; white-space: pre-line; }
+.tip-passive { color: var(--ink-2); white-space: pre-line; }
+
+/* Scoreboard carry score: 0-100 ring, ordinal chip under it. */
+.score-ring { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
+.score-ring svg { display: block; }
+.score-ring .ord { font-size: 10px; font-weight: 800; letter-spacing: 0.03em; color: var(--muted); }
+.score-ring .ord.mvp { color: var(--warn); }
+
+/* Sold-item overlay survives the ItemIcon wrapper; shard icons render small. */
+.slot-sold-wrap { position: relative; display: inline-flex; }
+.slot-sold-wrap::after {
+  content: '✕'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--lp-loss); font-weight: 800; background: rgba(14, 17, 22, 0.55); font-size: 12px;
+  border-radius: 4px; pointer-events: none;
+}
+.slot.round.shard { width: 20px; height: 20px; background: var(--panel-2); }
+.rune-page .slot.shard { width: 22px; height: 22px; }

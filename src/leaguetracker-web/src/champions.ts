@@ -1,12 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
 
+export interface ItemInfo {
+  name: string
+  gold: number
+  stats: string[]
+  passive: string
+}
+
+export interface PerkInfo {
+  icon: string
+  name: string
+  desc: string
+}
+
 interface Assets {
   version: string
   champs: Record<string, string>
   champNames: Record<number, string>
   spells: Record<number, string>
   runes: Record<number, { icon: string; name: string }>
+  perks: Record<number, PerkInfo>
+  items: Record<number, ItemInfo>
 }
+
+const stripTags = (s: string) => s.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
 
@@ -56,7 +73,38 @@ async function load(): Promise<Assets> {
     }
   }
 
-  return { version: v, champs, champNames, spells, runes }
+  // CommunityDragon perks: EVERY perk id - keystones, minor runes AND stat
+  // shards (which runesReforged lacks) - with names and short descriptions.
+  const perks: Record<number, PerkInfo> = {}
+  try {
+    const cdragon = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/'
+    const raw = (await fetch(`${cdragon}v1/perks.json`).then(r => r.json())) as Array<{
+      id: number; name: string; iconPath: string; shortDesc: string
+    }>
+    for (const p of raw) {
+      perks[p.id] = {
+        icon: cdragon + p.iconPath.replace(/^\/lol-game-data\/assets\//i, '').toLowerCase(),
+        name: p.name,
+        desc: stripTags(p.shortDesc ?? ''),
+      }
+    }
+  } catch { /* tooltips degrade to runesReforged names */ }
+
+  // Item names, cost and stat lines for in-game-style tooltips.
+  const items: Record<number, ItemInfo> = {}
+  try {
+    const itemData = (await fetch(`${cdn}/data/en_US/item.json`).then(r => r.json())) as {
+      data: Record<string, { name: string; gold: { total: number }; description: string }>
+    }
+    for (const [id, item] of Object.entries(itemData.data)) {
+      const statsMatch = item.description.match(/<stats>([\s\S]*?)<\/stats>/i)
+      const stats = statsMatch ? stripTags(statsMatch[1]).split('\n').map(s => s.trim()).filter(Boolean) : []
+      const passive = stripTags(item.description.replace(/<stats>[\s\S]*?<\/stats>/i, ''))
+      items[parseInt(id, 10)] = { name: item.name, gold: item.gold.total, stats, passive }
+    }
+  } catch { /* item tooltips degrade to ids */ }
+
+  return { version: v, champs, champNames, spells, runes, perks, items }
 }
 
 // Stat shards aren't in runesReforged - small stable set, text is enough.
@@ -69,7 +117,7 @@ function useAssets(): Assets | null {
   const [assets, setAssets] = useState<Assets | null>(cache)
   useEffect(() => {
     if (cache) return
-    if (!inflight) inflight = load().then(a => (cache = a)).catch(() => (cache = { version: '', champs: {}, champNames: {}, spells: {}, runes: {} }))
+    if (!inflight) inflight = load().then(a => (cache = a)).catch(() => (cache = { version: '', champs: {}, champNames: {}, spells: {}, runes: {}, perks: {}, items: {} }))
     let alive = true
     void inflight.then(a => alive && setAssets(a))
     return () => { alive = false }
@@ -91,15 +139,21 @@ export function useChampionNames(): (id: number) => string | null {
 
 export function useLoadoutIcons(): {
   item: (id: number) => string | null
+  itemInfo: (id: number) => ItemInfo | null
   spell: (id: number) => string | null
   rune: (id: number) => { icon: string; name: string } | null
+  perk: (id: number) => PerkInfo | null
 } {
   const assets = useAssets()
   return useMemo(() => ({
     item: (id: number) => (assets && assets.version && id > 0
       ? `https://ddragon.leagueoflegends.com/cdn/${assets.version}/img/item/${id}.png`
       : null),
+    itemInfo: (id: number) => assets?.items[id] ?? null,
     spell: (id: number) => assets?.spells[id] ?? null,
-    rune: (id: number) => assets?.runes[id] ?? null,
+    // Prefer the CDragon perk (covers stat shards and never has gaps);
+    // runesReforged stays as fallback while perks.json is loading.
+    rune: (id: number) => assets?.perks[id] ?? assets?.runes[id] ?? null,
+    perk: (id: number) => assets?.perks[id] ?? null,
   }), [assets])
 }

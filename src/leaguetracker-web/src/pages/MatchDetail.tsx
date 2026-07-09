@@ -2,10 +2,45 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts } from '../types'
-import { STAT_SHARDS, useChampionIcons, useLoadoutIcons } from '../champions'
+import { useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
+import { ItemIcon, PerkIcon } from '../components/GameIcons'
+import { tierClass } from '../components/Stats'
 
 type Tab = 'general' | 'details' | 'runes' | 'timeline'
+
+// dpm.lol-style carry score: each player's stats normalized against the game's
+// best, weighted toward damage and KDA. Purely relative within this one match.
+function carryScores(players: Participant[]): Record<number, { score: number; ord: number }> {
+  const max = (f: (p: Participant) => number) => Math.max(1, ...players.map(f))
+  const kda = (p: Participant) => (p.kills + p.assists) / Math.max(1, p.deaths)
+  const maxes = { kda: max(kda), dmg: max(p => p.damageToChampions), kp: max(p => p.killParticipation ?? 0), vis: max(p => p.visionScore), cs: max(p => p.cs), gold: max(p => p.gold) }
+  const raw = players.map(p => ({
+    id: p.participantId,
+    score: 100 * (
+      0.28 * (p.damageToChampions / maxes.dmg) + 0.24 * (kda(p) / maxes.kda) + 0.18 * ((p.killParticipation ?? 0) / maxes.kp) +
+      0.10 * (p.visionScore / maxes.vis) + 0.10 * (p.cs / maxes.cs) + 0.10 * (p.gold / maxes.gold)),
+  }))
+  const sorted = [...raw].sort((a, b) => b.score - a.score)
+  return Object.fromEntries(raw.map(r => [r.id, { score: Math.round(r.score), ord: sorted.findIndex(s => s.id === r.id) + 1 }]))
+}
+
+function ScoreRing({ score, ord, won }: { score: number; ord: number; won: boolean }) {
+  const r = 12
+  const c = 2 * Math.PI * r
+  const label = ord === 1 && won ? 'MVP' : ord === 1 ? 'ACE' : `${ord}${ord === 2 ? 'nd' : ord === 3 ? 'rd' : 'th'}`
+  return (
+    <span className="score-ring" title={`Carry score ${score}/100 (relative to this game)`}>
+      <svg width="30" height="30" viewBox="0 0 30 30">
+        <circle cx="15" cy="15" r={r} fill="none" stroke="var(--panel-2)" strokeWidth="3" />
+        <circle cx="15" cy="15" r={r} fill="none" stroke={ord === 1 ? 'var(--warn)' : 'var(--series-1)'} strokeWidth="3"
+          strokeDasharray={`${(c * score) / 100} ${c}`} strokeLinecap="round" transform="rotate(-90 15 15)" />
+        <text x="15" y="19" textAnchor="middle" fontSize="10" fontWeight="700" fill="var(--ink)">{score}</text>
+      </svg>
+      <span className={`ord ${ord === 1 ? 'mvp' : ''}`}>{label}</span>
+    </span>
+  )
+}
 
 const signed = (v: number | null) => (v === null ? '—' : `${v > 0 ? '+' : ''}${v}`)
 const parsePerks = (json: string): Perks | null => {
@@ -37,16 +72,11 @@ function ChampIcon({ name, size = 34, level }: { name: string; size?: number; le
 }
 
 function RunePair({ perks }: { perks: Perks | null }) {
-  const icons = useLoadoutIcons()
   if (!perks || perks.styles.length === 0) return <span className="mut">—</span>
-  const keystoneId = perks.styles[0]?.selections[0]?.perk ?? 0
-  const subStyleId = perks.styles[1]?.style ?? 0
-  const keystone = icons.rune(keystoneId)
-  const sub = icons.rune(subStyleId)
   return (
     <span className="rune-pair">
-      <span className="slot round" title={keystone?.name}>{keystone && <img src={keystone.icon} alt="" loading="lazy" />}</span>
-      <span className="slot round sm" title={sub?.name}>{sub && <img src={sub.icon} alt="" loading="lazy" />}</span>
+      <PerkIcon id={perks.styles[0]?.selections[0]?.perk ?? 0} />
+      <PerkIcon id={perks.styles[1]?.style ?? 0} className="sm" />
     </span>
   )
 }
@@ -66,7 +96,7 @@ function ObjChips({ o }: { o: TeamObjectiveCounts }) {
   )
 }
 
-function Scoreboard({ title, side, won, players, objectives, maxDamage, durationMin }: {
+function Scoreboard({ title, side, won, players, objectives, maxDamage, durationMin, scores }: {
   title: string
   side: string
   won: boolean
@@ -74,6 +104,7 @@ function Scoreboard({ title, side, won, players, objectives, maxDamage, duration
   objectives: TeamObjectiveCounts
   maxDamage: number
   durationMin: number
+  scores: Record<number, { score: number; ord: number }>
 }) {
   const icons = useLoadoutIcons()
   return (
@@ -92,12 +123,13 @@ function Scoreboard({ title, side, won, players, objectives, maxDamage, duration
               const dpm = Math.round(p.damageToChampions / durationMin)
               return (
                 <tr key={p.participantId} className={p.isMe ? 'me-row' : ''}>
+                  <td>{scores[p.participantId] && <ScoreRing score={scores[p.participantId].score} ord={scores[p.participantId].ord} won={won} />}</td>
                   <td>
                     <span className="sb-player">
                       <ChampIcon name={p.champion} level={p.champLevel} />
                       <span className="sb-name">
                         <span>{p.riotId}{p.isMe && <span className="mut"> (me)</span>}</span>
-                        <span className="mut sm-text">{p.tier ? `${p.tier} ${p.division}` : 'Unranked'}</span>
+                        <span className={`sm-text ${p.tier ? tierClass(p.tier) : 'mut'}`}>{p.tier ? `${p.tier} ${p.division}` : 'Unranked'}</span>
                       </span>
                     </span>
                   </td>
@@ -204,7 +236,8 @@ function DetailsTab({ detail }: { detail: Detail }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {l.checkpoints.map(c => (
+                  {/* Milestone minutes only - the every-3-min series feeds the item race below. */}
+                  {l.checkpoints.filter(c => [10, 15, 20, 25].includes(c.min)).map(c => (
                     <tr key={c.min}>
                       <td className="num">{c.min}:00</td>
                       <td className={`num ${c.gold >= 0 ? 'win' : 'loss'}`}>{signed(c.gold)}</td>
@@ -221,22 +254,15 @@ function DetailsTab({ detail }: { detail: Detail }) {
               <div className="item-race">
                 {l.checkpoints.map(c => (
                   <div key={c.min} className="item-race-row">
-                    <span className="mut sm-text item-race-min">{c.min}:00</span>
+                    <span className={`sm-text item-race-min ${c.gold >= 0 ? 'win' : 'loss'}`}>{c.min}:00</span>
                     <span className="slots">
-                      {c.myItems.map((id, i) => (
-                        <span key={i} className="slot" title={`Item ${id}`}>
-                          {icons.item(id) && <img src={icons.item(id)!} alt="" loading="lazy" />}
-                        </span>
-                      ))}
+                      {c.myItems.map((id, i) => <ItemIcon key={i} id={id} />)}
                     </span>
                     <span className="mut sm-text">vs</span>
                     <span className="slots">
-                      {c.oppItems.map((id, i) => (
-                        <span key={i} className="slot dim" title={`Item ${id}`}>
-                          {icons.item(id) && <img src={icons.item(id)!} alt="" loading="lazy" />}
-                        </span>
-                      ))}
+                      {c.oppItems.map((id, i) => <ItemIcon key={i} id={id} dim />)}
                     </span>
+                    <span className={`sm-text ${c.gold >= 0 ? 'win' : 'loss'}`} style={{ marginLeft: 'auto' }}>{signed(c.gold)}g</span>
                   </div>
                 ))}
               </div>
@@ -313,9 +339,9 @@ function DetailsTab({ detail }: { detail: Detail }) {
               <span key={gi} className="build-group">
                 <span className="slots">
                   {g.entries.map((e, i) => (
-                    <span key={i} className={`slot ${e.kind === 'SOLD' ? 'sold' : ''} ${e.kind === 'UNDO' ? 'undo' : ''}`}
-                      title={`${e.kind.toLowerCase()} · minute ${g.min}`}>
-                      {icons.item(e.id) && <img src={icons.item(e.id)!} alt="" loading="lazy" />}
+                    <span key={i} className={e.kind === 'SOLD' ? 'slot-sold-wrap' : undefined}
+                      style={e.kind === 'UNDO' ? { opacity: 0.4 } : undefined}>
+                      <ItemIcon id={e.id} />
                     </span>
                   ))}
                 </span>
@@ -387,31 +413,22 @@ function DetailsTab({ detail }: { detail: Detail }) {
 }
 
 function RunePage({ p }: { p: Participant }) {
-  const icons = useLoadoutIcons()
   const perks = parsePerks(p.perksJson)
   const primary = perks?.styles[0]
   const secondary = perks?.styles[1]
   const shards = perks ? [perks.statPerks.offense, perks.statPerks.flex, perks.statPerks.defense] : []
-  const runeImg = (id: number, cls = '') => {
-    const r = icons.rune(id)
-    return (
-      <span key={id + cls} className={`slot round ${cls}`} title={r?.name}>
-        {r && <img src={r.icon} alt="" loading="lazy" />}
-      </span>
-    )
-  }
   return (
     <div className="rune-page">
       <div className="rune-champ"><ChampIcon name={p.champion} size={42} /><span className="sm-text mut">{p.isMe ? 'me' : p.riotId.split('#')[0]}</span></div>
       {perks ? (
         <>
-          <div className="slots">{primary?.selections.map((s, i) => runeImg(s.perk, i === 0 ? 'keystone' : ''))}</div>
+          <div className="slots">{primary?.selections.map((s, i) => <PerkIcon key={i} id={s.perk} className={i === 0 ? 'keystone' : ''} />)}</div>
           <div className="slots">
-            {secondary && runeImg(secondary.style, 'sm')}
-            {secondary?.selections.map(s => runeImg(s.perk))}
+            {secondary && <PerkIcon id={secondary.style} className="sm" />}
+            {secondary?.selections.map((s, i) => <PerkIcon key={i} id={s.perk} />)}
           </div>
-          <div className="obj-chips">
-            {shards.map((id, i) => <span key={i} className="obj-chip">{STAT_SHARDS[id] ?? `#${id}`}</span>)}
+          <div className="slots">
+            {shards.map((id, i) => <PerkIcon key={i} id={id} className="shard" />)}
           </div>
         </>
       ) : <span className="mut">No rune data.</span>}
@@ -593,14 +610,17 @@ export default function MatchDetail() {
         </div>
       </div>
 
-      {tab === 'general' && (
-        <>
-          <Scoreboard title={m.isRemake ? 'Remake' : allies[0]?.win ? 'Victory' : 'Defeat'} side={detail.mySide} won={!m.isRemake && (allies[0]?.win ?? false)}
-            players={allies} objectives={detail.teamObjectives.ally} maxDamage={maxDamage} durationMin={m.durationMin} />
-          <Scoreboard title={m.isRemake ? 'Remake' : enemies[0]?.win ? 'Victory' : 'Defeat'} side={enemySide} won={!m.isRemake && (enemies[0]?.win ?? false)}
-            players={enemies} objectives={detail.teamObjectives.enemy} maxDamage={maxDamage} durationMin={m.durationMin} />
-        </>
-      )}
+      {tab === 'general' && (() => {
+        const scores = carryScores(participants)
+        return (
+          <>
+            <Scoreboard title={m.isRemake ? 'Remake' : allies[0]?.win ? 'Victory' : 'Defeat'} side={detail.mySide} won={!m.isRemake && (allies[0]?.win ?? false)}
+              players={allies} objectives={detail.teamObjectives.ally} maxDamage={maxDamage} durationMin={m.durationMin} scores={scores} />
+            <Scoreboard title={m.isRemake ? 'Remake' : enemies[0]?.win ? 'Victory' : 'Defeat'} side={enemySide} won={!m.isRemake && (enemies[0]?.win ?? false)}
+              players={enemies} objectives={detail.teamObjectives.enemy} maxDamage={maxDamage} durationMin={m.durationMin} scores={scores} />
+          </>
+        )
+      })()}
 
       {tab === 'details' && <DetailsTab detail={detail} />}
 
