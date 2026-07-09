@@ -80,10 +80,19 @@ public sealed class LensService(LeagueDbContext db)
         ("mechanics", "Mechanics", "Micro skills"),
     ];
 
-    public async Task<object?> GetAsync(int window, CancellationToken ct)
+    private static readonly HashSet<string> Roles = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
+
+    public async Task<object?> GetAsync(int window, string? role, CancellationToken ct)
     {
-        var matches = await db.Matches.AsNoTracking()
-            .Where(m => m.IsRanked && m.DurationSec >= 300)
+        var query = db.Matches.AsNoTracking()
+            .Where(m => m.IsRanked && m.DurationSec >= 300);
+        if (role is { Length: > 0 } && Roles.Contains(role.ToUpperInvariant()))
+        {
+            var normalized = role.ToUpperInvariant();
+            query = query.Where(m => m.Position == normalized);
+        }
+
+        var matches = await query
             .OrderByDescending(m => m.GameEndUtc)
             .ToListAsync(ct);
         if (matches.Count < 8) return null;
@@ -107,6 +116,14 @@ public sealed class LensService(LeagueDbContext db)
         var recent = rows.Take(window).ToList();
         var baseline = rows.Skip(window).ToList();
         var hasBaseline = baseline.Count >= 5;
+
+        // Header context: winrate over the window and the era's signature champion
+        // (most played) for the NEW vs OLD portrait pair.
+        var recentMatches = matches.Take(window).ToList();
+        var baselineMatches = matches.Skip(window).ToList();
+        var winrate = Math.Round(100.0 * recentMatches.Count(m => m.Win) / recentMatches.Count);
+        static string? TopChampion(List<Match> set) => set
+            .GroupBy(m => m.Champion).OrderByDescending(g => g.Count()).FirstOrDefault()?.Key;
 
         static double? Mean(List<Dictionary<string, double>> set, string key)
         {
@@ -162,7 +179,16 @@ public sealed class LensService(LeagueDbContext db)
             };
         });
 
-        return new { Games = rows.Count, Window = window, HasBaseline = hasBaseline, Categories = categories };
+        return new
+        {
+            Games = rows.Count,
+            Window = window,
+            HasBaseline = hasBaseline,
+            Winrate = winrate,
+            TopChampion = TopChampion(recentMatches),
+            TopChampionOld = hasBaseline ? TopChampion(baselineMatches) : null,
+            Categories = categories,
+        };
     }
 
     private Dictionary<string, double> ComputeRow(Match m, int collapses, int deathsAfterObjective)

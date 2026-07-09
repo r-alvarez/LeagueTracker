@@ -584,3 +584,109 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .ld-value { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .ld-label { color: var(--ink-2); font-weight: 600; }
 .ld-compare { display: flex; align-items: center; gap: 14px; font-size: 15px; }
+
+/* ============================================================================
+   Lens restyle: dpm-grade depth - layered gradient surfaces, iconography,
+   glow-selected states. Overrides the first-pass .lens-* rules.
+   ========================================================================== */
+.lens-shell { display: flex; flex-direction: column; gap: 12px; }
+
+.lens-header {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: linear-gradient(135deg, #171d29, #12161f 60%);
+  border-radius: 14px; padding: 12px 16px;
+}
+.lens-logo { display: inline-flex; align-items: center; gap: 8px; letter-spacing: 0.06em; font-size: 14px; }
+.lens-logo .cat-icon { background: var(--panel-2); }
+.lens-hstats { margin-left: auto; display: inline-flex; gap: 16px; font-variant-numeric: tabular-nums; }
+.lens-hstats .mut { font-size: 10px; letter-spacing: 0.05em; }
+.lens-header .seg button { display: inline-flex; align-items: center; padding: 6px 12px; }
+
+.lens-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.lens-tabs button {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--muted); font: inherit; font-weight: 700; padding: 8px 14px; cursor: pointer;
+  text-transform: uppercase; font-size: 11.5px; letter-spacing: 0.05em;
+}
+.lens-tabs button:hover { color: var(--ink); border-color: var(--muted); }
+.lens-tabs button.on {
+  background: linear-gradient(135deg, #1d2534, #171d29); color: var(--ink);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 12px rgba(79, 156, 249, 0.12);
+}
+.lens-tabs .cat-icon { width: 24px; height: 24px; background: transparent; border: 0; }
+
+.lens-panel {
+  background: linear-gradient(160deg, #151a24, #10141c 70%);
+  border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px;
+}
+
+.cat-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  border-radius: 50%; background: var(--page); border: 1px solid var(--baseline); color: var(--ink-2);
+}
+.cat-icon.sub {
+  width: 34px; height: 34px; font-size: 10px; font-weight: 800; color: var(--ink-2);
+}
+
+.lens-overview { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.lens-cat {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: linear-gradient(135deg, #1a2130, #141924 65%);
+  border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px;
+  cursor: pointer; font: inherit; color: inherit; text-align: left;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.lens-cat:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); box-shadow: 0 0 14px rgba(79, 156, 249, 0.10); }
+.lens-cat.weak { border-color: rgba(227, 179, 65, 0.45); }
+.lc-head { display: flex; align-items: center; gap: 11px; }
+.lc-name { font-weight: 750; font-size: 14px; display: flex; flex-direction: column; gap: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+.lens-cat-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.lens-cat-head h2 { margin: 0; font-size: 17px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+.lens-split { grid-template-columns: 300px 1fr; }
+.lens-subcard {
+  flex-direction: column; align-items: stretch; gap: 12px;
+  background: linear-gradient(135deg, #1a2130, #141924 65%);
+  border-radius: 14px; padding: 13px 15px;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.lens-subcard.on {
+  border-color: color-mix(in srgb, var(--ink) 35%, var(--border));
+  background: linear-gradient(135deg, #222b3d, #1a2130 65%);
+  box-shadow: 0 0 16px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+.ls-head { display: flex; align-items: center; gap: 10px; }
+.ls-name { display: flex; flex-direction: column; gap: 1px; }
+.ls-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.lens-pair { display: inline-flex; align-items: center; gap: 6px; }
+.lens-face {
+  display: inline-flex; border-radius: 50%; overflow: hidden;
+  border: 1px solid var(--baseline); background: var(--page); flex: 0 0 auto;
+}
+.lens-face img { width: 100%; height: 100%; object-fit: cover; }
+
+.lens-tiles { grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 12px; }
+.lens-tile {
+  align-items: center; text-align: center; gap: 7px;
+  background: linear-gradient(135deg, #171d29, #131722 65%);
+  border-radius: 12px; padding: 14px 12px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.lens-tile.on {
+  background: linear-gradient(135deg, #232c3f, #1a2130 65%);
+  border-color: color-mix(in srgb, var(--ink) 30%, var(--border));
+}
+.lt-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.lt-value { font-size: 19px; font-weight: 800; }
+.lens-delta { font-size: 12px; }
+
+.lens-detail {
+  background: linear-gradient(135deg, #171d29, #12161f 65%);
+  border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px;
+}
+.ld-value { font-size: 30px; }
+.ld-compare { align-items: center; }
+.ld-side { display: inline-flex; align-items: center; gap: 8px; font-size: 16px; font-variant-numeric: tabular-nums; }
