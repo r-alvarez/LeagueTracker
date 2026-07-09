@@ -137,6 +137,33 @@ const SPECIAL_SPELLS: Record<string, string> = {
   attack: 'Basic attack', turretbasicattack: 'Turret shot',
 }
 
+// Non-champion damage sources use Riot's internal unit names.
+const UNIT_NAMES: Array<[RegExp, string]> = [
+  [/^$/, 'Turret'],
+  [/^turret/i, 'Turret'],
+  [/^sru_(order|chaos)minion/i, 'Minions'],
+  [/^sru_baron/i, 'Baron Nashor'],
+  [/^sru_riftherald/i, 'Rift Herald'],
+  [/^sru_horde/i, 'Void Grubs'],
+  [/^sru_dragon_?(\w*)/i, 'Dragon'],
+  [/^sru_red/i, 'Red Brambleback'],
+  [/^sru_blue/i, 'Blue Sentinel'],
+  [/^sru_gromp/i, 'Gromp'],
+  [/^sru_murkwolf/i, 'Murk Wolves'],
+  [/^sru_razorbeak/i, 'Raptors'],
+  [/^sru_krug/i, 'Krugs'],
+  [/^sru_crab/i, 'Scuttle Crab'],
+]
+
+/// Champion names pass through; internal unit names ("SRU_OrderMinionMelee",
+/// empty string for turrets) become their in-game labels.
+export function sourceLabel(source: string): string {
+  for (const [re, label] of UNIT_NAMES) {
+    if (re.test(source)) return label
+  }
+  return source.startsWith('SRU_') ? source.slice(4).replace(/_/g, ' ') : source
+}
+
 /// Labels damage-recap spell names for the given source champions. Triggers the
 /// per-champion fetches and re-renders as they land; unresolvable names fall
 /// back to a cleaned-up version of the raw id.
@@ -154,18 +181,27 @@ export function useAbilityLabels(sources: string[]): (source: string, spellName:
   }, [assets, sources])
 
   return useMemo(() => (source: string, spellName: string) => {
-    const n = spellName.toLowerCase().trim()
+    // Trailing digits are rank/variant markers ("turretbasicattack2").
+    const n = spellName.toLowerCase().trim().replace(/\d+$/, '')
     if (!n) return 'Basic attacks'
-    const s = norm(source)
-    if (n === `${s}basicattack` || n === 'basicattack') return 'Basic attack'
     if (SPECIAL_SPELLS[n]) return SPECIAL_SPELLS[n]
+    if (n.startsWith('turret')) return 'Turret shot'
+    if (n.endsWith('basicattack')) return 'Basic attack'
 
+    // "3077active" - an item's active effect.
+    const itemActive = n.match(/^(\d{4,})active$/)
+    if (itemActive) {
+      const item = assets?.items[parseInt(itemActive[1], 10)]
+      return item ? `${item.name} (active)` : 'Item active'
+    }
+
+    const s = norm(source)
     const id = assets?.champIds[s]
     const fromData = id ? abilityCache[id]?.[n] : undefined
     if (fromData) return fromData
 
     // "gragasq" -> "Q" even when the spell id spells it differently.
-    if (n.startsWith(s)) {
+    if (n.startsWith(s) && s.length > 0) {
       const rest = n.slice(s.length)
       if (/^[qwer]$/.test(rest)) return rest.toUpperCase()
       if (rest.length > 1) return rest[0].toUpperCase() + rest.slice(1)

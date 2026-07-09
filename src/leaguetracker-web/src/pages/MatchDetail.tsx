@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts } from '../types'
-import { useAbilityLabels, useChampionIcons, useLoadoutIcons } from '../champions'
+import { sourceLabel, useAbilityLabels, useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
 import { ItemIcon, PerkIcon } from '../components/GameIcons'
 import { tierClass } from '../components/Stats'
@@ -204,9 +204,9 @@ function DeathRecap({ d }: { d: DeathEvent }) {
       </div>
       {sources.map(s => (
         <div key={s.source} className="recap-row">
-          <ChampIcon name={s.source} size={28} />
+          <ChampIcon name={sourceLabel(s.source)} size={28} />
           <span className="recap-name">
-            <span>{s.source} <strong>{s.total.toLocaleString()}</strong> <span className="mut sm-text">({Math.round((100 * s.total) / grandTotal)}%)</span></span>
+            <span>{sourceLabel(s.source)} <strong>{s.total.toLocaleString()}</strong> <span className="mut sm-text">({Math.round((100 * s.total) / grandTotal)}%)</span></span>
             <span className="recap-bar">
               {s.phys > 0 && <span className="seg phys" style={{ width: `${(100 * s.phys) / grandTotal}%` }} />}
               {s.magic > 0 && <span className="seg magic" style={{ width: `${(100 * s.magic) / grandTotal}%` }} />}
@@ -306,8 +306,9 @@ function DetailsTab({ detail }: { detail: Detail }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {/* Milestone minutes only - the every-3-min series feeds the item race below. */}
-                  {l.checkpoints.filter(c => [10, 15, 20, 25].includes(c.min)).map(c => (
+                  {/* Milestones only (dense early, sparser late) - the every-3-min
+                      series feeds the item race below. */}
+                  {l.checkpoints.filter(c => [10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90].includes(c.min)).map(c => (
                     <tr key={c.min}>
                       <td className="num">{c.min}:00</td>
                       <td className={`num ${c.gold >= 0 ? 'win' : 'loss'}`}>{signed(c.gold)}</td>
