@@ -22,7 +22,10 @@ export function ItemIcon({ id, size, dim }: { id: number; size?: number; dim?: b
 
   const tip = id > 0 ? (
     <>
-      <span className="tip-title">{info?.name ?? `Item ${id}`}{info ? <span className="tip-gold"> {info.gold}g</span> : null}</span>
+      <span className="tip-head">
+        {url ? <img className="tip-icon" src={url} alt="" loading="lazy" /> : null}
+        <span className="tip-title">{info?.name ?? `Item ${id}`}{info ? <span className="tip-gold"> {info.gold}g</span> : null}</span>
+      </span>
       {info?.stats.map((s, i) => <span key={i} className="tip-stat">{s}</span>)}
       {info?.passive ? <span className="tip-passive">{info.passive.length > 260 ? `${info.passive.slice(0, 260)}…` : info.passive}</span> : null}
     </>
@@ -48,7 +51,10 @@ export function PerkIcon({ id, className = '' }: { id: number; className?: strin
 
   const tip = name ? (
     <>
-      <span className="tip-title">{name}</span>
+      <span className="tip-head">
+        {icon ? <img className="tip-icon round" src={icon} alt="" loading="lazy" /> : null}
+        <span className="tip-title">{name}</span>
+      </span>
       {desc ? <span className="tip-passive">{desc}</span> : null}
     </>
   ) : null

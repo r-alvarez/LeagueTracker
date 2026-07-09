@@ -464,3 +464,33 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
 }
 .slot.round.shard { width: 20px; height: 20px; background: var(--panel-2); }
 .rune-page .slot.shard { width: 22px; height: 22px; }
+
+/* Tooltip header: icon beside the name. */
+.tip-head { display: flex; align-items: center; gap: 8px; }
+.tip-icon { width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border); flex: 0 0 auto; }
+.tip-icon.round { border-radius: 50%; background: var(--page); }
+
+/* Death recap: per-source damage with a phys/magic/true split bar. */
+.recap { display: flex; flex-direction: column; gap: 8px; }
+.recap-legend { float: right; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.dmg-phys { color: #e8853d; } .dmg-magic { color: var(--series-1); } .dmg-true { color: var(--ink); }
+.recap-row { display: grid; grid-template-columns: 28px minmax(220px, 1fr) 2fr; gap: 12px; align-items: center; }
+.recap-name { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.recap-bar { display: flex; height: 8px; border-radius: 4px; background: var(--panel-2); overflow: hidden; gap: 1px; }
+.recap-bar .seg { display: block; height: 100%; }
+.recap-bar .seg.phys { background: #e8853d; }
+.recap-bar .seg.magic { background: var(--series-1); }
+.recap-bar .seg.tru { background: var(--ink); }
+.recap-spells { display: flex; flex-wrap: wrap; gap: 5px; }
+.recap-spells .obj-chip strong { font-variant-numeric: tabular-nums; }
+.disclosure { color: var(--muted); font-size: 10px; display: inline-block; width: 12px; }
+
+/* Objective timeline: tinted by which side took it, kind carries a color. */
+tr.obj-row-win td:first-child { box-shadow: inset 3px 0 var(--delta-good); }
+tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
+.obj-kind { font-weight: 650; }
+.obj-kind.obj-dragon { color: var(--tier-plat); }
+.obj-kind.obj-baron { color: var(--tier-master); }
+.obj-kind.obj-herald { color: var(--tier-diamond); }
+.obj-kind.obj-grubs { color: var(--tier-emerald); }
+.obj-kind.obj-tower { color: var(--warn); }
