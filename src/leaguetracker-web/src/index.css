@@ -494,3 +494,21 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .obj-kind.obj-herald { color: var(--tier-diamond); }
 .obj-kind.obj-grubs { color: var(--tier-emerald); }
 .obj-kind.obj-tower { color: var(--warn); }
+
+/* Non-champion source glyphs in the death recap. */
+.unit-glyph {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--ink-2);
+}
+
+/* Match-row fixes: the meta column must never bleed into the portraits, and
+   the matchup reads dpm-style - my portrait vs the lane opponent's. */
+.mr-meta { min-width: 0; }
+.mr-meta .sub { overflow: hidden; text-overflow: ellipsis; }
+.mr-duel { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.mr-duel .vs-badge { font-size: 10px; font-weight: 800; color: var(--muted); text-transform: uppercase; }
+.mr-portrait.sm img, .mr-portrait.sm .champ-mono { width: 34px; height: 34px; border-radius: 8px; opacity: 0.9; }
+.match-row { grid-template-columns: 104px 235px 130px minmax(160px, 220px) 1fr 130px 86px 34px; }
+@media (max-width: 1100px) {
+  .match-row { grid-template-columns: 96px 215px 120px 1fr 86px; }
+}

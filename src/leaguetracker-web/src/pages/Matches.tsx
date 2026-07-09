@@ -9,15 +9,17 @@ import { KdaStat, LpChip, RankChip, RelTime } from '../components/Stats'
 
 const PAGE_SIZE = 25
 
-function Portrait({ name, level }: { name: string; level?: number }) {
+function Portrait({ name, level, small }: { name: string; level?: number; small?: boolean }) {
   const icon = useChampionIcons()(name)
   return (
-    <span className="mr-portrait champ-frame">
+    <span className={`mr-portrait champ-frame ${small ? 'sm' : ''}`} title={name}>
       {icon ? <img src={icon} alt={name} loading="lazy" /> : <span className="champ-mono">{name.slice(0, 2).toUpperCase()}</span>}
       {level !== undefined && <span className="lvl">{level}</span>}
     </span>
   )
 }
+
+const shortQueue = (q: string) => q.replace(/^Ranked\s+/, '').replace(/^Normal\s+/, '')
 
 function TinyChamp({ name }: { name: string }) {
   const icon = useChampionIcons()(name)
@@ -38,16 +40,22 @@ function Row({ m }: { m: MatchSummary }) {
       <div className="mr-meta">
         <span className={`mr-result ${m.isRemake ? 'mut' : m.win ? 'win' : 'loss'}`}>{result}</span>
         <span className="sub"><RelTime date={m.gameEndUtc} /></span>
-        <span className="sub">{m.queueName} · {m.durationMin.toFixed(0)}m</span>
+        <span className="sub">{shortQueue(m.queueName)} · {m.durationMin.toFixed(0)}m</span>
       </div>
 
       <div className="mr-champ">
-        <Portrait name={m.champion} level={m.champLevel} />
+        <span className="mr-duel">
+          <Portrait name={m.champion} level={m.champLevel} />
+          {m.opponentChampion && (
+            <>
+              <span className="vs-badge">vs</span>
+              <Portrait name={m.opponentChampion} small />
+            </>
+          )}
+        </span>
         <span className="mr-vs">
           <span className="name">{m.champion} <RoleIcon role={m.position} size={12} /></span>
-          {m.opponentChampion && (
-            <span className="opp">vs <TinyChamp name={m.opponentChampion} /> {m.opponentChampion}</span>
-          )}
+          {m.opponentChampion && <span className="opp">vs {m.opponentChampion}</span>}
           {m.enemyJungler && (
             <span className="opp">jgl <TinyChamp name={m.enemyJungler} /><span style={{ opacity: 0.7 }}>vs</span>{m.allyJungler ? <TinyChamp name={m.allyJungler} /> : '—'}</span>
           )}

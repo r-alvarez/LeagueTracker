@@ -2,9 +2,9 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts } from '../types'
-import { sourceLabel, useAbilityLabels, useChampionIcons, useLoadoutIcons } from '../champions'
+import { sourceLabel, unitKind, useAbilityLabels, useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
-import { ItemIcon, PerkIcon } from '../components/GameIcons'
+import { ItemIcon, PerkIcon, UnitGlyph } from '../components/GameIcons'
 import { tierClass } from '../components/Stats'
 
 type Tab = 'general' | 'details' | 'runes' | 'timeline'
@@ -204,7 +204,9 @@ function DeathRecap({ d }: { d: DeathEvent }) {
       </div>
       {sources.map(s => (
         <div key={s.source} className="recap-row">
-          <ChampIcon name={sourceLabel(s.source)} size={28} />
+          {unitKind(s.source) !== null
+            ? <UnitGlyph kind={unitKind(s.source)!} />
+            : <ChampIcon name={sourceLabel(s.source)} size={28} />}
           <span className="recap-name">
             <span>{sourceLabel(s.source)} <strong>{s.total.toLocaleString()}</strong> <span className="mut sm-text">({Math.round((100 * s.total) / grandTotal)}%)</span></span>
             <span className="recap-bar">
@@ -744,7 +746,7 @@ export default function MatchDetail() {
                       <Fragment key={d.timeSec}>
                       <tr style={{ cursor: 'pointer' }} title="Click for the death recap"
                         onClick={() => setRecapAt(recapAt === d.timeSec ? null : d.timeSec)}>
-                        <td className="num">
+                        <td style={{ whiteSpace: 'nowrap' }}>
                           <span className="disclosure">{recapAt === d.timeSec ? '▾' : '▸'}</span>
                           {d.gameTime}
                           {clipFor(d.timeSec) && (
@@ -806,7 +808,7 @@ export default function MatchDetail() {
                   <tbody>
                     {detail.objectives.map(o => (
                       <tr key={`${o.timeSec}-${o.kind}`} className={o.byMyTeam ? 'obj-row-win' : 'obj-row-loss'}>
-                        <td className="num">{o.gameTime}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>{o.gameTime}</td>
                         <td><span className={`obj-kind ${OBJ_KIND_CLASS[o.kind] ?? ''}`}>{objectiveLabel(o.kind, o.subKind)}</span></td>
                         <td className={o.byMyTeam ? 'win' : 'loss'}>{o.byMyTeam ? 'My team' : 'Enemy'}</td>
                         <td>{o.killer
