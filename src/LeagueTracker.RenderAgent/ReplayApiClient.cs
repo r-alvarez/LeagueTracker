@@ -1,0 +1,54 @@
+using System.Text;
+using System.Text.Json;
+
+namespace LeagueTracker.RenderAgent;
+
+/// Riot's official Replay API, served by the game itself while a replay runs
+/// (needs EnableReplayApi=1 in game.cfg). Self-signed cert, hence the bypass.
+public sealed class ReplayApiClient : IDisposable
+{
+    private const string Base = "https://127.0.0.1:2999";
+    private static readonly JsonSerializerOptions Json = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    private readonly HttpClient _http = new(new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback = (_, _, _, _) => true,
+    })
+    { Timeout = TimeSpan.FromSeconds(10) };
+
+    public sealed record Playback(double Time, bool Paused, bool Seeking, double Speed, double Length);
+
+    public async Task<Playback?> GetPlaybackAsync(CancellationToken ct)
+    {
+        try
+        {
+            var raw = await _http.GetStringAsync($"{Base}/replay/playback", ct);
+            return JsonSerializer.Deserialize<Playback>(raw, Json);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return null;   // game still loading, or gone
+        }
+    }
+
+    public Task SetPlaybackAsync(double? time, bool? paused, double? speed, CancellationToken ct) =>
+        PostAsync("/replay/playback", new { time, paused, speed }, ct);
+
+    /// Locks the camera onto the tracked player, with fog of war from their team's view.
+    public Task FollowPlayerAsync(string playerName, CancellationToken ct) =>
+        PostAsync("/replay/render", new { cameraAttached = true, selectionName = playerName, fogOfWar = true }, ct);
+
+    private async Task PostAsync(string path, object body, CancellationToken ct)
+    {
+        using var content = new StringContent(JsonSerializer.Serialize(body, Json), Encoding.UTF8, "application/json");
+        using var resp = await _http.PostAsync($"{Base}{path}", content, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public void Dispose() => _http.Dispose();
+}

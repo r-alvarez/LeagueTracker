@@ -203,10 +203,20 @@ app.MapPost("/api/render/next", async (ClipService clips, RenderLeaseService lea
         if (await clips.PlanAsync(matchId, ct) is not { Windows.Count: > 0 } plan) continue;
         if (!leases.TryClaim(matchId, agent)) continue;
         await clips.SavePlanAsync(plan, ct);
+
+        // The agent locks the replay camera onto this player (names as they were
+        // at game time, from the stored participant row).
+        var me = await db.Participants.AsNoTracking()
+            .Where(p => p.MatchId == matchId && p.IsMe)
+            .Select(p => new { p.RiotId, p.Champion })
+            .FirstOrDefaultAsync(ct);
+
         return Results.Ok(new
         {
             plan.MatchId, plan.GameVersion, plan.DurationSec,
             ReplayUrl = $"/api/matches/{plan.MatchId}/replay",
+            MyName = me?.RiotId is { Length: > 0 } riotId ? riotId.Split('#')[0] : null,
+            MyChampion = me?.Champion,
             plan.Windows,
         });
     }

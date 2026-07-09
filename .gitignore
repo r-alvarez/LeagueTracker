@@ -22,3 +22,7 @@ src/LeagueTracker.Api/wwwroot/
 
 # Local tooling
 docker-compose.override.yml
+
+# Render agent build output
+src/LeagueTracker.RenderAgent/bin/
+src/LeagueTracker.RenderAgent/obj/

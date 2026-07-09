@@ -158,3 +158,27 @@ excluded from v1 (would clip every teamfight; revisit if wanted).
 PUT clips, complete/fail) because the agent sits on the gaming PC behind NAT
 and the tracker moves to TrueNAS — outbound-only from the PC, no inbound
 holes. Upload body cap lifted per-endpoint (512MB), not globally.
+
+## 2026-07-09 — Render agent
+
+**The render agent is a separate always-interactive Windows exe, not a
+service** - the game must render to a real desktop for window capture, so it
+runs at logon in the user session (Task Scheduler), never as a session-0
+service. Discovered during build: League is NOT installed on the tracker dev
+box, so the agent/server split is required today, not just after the TrueNAS
+move.
+
+**Mock render mode (LT_MOCK_RENDER) is a first-class feature**, not test
+scaffolding: it exercised claim → rofl download → mp4 upload → complete on a
+machine with no League install, and stays as the smoke test for any future
+protocol change. Gotcha kept out of the mock: ffmpeg's drawtext filter
+crashes on Windows builds (fontconfig missing) - plain testsrc2 only.
+
+**Capture is ffmpeg gdigrab by window title at 30fps/CRF23** - chosen over
+OBS automation (heavier dependency, needs obs-websocket config) since the
+user's OBS is busy recording live play anyway. Revisit if gdigrab frame
+pacing disappoints; the seam is one method (CaptureAsync).
+
+**The agent trusts the server for camera identity** (/api/render/next carries
+MyName/MyChampion from the at-game-time participant row) because current
+Riot ID can drift from the name recorded in the replay.
