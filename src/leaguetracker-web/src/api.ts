@@ -1,4 +1,4 @@
-import type { AnalyticsSummary, ChallengeBenchmark, JobStatus, LpPerGame, LpPoint, MatchDetail, MatchPage, Stats, Status } from './types'
+import type { AnalyticsSummary, ChallengeBenchmark, JobStatus, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchPage, Stats, Status } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const resp = await fetch(url)
@@ -25,8 +25,14 @@ export const api = {
   analytics: (lastN: number) => get<AnalyticsSummary>(`/api/analytics/summary?lastN=${lastN}`),
   challengePercentiles: async (): Promise<ChallengeBenchmark | null> => {
     const r = await fetch('/api/challenges/percentiles')
-    if (r.status === 204) return null   // key lacks Challenges-V1 access, or not fetched yet
+    if (r.status === 204) return null   // not fetched from Riot yet (or the fetch failed with nothing cached)
     if (!r.ok) throw new Error(`/api/challenges/percentiles -> HTTP ${r.status}`)
+    return r.json()
+  },
+  live: async (): Promise<LiveGame | null> => {
+    const r = await fetch('/api/live')
+    if (r.status === 204) return null   // not in a game
+    if (!r.ok) throw new Error(`/api/live -> HTTP ${r.status}`)
     return r.json()
   },
   stats: (opts: { days?: number; lastGames?: number }) => {

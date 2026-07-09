@@ -79,6 +79,7 @@ export interface MatchSummary {
   items: string | null
   summoner1Id: number | null
   summoner2Id: number | null
+  hasReplay: boolean
 }
 
 export interface MatchPage {
@@ -338,11 +339,32 @@ export interface ChallengeRow {
   levelRank: number
   percentile: number | null
   value: number | null
+  levelShare: number | null
+  nextLevel: string | null
+  nextLevelShare: number | null
 }
 
 export interface ChallengeBenchmark {
   asOfUtc: string | null
   challenges: ChallengeRow[]
+}
+
+export interface LiveParticipant {
+  championId: number
+  teamId: number
+  riotId: string | null
+  isMe: boolean
+}
+
+export interface LiveGame {
+  matchId: string
+  queueId: number
+  queue: string
+  startedUtc: string | null
+  detectedUtc: string
+  myChampionId: number
+  myTeamId: number
+  participants: LiveParticipant[]
 }
 
 export interface MatchupRow {

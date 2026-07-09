@@ -25,6 +25,12 @@ public sealed class ChallengesBenchmarkService(
             () => riot.GetChallengesConfigRawAsync(ct), ct);
         if (playerRaw is null || configRaw is null) return null;
 
+        // Ladder-wide level shares give each level its meaning ("GOLD here = top 9%").
+        // Nice-to-have: a failed fetch degrades the rows, it doesn't hide them.
+        var sharesRaw = await CachedAsync("challenges:levelshares", TimeSpan.FromDays(7),
+            () => riot.GetChallengesAllPercentilesRawAsync(ct), ct);
+        var levelShares = sharesRaw is null ? [] : ParseLevelShares(sharesRaw);
+
         var names = ParseConfigNames(configRaw);
         var rows = new List<object>();
         using var doc = JsonDocument.Parse(playerRaw);
@@ -37,6 +43,7 @@ public sealed class ChallengesBenchmarkService(
             if (level is "NONE") continue;
             if (!names.TryGetValue(id, out var meta)) continue;   // capstone/category roots have no leaf name
 
+            var (levelShare, nextLevel, nextLevelShare) = LadderContext(levelShares, id, level);
             rows.Add(new
             {
                 Id = id,
@@ -46,6 +53,9 @@ public sealed class ChallengesBenchmarkService(
                 LevelRank = Array.IndexOf(LevelOrder, level),
                 Percentile = c.TryGetProperty("percentile", out var pc) ? Math.Round(pc.GetDouble(), 4) : (double?)null,
                 Value = c.TryGetProperty("value", out var vv) ? vv.GetDouble() : (double?)null,
+                LevelShare = levelShare,
+                NextLevel = nextLevel,
+                NextLevelShare = nextLevelShare,
             });
         }
 
@@ -91,6 +101,42 @@ public sealed class ChallengesBenchmarkService(
             }
             return null;
         }
+    }
+
+    /// The share of the playerbase at (or above) the player's level on this
+    /// challenge, plus the next tier up and its share - the "what would it take"
+    /// context. Nulls when Riot has no distribution for the challenge.
+    private static (double? LevelShare, string? NextLevel, double? NextLevelShare) LadderContext(
+        Dictionary<long, Dictionary<string, double>> levelShares, long challengeId, string level)
+    {
+        if (!levelShares.TryGetValue(challengeId, out var dist)) return (null, null, null);
+
+        var levelShare = dist.TryGetValue(level, out var share) ? Math.Round(share, 4) : (double?)null;
+        for (var i = Array.IndexOf(LevelOrder, level) + 1; i > 0 && i < LevelOrder.Length; i++)
+        {
+            if (dist.TryGetValue(LevelOrder[i], out var next))
+            {
+                return (levelShare, LevelOrder[i], Math.Round(next, 4));
+            }
+        }
+        return (levelShare, null, null);
+    }
+
+    private static Dictionary<long, Dictionary<string, double>> ParseLevelShares(string sharesRaw)
+    {
+        var map = new Dictionary<long, Dictionary<string, double>>();
+        using var doc = JsonDocument.Parse(sharesRaw);
+        foreach (var challenge in doc.RootElement.EnumerateObject())
+        {
+            if (!long.TryParse(challenge.Name, out var id)) continue;
+            var dist = new Dictionary<string, double>();
+            foreach (var levelEntry in challenge.Value.EnumerateObject())
+            {
+                if (levelEntry.Value.ValueKind is JsonValueKind.Number) dist[levelEntry.Name] = levelEntry.Value.GetDouble();
+            }
+            map[id] = dist;
+        }
+        return map;
     }
 
     private static Dictionary<long, (string Name, string Description)> ParseConfigNames(string configRaw)
