@@ -64,7 +64,14 @@ public sealed class AnalyticsReprocessService(
             ? tl.GetRawText() : null;
 
         var dto = JsonSerializer.Deserialize<RiotMatchDto>(matchRaw, Json)!;
-        var me = dto.Info.Participants.First(p => p.Puuid == puuid);
+        // PUUIDs are encrypted per API key, so raw files written under an older
+        // key never contain the current puuid. The participant row's IsMe flag
+        // (set at ingest time) is the stable identity; puuid is the fallback
+        // for rows imported before the flag existed.
+        var mePid = match.Participants.FirstOrDefault(x => x.IsMe)?.ParticipantId;
+        var me = mePid is { } pid
+            ? dto.Info.Participants.First(p => p.ParticipantId == pid)
+            : dto.Info.Participants.First(p => p.Puuid == puuid);
 
         foreach (var p in dto.Info.Participants)
         {
