@@ -242,10 +242,12 @@ public static class TimelineAnalyzer
             }
         }
 
-        // Every 3 minutes (the item race wants density) plus the 10/15/20/25
-        // milestones the lane-diff table is built around; the UI filters.
+        // Every 3 minutes (the item race wants density) plus the milestone
+        // minutes the lane-diff table is built around, out to 90 for the
+        // marathon games - minutes past the last frame skip automatically.
         var laneDiffs = new List<LaneDiffPoint>();
-        foreach (var minute in Enumerable.Range(1, 15).Select(i => i * 3).Concat([10, 15, 20, 25]).Distinct().Order())
+        foreach (var minute in Enumerable.Range(1, 30).Select(i => i * 3)
+            .Concat([10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90]).Distinct().Order())
         {
             var frame = FrameAtMinute(frames, minute);
             if (My(frame) is not { } mineAt || Opp(frame) is not { } oppAt) continue;
