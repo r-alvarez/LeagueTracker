@@ -82,7 +82,9 @@ public sealed class LensService(LeagueDbContext db)
 
     private static readonly HashSet<string> Roles = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
 
-    public async Task<object?> GetAsync(int window, string? role, CancellationToken ct)
+    /// Window is either the last N games or, when days is given, everything
+    /// inside that many days (mirroring the Dashboard's window selector).
+    public async Task<object?> GetAsync(int window, int? days, string? role, CancellationToken ct)
     {
         var query = db.Matches.AsNoTracking()
             .Where(m => m.IsRanked && m.DurationSec >= 300);
@@ -112,7 +114,13 @@ public sealed class LensService(LeagueDbContext db)
             deathAgg.TryGetValue(m.Id, out var da) ? da.Collapses : 0,
             deathAgg.TryGetValue(m.Id, out var db2) ? db2.AfterObjective : 0)).ToList();
 
-        window = Math.Clamp(window, 5, rows.Count);
+        if (days is { } d)
+        {
+            var cutoff = DateTime.UtcNow.AddDays(-Math.Clamp(d, 1, 365));
+            window = matches.Count(m => m.GameEndUtc >= cutoff);
+            if (window < 3) return null;
+        }
+        window = Math.Clamp(window, 3, rows.Count);
         var recent = rows.Take(window).ToList();
         var baseline = rows.Skip(window).ToList();
         var hasBaseline = baseline.Count >= 5;

@@ -156,16 +156,35 @@ const ROLE_FILTERS: Array<{ key: string; label: string }> = [
   { key: 'MIDDLE', label: 'Mid' }, { key: 'BOTTOM', label: 'Bot' }, { key: 'UTILITY', label: 'Support' },
 ]
 
+// Same windows as the Dashboard, so the two pages always talk about the same slice.
+const WINDOWS = [
+  { key: '7d', label: 'Last 7d', days: 7 },
+  { key: '15d', label: '15d', days: 15 },
+  { key: '30d', label: '30d', days: 30 },
+  { key: '60d', label: '60d', days: 60 },
+  { key: '10g', label: 'Last 10', window: 10 },
+  { key: '20g', label: '20', window: 20 },
+  { key: '30g', label: '30', window: 30 },
+  { key: '40g', label: '40', window: 40 },
+  { key: '50g', label: '50', window: 50 },
+  { key: '100g', label: '100', window: 100 },
+] as const
+
 export default function Coach() {
   const [data, setData] = useState<LensResponse | null | undefined>(undefined)
-  const [window, setWindow] = useState(20)
+  const [windowKey, setWindowKey] = useState<(typeof WINDOWS)[number]['key']>('20g')
   const [role, setRole] = useState('')
   const [tab, setTab] = useState('overview')
 
   useEffect(() => {
     setData(undefined)
-    api.lens(window, role).then(setData).catch(() => setData(null))
-  }, [window, role])
+    const w = WINDOWS.find(x => x.key === windowKey)!
+    api.lens({
+      window: 'window' in w ? w.window : undefined,
+      days: 'days' in w ? w.days : undefined,
+      role,
+    }).then(setData).catch(() => setData(null))
+  }, [windowKey, role])
 
   const weakest = useMemo(() => {
     const scored = (data?.categories ?? []).filter(c => c.score !== null)
@@ -186,8 +205,8 @@ export default function Coach() {
           ))}
         </div>
         <div className="seg">
-          {[10, 20, 50].map(w => (
-            <button key={w} className={window === w ? 'on' : ''} onClick={() => setWindow(w)}>Last {w}</button>
+          {WINDOWS.map(w => (
+            <button key={w.key} className={windowKey === w.key ? 'on' : ''} onClick={() => setWindowKey(w.key)}>{w.label}</button>
           ))}
         </div>
         {data && (
