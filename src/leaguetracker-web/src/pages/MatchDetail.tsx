@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts } from '../types'
@@ -173,6 +173,76 @@ function damageSummary(d: DeathEvent): string {
   if (d.damageInstanceCount === null || d.topSourceShare === null) return '—'
   const style = d.topSourceShare >= 0.7 ? 'burst' : 'whittled'
   return `${d.damageInstanceCount} hits, ${Math.round(d.topSourceShare * 100)}% ${d.topSource} (${style})`
+}
+
+// "assassinsmark" -> readable-ish; empty spell names are basic attacks.
+const spellLabel = (s: string) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : 'Basic attacks')
+
+/// In-game-style death recap: the final ~10s of damage grouped by source
+/// champion, split physical / magic / true.
+function DeathRecap({ d }: { d: DeathEvent }) {
+  const bySource = new Map<string, { phys: number; magic: number; tru: number; spells: Map<string, number> }>()
+  for (const i of d.damageInstances) {
+    const s = bySource.get(i.source) ?? { phys: 0, magic: 0, tru: 0, spells: new Map<string, number>() }
+    s.phys += i.physical
+    s.magic += i.magic
+    s.tru += i.trueDamage
+    s.spells.set(i.spellName, (s.spells.get(i.spellName) ?? 0) + i.total)
+    bySource.set(i.source, s)
+  }
+  const sources = [...bySource.entries()]
+    .map(([source, s]) => ({ source, total: s.phys + s.magic + s.tru, ...s }))
+    .sort((a, b) => b.total - a.total)
+  const grandTotal = Math.max(1, sources.reduce((acc, s) => acc + s.total, 0))
+
+  return (
+    <div className="recap">
+      <div className="sub-h" style={{ marginTop: 0 }}>
+        Death recap — {grandTotal.toLocaleString()} damage · {d.damageInstances.length} hits in the final ~10s
+        <span className="recap-legend">
+          <span className="dmg-phys">■ physical</span> <span className="dmg-magic">■ magic</span> <span className="dmg-true">■ true</span>
+        </span>
+      </div>
+      {sources.map(s => (
+        <div key={s.source} className="recap-row">
+          <ChampIcon name={s.source} size={28} />
+          <span className="recap-name">
+            <span>{s.source} <strong>{s.total.toLocaleString()}</strong> <span className="mut sm-text">({Math.round((100 * s.total) / grandTotal)}%)</span></span>
+            <span className="recap-bar">
+              {s.phys > 0 && <span className="seg phys" style={{ width: `${(100 * s.phys) / grandTotal}%` }} />}
+              {s.magic > 0 && <span className="seg magic" style={{ width: `${(100 * s.magic) / grandTotal}%` }} />}
+              {s.tru > 0 && <span className="seg tru" style={{ width: `${(100 * s.tru) / grandTotal}%` }} />}
+            </span>
+          </span>
+          <span className="recap-spells">
+            {[...s.spells.entries()].sort((a, b) => b[1] - a[1]).map(([spell, dmg]) => (
+              <span key={spell} className="obj-chip">{spellLabel(spell)} <strong>{dmg.toLocaleString()}</strong></span>
+            ))}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const DRAGON_NAMES: Record<string, string> = {
+  FIRE: 'Infernal', EARTH: 'Mountain', AIR: 'Cloud', WATER: 'Ocean',
+  HEXTECH: 'Hextech', CHEMTECH: 'Chemtech', ELDER: 'Elder',
+}
+
+const objectiveLabel = (kind: string, subKind: string): string => {
+  if (kind === 'DRAGON') return `${DRAGON_NAMES[subKind.toUpperCase()] ?? subKind} Dragon`
+  if (kind === 'TOWER') return `${subKind ? subKind[0] + subKind.slice(1).toLowerCase() + ' ' : ''}Tower`
+  if (kind === 'HERALD') return 'Rift Herald'
+  if (kind === 'GRUBS') return 'Void Grub'
+  if (kind === 'BARON') return 'Baron Nashor'
+  if (kind === 'ATAKHAN') return 'Atakhan'
+  return kind === 'INHIBITOR' ? 'Inhibitor' : kind
+}
+
+const OBJ_KIND_CLASS: Record<string, string> = {
+  DRAGON: 'obj-dragon', BARON: 'obj-baron', HERALD: 'obj-herald',
+  GRUBS: 'obj-grubs', TOWER: 'obj-tower', INHIBITOR: 'obj-tower', ATAKHAN: 'obj-baron',
 }
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
@@ -445,6 +515,7 @@ export default function MatchDetail() {
   const [tab, setTab] = useState<Tab>('general')
   const [clips, setClips] = useState<ClipInfo[]>([])
   const [fullGame, setFullGame] = useState<FullGameStatus | null>(null)
+  const [recapAt, setRecapAt] = useState<number | null>(null)
   const clipRefs = useRef<Record<number, HTMLVideoElement | null>>({})
 
   useEffect(() => {
@@ -625,9 +696,26 @@ export default function MatchDetail() {
       {tab === 'details' && <DetailsTab detail={detail} />}
 
       {tab === 'runes' && (
-        <div className="rune-grid">
-          {[...allies, ...enemies].map(p => <RunePage key={p.participantId} p={p} />)}
-        </div>
+        <>
+          <div className="card" style={{ marginBottom: 14 }}>
+            <h2>
+              <span className={m.isRemake ? 'mut' : allies[0]?.win ? 'win' : 'loss'}>{m.isRemake ? 'Remake' : allies[0]?.win ? 'Victory' : 'Defeat'}</span>{' '}
+              <span className="mut" style={{ fontWeight: 400 }}>({detail.mySide} side — my team)</span>
+            </h2>
+            <div className="rune-grid">
+              {allies.map(p => <RunePage key={p.participantId} p={p} />)}
+            </div>
+          </div>
+          <div className="card">
+            <h2>
+              <span className={m.isRemake ? 'mut' : enemies[0]?.win ? 'win' : 'loss'}>{m.isRemake ? 'Remake' : enemies[0]?.win ? 'Victory' : 'Defeat'}</span>{' '}
+              <span className="mut" style={{ fontWeight: 400 }}>({enemySide} side)</span>
+            </h2>
+            <div className="rune-grid">
+              {enemies.map(p => <RunePage key={p.participantId} p={p} />)}
+            </div>
+          </div>
+        </>
       )}
 
       {tab === 'timeline' && (
@@ -648,12 +736,15 @@ export default function MatchDetail() {
                   </thead>
                   <tbody>
                     {deaths.map(d => (
-                      <tr key={d.timeSec}>
+                      <Fragment key={d.timeSec}>
+                      <tr style={{ cursor: 'pointer' }} title="Click for the death recap"
+                        onClick={() => setRecapAt(recapAt === d.timeSec ? null : d.timeSec)}>
                         <td className="num">
+                          <span className="disclosure">{recapAt === d.timeSec ? '▾' : '▸'}</span>
                           {d.gameTime}
                           {clipFor(d.timeSec) && (
                             <button className="action" style={{ marginLeft: 6, padding: '0 6px' }}
-                              title="Watch this death" onClick={() => playMoment(d.timeSec)}>▶</button>
+                              title="Watch this death" onClick={e => { e.stopPropagation(); playMoment(d.timeSec) }}>▶</button>
                           )}
                         </td>
                         <td className="mut">{d.zone || '—'}</td>
@@ -676,6 +767,16 @@ export default function MatchDetail() {
                         <td className="num">{d.myLevel ?? '—'}</td>
                         <td className="num">{d.myTotalGold?.toLocaleString() ?? '—'}</td>
                       </tr>
+                      {recapAt === d.timeSec && (
+                        <tr className="drill">
+                          <td colSpan={10}>
+                            {d.damageInstances.length > 0
+                              ? <DeathRecap d={d} />
+                              : <span className="mut">No damage detail recorded for this death.</span>}
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -699,11 +800,13 @@ export default function MatchDetail() {
                   </thead>
                   <tbody>
                     {detail.objectives.map(o => (
-                      <tr key={`${o.timeSec}-${o.kind}`}>
+                      <tr key={`${o.timeSec}-${o.kind}`} className={o.byMyTeam ? 'obj-row-win' : 'obj-row-loss'}>
                         <td className="num">{o.gameTime}</td>
-                        <td>{o.kind}{o.subKind && <span className="mut"> {o.subKind}</span>}</td>
+                        <td><span className={`obj-kind ${OBJ_KIND_CLASS[o.kind] ?? ''}`}>{objectiveLabel(o.kind, o.subKind)}</span></td>
                         <td className={o.byMyTeam ? 'win' : 'loss'}>{o.byMyTeam ? 'My team' : 'Enemy'}</td>
-                        <td>{o.killer ?? <span className="mut">—</span>}</td>
+                        <td>{o.killer
+                          ? <span className="sb-player" style={{ gap: 7 }}><ChampIcon name={o.killer} size={22} />{o.killer}</span>
+                          : <span className="mut">—</span>}</td>
                       </tr>
                     ))}
                   </tbody>
