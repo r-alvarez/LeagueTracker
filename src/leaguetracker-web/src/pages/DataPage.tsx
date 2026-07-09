@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import type { JobStatus, Status } from '../types'
+import type { JobStatus, RenderQueueRow, Status } from '../types'
 
 export default function DataPage() {
   const [status, setStatus] = useState<Status | null>(null)
   const [job, setJob] = useState<JobStatus | null>(null)
+  const [renderQueue, setRenderQueue] = useState<RenderQueueRow[]>([])
   // In the Docker deployment backup folders are mounted read-only at
   // /imports (see docker-compose.override.yml); host runs use Windows paths.
   const [importPath, setImportPath] = useState('/imports')
@@ -12,6 +13,7 @@ export default function DataPage() {
 
   useEffect(() => {
     api.status().then(s => { setStatus(s); setJob(s.job) }).catch(console.error)
+    api.renderQueue().then(setRenderQueue).catch(() => setRenderQueue([]))
     return () => { if (pollTimer.current) window.clearInterval(pollTimer.current) }
   }, [])
 
@@ -98,6 +100,28 @@ export default function DataPage() {
           Reprocess all games
         </button>
       </div>
+
+      {renderQueue.length > 0 && (
+        <div className="card">
+          <h2>Clip rendering</h2>
+          <p className="mut" style={{ marginTop: 0 }}>
+            Each archived replay gets its kill/death moments cut into mp4 clips by the render agent on the gaming PC
+            (it drives the game client's replay mode). Clips appear on the match pages as they land.
+          </p>
+          <p style={{ margin: 0 }}>
+            {(['pending', 'rendering', 'done', 'failed'] as const).map(s => {
+              const n = renderQueue.filter(r => r.status === s).length
+              return n > 0 ? <span key={s} style={{ marginRight: 14 }}><strong>{n}</strong> {s}</span> : null
+            })}
+            {renderQueue.every(r => r.status === 'no-events') && <span className="mut">nothing to render yet</span>}
+          </p>
+          {renderQueue.some(r => r.status === 'failed') && (
+            <p className="mut sm-text" style={{ marginBottom: 0 }}>
+              failed: {renderQueue.filter(r => r.status === 'failed').map(r => `${r.matchId} (${r.error})`).join(', ')}
+            </p>
+          )}
+        </div>
+      )}
 
       {job && (job.running || job.message) && (
         <div className="card">
