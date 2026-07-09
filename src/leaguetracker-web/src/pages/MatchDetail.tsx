@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
-import type { DeathEvent, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts } from '../types'
+import type { ClipInfo, DeathEvent, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts } from '../types'
 import { STAT_SHARDS, useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
 
@@ -419,15 +419,33 @@ function RunePage({ p }: { p: Participant }) {
   )
 }
 
+const fmtClock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
+
 export default function MatchDetail() {
   const { id } = useParams()
   const [detail, setDetail] = useState<Detail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('general')
+  const [clips, setClips] = useState<ClipInfo[]>([])
+  const clipRefs = useRef<Record<number, HTMLVideoElement | null>>({})
 
   useEffect(() => {
-    if (id) api.match(id).then(setDetail).catch(e => setError(String(e)))
+    if (!id) return
+    api.match(id).then(setDetail).catch(e => setError(String(e)))
+    api.clips(id).then(setClips).catch(() => setClips([]))
   }, [id])
+
+  // Jump the covering clip to ~5s before the moment and play it.
+  const playMoment = (timeSec: number) => {
+    const clip = clips.find(c => c.ready && timeSec >= c.startSec && timeSec <= c.endSec)
+    const el = clip ? clipRefs.current[clip.index] : null
+    if (!el) return
+    el.currentTime = Math.max(0, timeSec - (clip?.startSec ?? 0) - 5)
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    void el.play()
+  }
+
+  const clipFor = (timeSec: number) => clips.find(c => c.ready && timeSec >= c.startSec && timeSec <= c.endSec)
 
   if (error) return <div className="empty">Failed to load match: {error}</div>
   if (!detail) return <div className="empty">Loading…</div>
@@ -484,6 +502,39 @@ export default function MatchDetail() {
         )}
       </div>
 
+      {clips.length > 0 && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <h2>
+            Clips <span className="mut" style={{ fontWeight: 400 }}>— your kills & deaths, rendered from the official replay</span>
+          </h2>
+          {clips.every(c => !c.ready) ? (
+            <p className="mut" style={{ margin: 0 }}>
+              {clips.length} fight window{clips.length === 1 ? '' : 's'} planned — waiting for the render agent on the gaming PC.
+            </p>
+          ) : (
+            <div className="grid two-col">
+              {clips.map(c => (
+                <div key={c.index}>
+                  <div className="sub-h" style={{ marginTop: 0 }}>
+                    {c.label} · {fmtClock(c.startSec)}–{fmtClock(c.endSec)}
+                    <span className="mut"> · {c.events.map(e => `${e.kind} ${fmtClock(e.timeSec)}`).join(', ')}</span>
+                  </div>
+                  {c.ready ? (
+                    <video
+                      ref={el => { clipRefs.current[c.index] = el }}
+                      src={c.url} controls preload="metadata"
+                      style={{ width: '100%', borderRadius: 8, background: '#000' }}
+                    />
+                  ) : (
+                    <div className="empty">queued for render</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="filters">
         <div className="seg" role="tablist" aria-label="Match view">
           {(['general', 'details', 'runes', 'timeline'] as Tab[]).map(t => (
@@ -530,7 +581,13 @@ export default function MatchDetail() {
                   <tbody>
                     {deaths.map(d => (
                       <tr key={d.timeSec}>
-                        <td className="num">{d.gameTime}</td>
+                        <td className="num">
+                          {d.gameTime}
+                          {clipFor(d.timeSec) && (
+                            <button className="action" style={{ marginLeft: 6, padding: '0 6px' }}
+                              title="Watch this death" onClick={() => playMoment(d.timeSec)}>▶</button>
+                          )}
+                        </td>
                         <td className="mut">{d.zone || '—'}</td>
                         <td>
                           {d.killedBy}{d.assistedBy && <span className="mut"> +{d.assistedBy}</span>}

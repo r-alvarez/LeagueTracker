@@ -1,4 +1,4 @@
-import type { AnalyticsSummary, ChallengeBenchmark, JobStatus, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchPage, Stats, Status } from './types'
+import type { AnalyticsSummary, ChallengeBenchmark, ClipInfo, JobStatus, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchPage, RenderQueueRow, Stats, Status } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const resp = await fetch(url)
@@ -17,6 +17,8 @@ export const api = {
   matches: (page: number, pageSize: number, ranked?: boolean) =>
     get<MatchPage>(`/api/matches?page=${page}&pageSize=${pageSize}${ranked === undefined ? '' : `&ranked=${ranked}`}`),
   match: (id: string) => get<MatchDetail>(`/api/matches/${id}`),
+  clips: (id: string) => get<ClipInfo[]>(`/api/matches/${id}/clips`),
+  renderQueue: () => get<RenderQueueRow[]>('/api/render/queue'),
   lpHistory: (queue: string) => get<LpPoint[]>(`/api/lp/history?queue=${encodeURIComponent(queue)}`),
   lpPerGame: () => get<LpPerGame[]>('/api/lp/per-game'),
   jobStatus: () => get<JobStatus>('/api/jobs/status'),

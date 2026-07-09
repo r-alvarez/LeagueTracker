@@ -350,6 +350,29 @@ export interface ChallengeBenchmark {
   challenges: ChallengeRow[]
 }
 
+export interface ClipEvent {
+  kind: 'kill' | 'death'
+  timeSec: number
+}
+
+export interface ClipInfo {
+  index: number
+  label: string
+  startSec: number
+  endSec: number
+  events: ClipEvent[]
+  url: string
+  ready: boolean
+}
+
+export interface RenderQueueRow {
+  matchId: string
+  champion: string
+  gameEndUtc: string
+  status: 'pending' | 'rendering' | 'done' | 'failed' | 'no-events'
+  error: string | null
+}
+
 export interface LiveParticipant {
   championId: number
   teamId: number

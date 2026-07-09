@@ -138,3 +138,23 @@ on the existing percentiles payload** (one extra cached-7d call to
 A separate leaderboards-per-challenge endpoint exists but costs a call per
 challenge; rejected as 200+ calls for context the aggregate distribution
 already gives. A missing distribution degrades the row, never hides it.
+
+## 2026-07-09 — Clip pipeline (server side)
+
+**No RenderJobs table.** Job state derives from files, consistent with the
+db-as-disposable-index rule: pending = replay archived + kill/death windows
+plannable + no mp4s; done = mp4s exist; failed = render-failed.json marker;
+rendering = in-memory lease (RenderLeaseService, 30-min expiry, deliberately
+not persisted — a restart re-offers the job and uploads are idempotent by
+window index). The plan manifest (plan.json) is written into the clip folder
+at claim time so the clip list survives db rebuilds.
+
+**Windows come from the KillEvents table, not timeline re-parsing** — kills
+and deaths of the tracked player, [t-20s, t+10s], overlapping windows merged
+so a kill followed by a death is one "fight" clip. Assists deliberately
+excluded from v1 (would clip every teamfight; revisit if wanted).
+
+**Agent protocol is pull-based over plain HTTP** (POST /api/render/next,
+PUT clips, complete/fail) because the agent sits on the gaming PC behind NAT
+and the tracker moves to TrueNAS — outbound-only from the PC, no inbound
+holes. Upload body cap lifted per-endpoint (512MB), not globally.
