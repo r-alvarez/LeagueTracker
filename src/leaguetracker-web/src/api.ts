@@ -20,7 +20,8 @@ export const api = {
   lpHistory: (queue: string) => get<LpPoint[]>(`/api/lp/history?queue=${encodeURIComponent(queue)}`),
   lpPerGame: () => get<LpPerGame[]>('/api/lp/per-game'),
   jobStatus: () => get<JobStatus>('/api/jobs/status'),
-  syncHistory: (rankedTarget: number) => post<JobStatus>(`/api/sync/history?rankedTarget=${rankedTarget}`),
+  // No params = the whole thing: pages Riot's match list until it runs dry, all queues.
+  syncHistory: () => post<JobStatus>('/api/sync/history'),
   importFolder: (path: string) => post<JobStatus>(`/api/import?path=${encodeURIComponent(path)}`),
   analytics: (lastN: number) => get<AnalyticsSummary>(`/api/analytics/summary?lastN=${lastN}`),
   challengePercentiles: async (): Promise<ChallengeBenchmark | null> => {

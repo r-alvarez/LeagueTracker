@@ -5,10 +5,9 @@ import type { JobStatus, Status } from '../types'
 export default function DataPage() {
   const [status, setStatus] = useState<Status | null>(null)
   const [job, setJob] = useState<JobStatus | null>(null)
-  const [rankedTarget, setRankedTarget] = useState('250')
-  // In the Docker deployment old export folders are mounted read-only at
+  // In the Docker deployment backup folders are mounted read-only at
   // /imports (see docker-compose.override.yml); host runs use Windows paths.
-  const [importPath, setImportPath] = useState('/imports/export-20260610-082650')
+  const [importPath, setImportPath] = useState('/imports')
   const pollTimer = useRef<number | null>(null)
 
   useEffect(() => {
@@ -29,7 +28,7 @@ export default function DataPage() {
   }
 
   const startSync = async () => {
-    setJob(await api.syncHistory(parseInt(rankedTarget, 10) || 0))
+    setJob(await api.syncHistory())
     pollJob()
   }
 
@@ -55,31 +54,33 @@ export default function DataPage() {
       <div className="card">
         <h2>Live capture</h2>
         <p className="mut" style={{ marginTop: 0 }}>
-          Runs automatically in the background: every couple of minutes the tracker checks for finished games and captures
-          the match, timeline, everyone's rank at game time, and your exact LP change.
+          Runs automatically in the background. The tracker spots your game while it's still being played (that's the
+          banner up top), and the moment it ends switches to a fast cadence so the match, timeline, everyone's rank at
+          game time, your exact LP change <em>and the official replay file</em> are captured within seconds.
         </p>
         <p>
-          Tracking <strong>{status?.riotId ?? '…'}</strong> · {status?.matches ?? 0} games · {status?.lpSnapshots ?? 0} LP snapshots
+          Tracking <strong>{status?.riotId ?? '…'}</strong> · {status?.matches ?? 0} games · {status?.lpSnapshots ?? 0} LP
+          snapshots · {status?.replays ?? 0} replays archived
         </p>
       </div>
 
       <div className="card">
-        <h2>Backfill match history</h2>
+        <h2>Sync full match history</h2>
         <p className="mut" style={{ marginTop: 0 }}>
-          Downloads your most recent ranked games (match + timeline + current ranks) that aren't stored yet.
-          Note: ranks attached to old games are the players' ranks <em>now</em>, not at game time.
+          Pages through everything Riot still serves for this account (all queues, match + timeline) and downloads
+          whatever isn't stored yet - already-stored games are skipped, so re-running is cheap and safe.
+          Note: ranks attached to backfilled games are the players' ranks <em>now</em>, not at game time; only live
+          capture gets at-game-time ranks.
         </p>
-        <div className="filters" style={{ margin: 0 }}>
-          <input className="text" value={rankedTarget} onChange={e => setRankedTarget(e.target.value)} aria-label="Ranked games to fetch" />
-          <button className="action" onClick={startSync} disabled={job?.running === true}>Sync ranked history</button>
-        </div>
+        <button className="action" onClick={startSync} disabled={job?.running === true}>Sync everything</button>
       </div>
 
       <div className="card">
-        <h2>Import PowerShell exports</h2>
+        <h2>Restore from raw game files</h2>
         <p className="mut" style={{ marginTop: 0 }}>
-          Points at an export folder (or the live watcher folder). Games, deaths, the LP ledger and per-game LP
-          are all carried over; already-imported games are skipped.
+          The database is just an index - the raw per-game JSON files are the source of truth. Point this at a backup
+          of a <code>games</code> folder (or an old PowerShell-exporter folder; same format) to rebuild games, deaths
+          and the LP ledger without touching the Riot API. Already-imported games are skipped.
         </p>
         <div className="filters" style={{ margin: 0 }}>
           <input className="text" style={{ flex: 1 }} value={importPath} onChange={e => setImportPath(e.target.value)} aria-label="Folder to import" />
