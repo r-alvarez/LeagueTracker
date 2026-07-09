@@ -40,7 +40,7 @@ export default function Matches() {
               <th>Date</th><th>Champion</th><th>Result</th><th>vs</th>
               <th className="num">K/D/A</th><th className="num">KP</th>
               <th className="num">CS@10</th><th className="num">G@10</th><th>Build</th><th className="num">Min</th>
-              <th>Avg enemy rank</th><th className="num">LP</th>
+              <th>Avg enemy rank</th><th className="num">LP</th><th></th>
             </tr>
           </thead>
           <tbody>
@@ -86,6 +86,12 @@ export default function Matches() {
                 <td className="num">{m.durationMin.toFixed(0)}</td>
                 <td>{m.avgEnemyRank ?? <span className="mut">—</span>}</td>
                 <td className="num">{m.lpChange !== null ? <span className={m.lpChange >= 0 ? 'win' : 'loss'}>{m.lpChange >= 0 ? '+' : ''}{m.lpChange}</span> : <span className="mut">—</span>}</td>
+                <td>
+                  {m.hasReplay && (
+                    <a href={`/api/matches/${m.id}/replay`} download onClick={e => e.stopPropagation()}
+                      title="Download replay (.rofl — plays in the client while this patch is live)">⬇︎</a>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
