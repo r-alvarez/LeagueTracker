@@ -26,6 +26,7 @@ export interface Status {
   rankedMatches: number
   deaths: number
   lpSnapshots: number
+  replays: number
   patches: string[]
   dateFrom: string | null
   dateTo: string | null

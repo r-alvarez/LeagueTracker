@@ -79,7 +79,7 @@ app.UseStaticFiles();
 
 // --- Status ---------------------------------------------------------------------
 
-app.MapGet("/api/status", async (LeagueDbContext db, LpService lp, TrackedPlayerService player, IRiotKeyProvider keys, JobStatusService jobs, CancellationToken ct) =>
+app.MapGet("/api/status", async (LeagueDbContext db, LpService lp, TrackedPlayerService player, IRiotKeyProvider keys, JobStatusService jobs, ReplayArchiveService replays, CancellationToken ct) =>
 {
     var solo = await lp.GetLatestAsync("Solo/Duo", ct);
     var flex = await lp.GetLatestAsync("Flex", ct);
@@ -92,6 +92,7 @@ app.MapGet("/api/status", async (LeagueDbContext db, LpService lp, TrackedPlayer
         RankedMatches = await db.Matches.CountAsync(m => m.IsRanked, ct),
         Deaths = await db.Deaths.CountAsync(ct),
         LpSnapshots = await db.LpSnapshots.CountAsync(ct),
+        Replays = replays.ArchivedMatchIds().Count,
         Patches = await Reports.PatchesAsync(db, ct),
         DateFrom = hasMatches ? (await db.Matches.MinAsync(m => m.GameCreationUtc, ct)).ToLocalTime().ToString("yyyy-MM-dd") : null,
         DateTo = hasMatches ? (await db.Matches.MaxAsync(m => m.GameCreationUtc, ct)).ToLocalTime().ToString("yyyy-MM-dd") : null,
