@@ -42,6 +42,34 @@ public sealed class RiotApiClient(HttpClient http, IOptions<RiotOptions> options
     public Task<string> GetChallengesConfigRawAsync(CancellationToken ct) =>
         GetStringAsync($"{PlatformBase}/lol/challenges/v1/challenges/config", ct);
 
+    /// Per-challenge share of the playerbase at each level (id -> level -> fraction).
+    /// Ladder-wide, so it moves slowly; cache it like the config.
+    public Task<string> GetChallengesAllPercentilesRawAsync(CancellationToken ct) =>
+        GetStringAsync($"{PlatformBase}/lol/challenges/v1/challenges/percentiles", ct);
+
+    /// The game the player is in right now, or null - spectator 404s between games.
+    public async Task<string?> GetActiveGameRawAsync(string puuid, CancellationToken ct)
+    {
+        try
+        {
+            return await GetStringAsync($"{PlatformBase}/lol/spectator/v5/active-games/by-summoner/{puuid}", ct);
+        }
+        catch (RiotApiException ex) when (ex.StatusCode is 404)
+        {
+            return null;
+        }
+    }
+
+    /// Pre-signed download URLs for the .rofl files of the player's most recent
+    /// games (Riot serves only the last ~5, and the links expire after an hour).
+    public async Task<List<string>> GetReplayUrlsAsync(string puuid, CancellationToken ct)
+    {
+        var raw = await GetStringAsync($"{RegionalBase}/lol/match/v5/matches/by-puuid/{puuid}/replays", ct);
+        using var doc = JsonDocument.Parse(raw);
+        if (!doc.RootElement.TryGetProperty("matchFileURLs", out var urls)) return [];
+        return [.. urls.EnumerateArray().Select(u => u.GetString()).OfType<string>()];
+    }
+
     private async Task<string> GetStringAsync(string url, CancellationToken ct)
     {
         using var resp = await http.GetAsync(url, ct);
