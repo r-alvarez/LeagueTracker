@@ -456,6 +456,13 @@ export default function MatchDetail() {
             {m.kills}/{m.deaths}/{m.assists} · {m.durationMin.toFixed(0)} min · {m.cs} CS
             {m.opponentChampion && ` · vs ${m.opponentChampion}`}
             {m.laneGoldDiff10 !== null && ` · ${m.laneGoldDiff10 > 0 ? '+' : ''}${m.laneGoldDiff10}g @10`}
+            {m.hasReplay && (
+              <>
+                {' · '}
+                <a href={`/api/matches/${m.id}/replay`} download
+                  title="Official .rofl — plays in the client while this patch is live">watch replay ⬇︎</a>
+              </>
+            )}
           </div>
         </div>
         <div className="card tile">
