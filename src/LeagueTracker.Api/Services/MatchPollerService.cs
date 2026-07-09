@@ -21,6 +21,7 @@ public sealed class MatchPollerService(
 
     private readonly RiotOptions _options = options.Value;
     private bool _firstPass = true;
+    private DateTime _lastRetentionSweepUtc = DateTime.MinValue;
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -94,6 +95,14 @@ public sealed class MatchPollerService(
         var puuid = await player.GetPuuidAsync(ct);
 
         await CheckLiveGameAsync(puuid, riot, ct);
+
+        // Full-game renders are big; expire unkept ones on a slow cadence.
+        if (DateTime.UtcNow - _lastRetentionSweepUtc > TimeSpan.FromHours(6))
+        {
+            _lastRetentionSweepUtc = DateTime.UtcNow;
+            var swept = scope.ServiceProvider.GetRequiredService<FullGameService>().SweepRetention(_options.FullGameRetentionDays);
+            if (swept > 0) logger.LogInformation("Retention: deleted {Count} unkept full-game render(s) older than {Days} days", swept, _options.FullGameRetentionDays);
+        }
 
         // Service (re)start: grab whatever of the last games' replays is still on
         // offer - the window is ~5 games, so an offline stretch can't be recovered later.

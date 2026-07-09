@@ -36,6 +36,7 @@ builder.Services.AddScoped<AnalyticsReprocessService>();
 builder.Services.AddScoped<ChallengesBenchmarkService>();
 builder.Services.AddScoped<ReplayArchiveService>();
 builder.Services.AddScoped<ClipService>();
+builder.Services.AddScoped<FullGameService>();
 builder.Services.AddSingleton<RenderLeaseService>();
 builder.Services.AddSingleton<LiveGameState>();
 builder.Services.AddHostedService<MatchPollerService>();
@@ -179,17 +180,73 @@ app.MapGet("/api/matches/{id}/clips/{index:int}", (string id, int index, ClipSer
         ? Results.File(path, "video/mp4", enableRangeProcessing: true)
         : Results.NotFound());
 
+// --- Full-game renders (opt-in per match; retention-swept unless kept) ----------
+
+app.MapGet("/api/matches/{id}/fullgame/status", (string id, FullGameService full, RenderLeaseService leases) =>
+    Results.Ok(full.Status(id, leases)));
+
+app.MapGet("/api/matches/{id}/fullgame", (string id, FullGameService full) =>
+    full.VideoPath(id) is { } path
+        ? Results.File(path, "video/mp4", enableRangeProcessing: true)
+        : Results.NotFound());
+
+app.MapPost("/api/matches/{id}/fullgame", (string id, FullGameService full, RenderLeaseService leases) =>
+    full.Request(id) is { } error
+        ? Results.BadRequest(new { error })
+        : Results.Ok(full.Status(id, leases)));
+
+app.MapPost("/api/matches/{id}/fullgame/keep", (string id, FullGameService full, RenderLeaseService leases) =>
+{
+    full.ToggleKeep(id);
+    return Results.Ok(full.Status(id, leases));
+});
+
+app.MapDelete("/api/matches/{id}/fullgame", (string id, FullGameService full) =>
+{
+    full.Delete(id);
+    return Results.Ok();
+});
+
+// Disk usage per artifact family - keeps the storage cost of renders visible.
+app.MapGet("/api/storage", (DataPaths paths) =>
+{
+    static double DirMb(string dir) => Directory.Exists(dir)
+        ? Math.Round(Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length) / 1024.0 / 1024.0, 1)
+        : 0;
+    return Results.Ok(new
+    {
+        RawGamesMb = DirMb(Path.Combine(paths.DataDir, "games")),
+        ReplaysMb = DirMb(Path.Combine(paths.DataDir, "replays")),
+        ClipsMb = DirMb(Path.Combine(paths.DataDir, "clips")),
+        FullGamesMb = DirMb(Path.Combine(paths.DataDir, "fullgames")),
+        DatabaseMb = File.Exists(Path.Combine(paths.DataDir, "leaguetracker.db"))
+            ? Math.Round(new FileInfo(Path.Combine(paths.DataDir, "leaguetracker.db")).Length / 1024.0 / 1024.0, 1)
+            : 0,
+    });
+});
+
 // --- Render jobs (served to the render agent on the gaming PC) -------------------
 
-app.MapGet("/api/render/queue", async (ClipService clips, RenderLeaseService leases, CancellationToken ct) =>
-    Results.Ok(await clips.QueueAsync(leases, ct)));
+app.MapGet("/api/render/queue", async (ClipService clips, FullGameService full, RenderLeaseService leases, CancellationToken ct) =>
+    Results.Ok((await clips.QueueAsync(leases, ct)).Concat(await full.QueueRowsAsync(leases, ct))));
 
-// Claim the newest renderable match: replay archived, kill/death windows planned,
-// no clips yet, not failed, not already claimed. The plan manifest is written at
-// claim time so uploads can be validated against it.
-app.MapPost("/api/render/next", async (ClipService clips, RenderLeaseService leases, ReplayArchiveService replays,
-    LeagueDbContext db, string agent = "render-agent", CancellationToken ct = default) =>
+// Claim the next renderable job. Clip jobs first (cheap, automatic, serve the
+// review loop), then explicit full-game requests. The plan manifest is written
+// at claim time so uploads can be validated against it.
+app.MapPost("/api/render/next", async (ClipService clips, FullGameService full, RenderLeaseService leases,
+    ReplayArchiveService replays, LeagueDbContext db, string agent = "render-agent", CancellationToken ct = default) =>
 {
+    // The agent locks the replay camera onto this player (names as they were at
+    // game time, from the stored participant row).
+    async Task<(string? Name, string? Champion)> CameraTargetAsync(string matchId)
+    {
+        var me = await db.Participants.AsNoTracking()
+            .Where(p => p.MatchId == matchId && p.IsMe)
+            .Select(p => new { p.RiotId, p.Champion })
+            .FirstOrDefaultAsync(ct);
+        return (me?.RiotId is { Length: > 0 } riotId ? riotId.Split('#')[0] : null, me?.Champion);
+    }
+
     var archived = replays.ArchivedMatchIds();
     var candidates = await db.Matches.AsNoTracking()
         .Where(m => archived.Contains(m.Id) && m.HasTimeline)
@@ -199,28 +256,58 @@ app.MapPost("/api/render/next", async (ClipService clips, RenderLeaseService lea
 
     foreach (var matchId in candidates)
     {
-        if (clips.HasClips(matchId) || clips.FailReason(matchId) is not null || leases.IsLeased(matchId)) continue;
+        if (clips.HasClips(matchId) || clips.FailReason(matchId) is not null || leases.IsLeased($"clips:{matchId}")) continue;
         if (await clips.PlanAsync(matchId, ct) is not { Windows.Count: > 0 } plan) continue;
-        if (!leases.TryClaim(matchId, agent)) continue;
+        if (!leases.TryClaim($"clips:{matchId}", agent)) continue;
         await clips.SavePlanAsync(plan, ct);
-
-        // The agent locks the replay camera onto this player (names as they were
-        // at game time, from the stored participant row).
-        var me = await db.Participants.AsNoTracking()
-            .Where(p => p.MatchId == matchId && p.IsMe)
-            .Select(p => new { p.RiotId, p.Champion })
-            .FirstOrDefaultAsync(ct);
-
+        var (myName, myChampion) = await CameraTargetAsync(matchId);
         return Results.Ok(new
         {
+            Kind = "clips",
             plan.MatchId, plan.GameVersion, plan.DurationSec,
             ReplayUrl = $"/api/matches/{plan.MatchId}/replay",
-            MyName = me?.RiotId is { Length: > 0 } riotId ? riotId.Split('#')[0] : null,
-            MyChampion = me?.Champion,
+            MyName = myName,
+            MyChampion = myChampion,
             plan.Windows,
         });
     }
+
+    foreach (var matchId in full.PendingRequests())
+    {
+        if (!archived.Contains(matchId) || leases.IsLeased($"full:{matchId}")) continue;
+        var match = await db.Matches.AsNoTracking().FirstOrDefaultAsync(m => m.Id == matchId, ct);
+        if (match is null || !leases.TryClaim($"full:{matchId}", agent)) continue;
+        var (myName, myChampion) = await CameraTargetAsync(matchId);
+        return Results.Ok(new
+        {
+            Kind = "full",
+            MatchId = matchId, match.GameVersion, match.DurationSec,
+            ReplayUrl = $"/api/matches/{matchId}/replay",
+            MyName = myName,
+            MyChampion = myChampion,
+            Windows = new[] { new ClipWindow(0, 0, (int)match.DurationSec, "full", []) },
+        });
+    }
+
     return Results.NoContent();
+});
+
+app.MapPut("/api/render/{matchId}/full", async (string matchId, HttpRequest request, FullGameService full, CancellationToken ct) =>
+{
+    if (full.VideoTargetPath(matchId) is not { } target) return Results.NotFound();
+
+    // A full game runs to ~500MB; lift the body cap accordingly.
+    request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
+        .MaxRequestBodySize = 4L * 1024 * 1024 * 1024;
+
+    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+    var temp = target + ".tmp";
+    await using (var file = File.Create(temp))
+    {
+        await request.Body.CopyToAsync(file, ct);
+    }
+    File.Move(temp, target, overwrite: true);
+    return Results.Ok(new { bytes = new FileInfo(target).Length });
 });
 
 app.MapPut("/api/render/{matchId}/clips/{index:int}", async (string matchId, int index, HttpRequest request, ClipService clips, CancellationToken ct) =>
@@ -243,26 +330,30 @@ app.MapPut("/api/render/{matchId}/clips/{index:int}", async (string matchId, int
     return Results.Ok(new { index, bytes = new FileInfo(target).Length });
 });
 
-app.MapPost("/api/render/{matchId}/complete", (string matchId, RenderLeaseService leases, ClipService clips) =>
+app.MapPost("/api/render/{matchId}/complete", (string matchId, RenderLeaseService leases, ClipService clips, FullGameService full, string kind = "clips") =>
 {
-    clips.ClearFailed(matchId);
-    leases.Release(matchId);
+    if (kind is "full") full.CompleteRequest(matchId);
+    else clips.ClearFailed(matchId);
+    leases.Release($"{kind}:{matchId}");
     return Results.Ok();
 });
 
-app.MapPost("/api/render/{matchId}/fail", async (string matchId, HttpRequest request, RenderLeaseService leases, ClipService clips, CancellationToken ct) =>
+app.MapPost("/api/render/{matchId}/fail", async (string matchId, HttpRequest request, RenderLeaseService leases, ClipService clips, FullGameService full, string kind = "clips", CancellationToken ct = default) =>
 {
     using var reader = new StreamReader(request.Body);
     var error = await reader.ReadToEndAsync(ct);
-    await clips.MarkFailedAsync(matchId, error is { Length: > 0 } ? error.Trim() : "unknown", ct);
-    leases.Release(matchId);
+    error = error is { Length: > 0 } ? error.Trim() : "unknown";
+    if (kind is "full") full.MarkFailed(matchId, error);
+    else await clips.MarkFailedAsync(matchId, error, ct);
+    leases.Release($"{kind}:{matchId}");
     return Results.Ok();
 });
 
 // Clears the failed marker so the agent picks the match up again.
-app.MapPost("/api/render/{matchId}/retry", (string matchId, ClipService clips) =>
+app.MapPost("/api/render/{matchId}/retry", (string matchId, ClipService clips, FullGameService full, string kind = "clips") =>
 {
-    clips.ClearFailed(matchId);
+    if (kind is "full") full.Request(matchId);
+    else clips.ClearFailed(matchId);
     return Results.Ok();
 });
 

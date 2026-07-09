@@ -182,3 +182,25 @@ pacing disappoints; the seam is one method (CaptureAsync).
 **The agent trusts the server for camera identity** (/api/render/next carries
 MyName/MyChampion from the at-game-time participant row) because current
 Riot ID can drift from the name recorded in the replay.
+
+## 2026-07-09 — Full-game renders
+
+**Full-game renders are opt-in per match, never automatic** — at ~6 games/day,
+auto-rendering would cost ~1TB/year and ~3h/day of gaming-PC render time for
+games mostly never rewatched; clips stay the automatic tier. The storage
+policy IS the button. Guardrails: retention sweep deletes unkept renders
+after FullGameRetentionDays (default 60, poller-driven every 6h; clips are
+exempt - small enough to keep forever), and /api/storage keeps the per-family
+disk usage visible on the Data page.
+
+**Same files-as-truth pattern as clips**: {matchId}.requested queues,
+.mp4 is the result, .keep exempts from retention, .failed.json blocks
+retries. Lease keys are kind-prefixed (clips:X / full:X) so the two job
+kinds never block each other. A full-game job reuses the agent's window
+machinery verbatim: it is one window from 0 to game end - the agent needed
+only kind-aware upload/complete routing.
+
+**Interactive replayit-style live streaming (camera switching mid-watch) was
+evaluated and parked**: an mp4 in <video> natively covers pause/seek/speed;
+the only capability lost is changing the camera target after render, which
+does not justify HLS streaming + a control relay for a single-user tool.

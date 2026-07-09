@@ -1,4 +1,4 @@
-import type { AnalyticsSummary, ChallengeBenchmark, ClipInfo, JobStatus, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchPage, RenderQueueRow, Stats, Status } from './types'
+import type { AnalyticsSummary, ChallengeBenchmark, ClipInfo, FullGameStatus, JobStatus, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchPage, RenderQueueRow, Stats, StorageInfo, Status } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const resp = await fetch(url)
@@ -19,6 +19,12 @@ export const api = {
   match: (id: string) => get<MatchDetail>(`/api/matches/${id}`),
   clips: (id: string) => get<ClipInfo[]>(`/api/matches/${id}/clips`),
   renderQueue: () => get<RenderQueueRow[]>('/api/render/queue'),
+  fullGameStatus: (id: string) => get<FullGameStatus>(`/api/matches/${id}/fullgame/status`),
+  requestFullGame: (id: string) => post<FullGameStatus>(`/api/matches/${id}/fullgame`),
+  toggleFullGameKeep: (id: string) => post<FullGameStatus>(`/api/matches/${id}/fullgame/keep`),
+  deleteFullGame: async (id: string) => { await fetch(`/api/matches/${id}/fullgame`, { method: 'DELETE' }) },
+  retryRender: async (id: string, kind: 'clips' | 'full') => { await fetch(`/api/render/${id}/retry?kind=${kind}`, { method: 'POST' }) },
+  storage: () => get<StorageInfo>('/api/storage'),
   lpHistory: (queue: string) => get<LpPoint[]>(`/api/lp/history?queue=${encodeURIComponent(queue)}`),
   lpPerGame: () => get<LpPerGame[]>('/api/lp/per-game'),
   jobStatus: () => get<JobStatus>('/api/jobs/status'),

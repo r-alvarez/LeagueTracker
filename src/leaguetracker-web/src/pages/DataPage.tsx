@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import type { JobStatus, RenderQueueRow, Status } from '../types'
+import type { JobStatus, RenderQueueRow, Status, StorageInfo } from '../types'
 
 export default function DataPage() {
   const [status, setStatus] = useState<Status | null>(null)
   const [job, setJob] = useState<JobStatus | null>(null)
   const [renderQueue, setRenderQueue] = useState<RenderQueueRow[]>([])
+  const [storage, setStorage] = useState<StorageInfo | null>(null)
   // In the Docker deployment backup folders are mounted read-only at
   // /imports (see docker-compose.override.yml); host runs use Windows paths.
   const [importPath, setImportPath] = useState('/imports')
@@ -14,6 +15,7 @@ export default function DataPage() {
   useEffect(() => {
     api.status().then(s => { setStatus(s); setJob(s.job) }).catch(console.error)
     api.renderQueue().then(setRenderQueue).catch(() => setRenderQueue([]))
+    api.storage().then(setStorage).catch(() => setStorage(null))
     return () => { if (pollTimer.current) window.clearInterval(pollTimer.current) }
   }, [])
 
@@ -120,6 +122,24 @@ export default function DataPage() {
               failed: {renderQueue.filter(r => r.status === 'failed').map(r => `${r.matchId} (${r.error})`).join(', ')}
             </p>
           )}
+        </div>
+      )}
+
+      {storage && (
+        <div className="card">
+          <h2>Storage</h2>
+          <p className="mut" style={{ marginTop: 0 }}>
+            What the tracker's data folder holds. Clips are small and permanent; full-game renders are the heavy tier
+            and expire automatically unless marked keep on their match page.
+          </p>
+          <p style={{ margin: 0 }}>
+            {([['raw games', storage.rawGamesMb], ['replays', storage.replaysMb], ['clips', storage.clipsMb],
+              ['full games', storage.fullGamesMb], ['database', storage.databaseMb]] as const).map(([label, mb]) => (
+              <span key={label} style={{ marginRight: 16 }}>
+                <strong>{mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`}</strong> <span className="mut">{label}</span>
+              </span>
+            ))}
+          </p>
         </div>
       )}
 

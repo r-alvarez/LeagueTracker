@@ -8,8 +8,11 @@ public sealed record ClipEvent(string Kind, int TimeSec);
 public sealed record ClipWindow(int Index, int StartSec, int EndSec, string Label, List<ClipEvent> Events);
 
 public sealed record RenderJob(
-    string MatchId, string GameVersion, double DurationSec, string ReplayUrl,
-    string? MyName, string? MyChampion, List<ClipWindow> Windows);
+    string Kind, string MatchId, string GameVersion, double DurationSec, string ReplayUrl,
+    string? MyName, string? MyChampion, List<ClipWindow> Windows)
+{
+    public bool IsFullGame => Kind is "full";
+}
 
 /// The agent's half of the pull-based render queue on the tracker server.
 public sealed class TrackerClient(string serverUrl, string agentName)
@@ -44,26 +47,29 @@ public sealed class TrackerClient(string serverUrl, string agentName)
         await stream.CopyToAsync(file, ct);
     }
 
-    public async Task UploadClipAsync(string matchId, int index, string mp4Path, CancellationToken ct)
+    public async Task UploadAsync(RenderJob job, int index, string mp4Path, CancellationToken ct)
     {
+        var url = job.IsFullGame
+            ? $"{serverUrl}/api/render/{job.MatchId}/full"
+            : $"{serverUrl}/api/render/{job.MatchId}/clips/{index}";
         await using var file = File.OpenRead(mp4Path);
         using var content = new StreamContent(file);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("video/mp4");
-        using var resp = await _http.PutAsync($"{serverUrl}/api/render/{matchId}/clips/{index}", content, ct);
+        using var resp = await _http.PutAsync(url, content, ct);
         resp.EnsureSuccessStatusCode();
     }
 
-    public async Task CompleteAsync(string matchId, CancellationToken ct)
+    public async Task CompleteAsync(RenderJob job, CancellationToken ct)
     {
-        using var resp = await _http.PostAsync($"{serverUrl}/api/render/{matchId}/complete", null, ct);
+        using var resp = await _http.PostAsync($"{serverUrl}/api/render/{job.MatchId}/complete?kind={job.Kind}", null, ct);
         resp.EnsureSuccessStatusCode();
     }
 
-    public async Task FailAsync(string matchId, string error, CancellationToken ct)
+    public async Task FailAsync(RenderJob job, string error, CancellationToken ct)
     {
         try
         {
-            using var resp = await _http.PostAsync($"{serverUrl}/api/render/{matchId}/fail", new StringContent(error), ct);
+            using var resp = await _http.PostAsync($"{serverUrl}/api/render/{job.MatchId}/fail?kind={job.Kind}", new StringContent(error), ct);
         }
         catch
         {

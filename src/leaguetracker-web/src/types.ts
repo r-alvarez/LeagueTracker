@@ -369,8 +369,25 @@ export interface RenderQueueRow {
   matchId: string
   champion: string
   gameEndUtc: string
+  kind: 'clips' | 'full'
   status: 'pending' | 'rendering' | 'done' | 'failed' | 'no-events'
   error: string | null
+}
+
+export interface FullGameStatus {
+  state: 'none' | 'requested' | 'rendering' | 'done' | 'failed'
+  keep: boolean
+  sizeMb: number | null
+  renderedUtc: string | null
+  error: string | null
+}
+
+export interface StorageInfo {
+  rawGamesMb: number
+  replaysMb: number
+  clipsMb: number
+  fullGamesMb: number
+  databaseMb: number
 }
 
 export interface LiveParticipant {
