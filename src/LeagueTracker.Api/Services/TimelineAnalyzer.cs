@@ -72,7 +72,10 @@ public static class TimelineAnalyzer
     public sealed record LaneDiffPoint(
         int Min, int Gold, int Xp, int Cs, int Level,
         int MyCs, int MyLevel, int OppCs, int OppLevel,
-        List<int> MyItems, List<int> OppItems);
+        List<int> MyItems, List<int> OppItems,
+        // Running whole-game kill scores at the checkpoint - the "why" behind
+        // a gold swing. Defaults keep pre-existing serialized rows readable.
+        int MyKills = 0, int MyDeaths = 0, int OppKills = 0, int OppDeaths = 0);
 
     private readonly record struct ItemLogEntry(int T, int Pid, string Kind, int ItemId, int BeforeId, int AfterId);
 
@@ -246,11 +249,16 @@ public static class TimelineAnalyzer
         {
             var frame = FrameAtMinute(frames, minute);
             if (My(frame) is not { } mineAt || Opp(frame) is not { } oppAt) continue;
+            var cutoff = minute * 60;
             laneDiffs.Add(new LaneDiffPoint(minute,
                 mineAt.Gold - oppAt.Gold, mineAt.Xp - oppAt.Xp, mineAt.Cs - oppAt.Cs, mineAt.Level - oppAt.Level,
                 mineAt.Cs, mineAt.Level, oppAt.Cs, oppAt.Level,
-                InventoryAt(itemLog, me.ParticipantId, minute * 60),
-                InventoryAt(itemLog, opp!.ParticipantId, minute * 60)));
+                InventoryAt(itemLog, me.ParticipantId, cutoff),
+                InventoryAt(itemLog, opp!.ParticipantId, cutoff),
+                MyKills: kills.Count(k => k.TimeSec <= cutoff && k.KillerParticipantId == me.ParticipantId),
+                MyDeaths: kills.Count(k => k.TimeSec <= cutoff && k.VictimParticipantId == me.ParticipantId),
+                OppKills: kills.Count(k => k.TimeSec <= cutoff && k.KillerParticipantId == opp.ParticipantId),
+                OppDeaths: kills.Count(k => k.TimeSec <= cutoff && k.VictimParticipantId == opp.ParticipantId)));
         }
 
         double? dpmEarly = my10 is not null ? Math.Round(my10.DmgToChamps / 10.0, 1) : null;
