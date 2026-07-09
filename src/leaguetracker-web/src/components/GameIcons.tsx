@@ -22,9 +22,9 @@ export function ItemIcon({ id, size, dim }: { id: number; size?: number; dim?: b
 
   const tip = id > 0 ? (
     <>
-      <span className="tip-title">{info?.name ?? `Item ${id}`}{info && <span className="tip-gold"> {info.gold}g</span>}</span>
+      <span className="tip-title">{info?.name ?? `Item ${id}`}{info ? <span className="tip-gold"> {info.gold}g</span> : null}</span>
       {info?.stats.map((s, i) => <span key={i} className="tip-stat">{s}</span>)}
-      {info?.passive && <span className="tip-passive">{info.passive.length > 260 ? `${info.passive.slice(0, 260)}…` : info.passive}</span>}
+      {info?.passive ? <span className="tip-passive">{info.passive.length > 260 ? `${info.passive.slice(0, 260)}…` : info.passive}</span> : null}
     </>
   ) : null
 
@@ -40,20 +40,23 @@ export function ItemIcon({ id, size, dim }: { id: number; size?: number; dim?: b
 /// Rune / stat-shard icon with name + short description on hover.
 export function PerkIcon({ id, className = '' }: { id: number; className?: string }) {
   const icons = useLoadoutIcons()
-  const perk = icons.perk(id) ?? icons.rune(id)
-  const desc = perk && 'desc' in perk ? perk.desc : ''
+  const perk = icons.perk(id)
+  const fallback = icons.rune(id)
+  const name = perk?.name ?? fallback?.name
+  const icon = perk?.icon ?? fallback?.icon
+  const desc = perk?.desc ?? ''
 
-  const tip = perk ? (
+  const tip = name ? (
     <>
-      <span className="tip-title">{perk.name}</span>
-      {desc && <span className="tip-passive">{desc}</span>}
+      <span className="tip-title">{name}</span>
+      {desc ? <span className="tip-passive">{desc}</span> : null}
     </>
   ) : null
 
   return (
     <RichTip tip={tip}>
       <span className={`slot round ${className}`}>
-        {perk && <img src={perk.icon} alt={perk.name} loading="lazy" />}
+        {icon ? <img src={icon} alt={name ?? ''} loading="lazy" /> : null}
       </span>
     </RichTip>
   )
