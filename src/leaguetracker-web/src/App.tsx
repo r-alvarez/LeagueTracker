@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import Matches from './pages/Matches'
 import MatchDetail from './pages/MatchDetail'
 import DataPage from './pages/DataPage'
+import LiveGameBanner from './components/LiveGameBanner'
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null)
@@ -33,6 +34,8 @@ export default function App() {
         <NavLink to="/matches" className={({ isActive }) => (isActive ? 'active' : '')}>Matches</NavLink>
         <NavLink to="/data" className={({ isActive }) => (isActive ? 'active' : '')}>Data & sync</NavLink>
       </nav>
+
+      <LiveGameBanner />
 
       <Routes>
         <Route path="/" element={<Dashboard />} />

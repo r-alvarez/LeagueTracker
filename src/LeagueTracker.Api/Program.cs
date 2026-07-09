@@ -34,6 +34,8 @@ builder.Services.AddScoped<HistorySyncService>();
 builder.Services.AddScoped<ImportService>();
 builder.Services.AddScoped<AnalyticsReprocessService>();
 builder.Services.AddScoped<ChallengesBenchmarkService>();
+builder.Services.AddScoped<ReplayArchiveService>();
+builder.Services.AddSingleton<LiveGameState>();
 builder.Services.AddHostedService<MatchPollerService>();
 
 // Vite dev server origin; irrelevant in production where the SPA is served by this host.
@@ -103,9 +105,20 @@ app.MapGet("/api/status", async (LeagueDbContext db, LpService lp, TrackedPlayer
     });
 });
 
+// The game being played right now (spectator-v5, refreshed by the poller).
+app.MapGet("/api/live", (LiveGameState live) =>
+    live.Current is { } g
+        ? Results.Ok(new
+        {
+            g.MatchId, g.QueueId, Queue = RankMath.QueueName(g.QueueId),
+            g.StartedUtc, g.DetectedUtc, g.MyChampionId, g.MyTeamId,
+            Participants = g.Participants.Select(p => new { p.ChampionId, p.TeamId, p.RiotId, p.IsMe }),
+        })
+        : Results.NoContent());
+
 // --- Matches --------------------------------------------------------------------
 
-app.MapGet("/api/matches", async (LeagueDbContext db, int page = 1, int pageSize = 20, bool? ranked = null, string? champion = null, CancellationToken ct = default) =>
+app.MapGet("/api/matches", async (LeagueDbContext db, ReplayArchiveService replays, int page = 1, int pageSize = 20, bool? ranked = null, string? champion = null, CancellationToken ct = default) =>
 {
     var query = db.Matches.AsNoTracking();
     if (ranked is not null) query = query.Where(m => m.IsRanked == ranked);
@@ -125,17 +138,25 @@ app.MapGet("/api/matches", async (LeagueDbContext db, int page = 1, int pageSize
             .ToListAsync(ct))
         .ToDictionary(p => p.MatchId);
 
+    var archived = replays.ArchivedMatchIds();
     return Results.Ok(new
     {
         total,
         items = items.Select(m => MatchListItem(m,
             loadouts.TryGetValue(m.Id, out var l) ? l.Items : null,
             loadouts.TryGetValue(m.Id, out var l1) ? l1.Summoner1Id : null,
-            loadouts.TryGetValue(m.Id, out var l2) ? l2.Summoner2Id : null)),
+            loadouts.TryGetValue(m.Id, out var l2) ? l2.Summoner2Id : null,
+            archived.Contains(m.Id))),
     });
 });
 
-app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, CancellationToken ct) =>
+// The archived official .rofl for a game (playable in the client on the same patch).
+app.MapGet("/api/matches/{id}/replay", (string id, ReplayArchiveService replays) =>
+    replays.PathFor(id) is { } path
+        ? Results.File(path, "application/octet-stream", $"{id}.rofl")
+        : Results.NotFound());
+
+app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, ReplayArchiveService replays, CancellationToken ct) =>
 {
     var match = await db.Matches.AsNoTracking()
         .Include(m => m.Participants.OrderBy(p => p.ParticipantId))
@@ -159,7 +180,7 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, Cancellati
 
     return Results.Ok(new
     {
-        Summary = MatchListItem(match),
+        Summary = MatchListItem(match, hasReplay: replays.PathFor(match.Id) is not null),
         match.RanksAtGameTime,
         MySide = match.Participants.FirstOrDefault(p => p.IsMe)?.TeamId == 100 ? "Blue" : "Red",
         TeamObjectives = new { Ally = TeamObjectives(true), Enemy = TeamObjectives(false) },
@@ -416,11 +437,12 @@ app.MapFallbackToFile("index.html");
 
 app.Run();
 
-static object MatchListItem(Match m, string? items = null, int? summoner1Id = null, int? summoner2Id = null) => new
+static object MatchListItem(Match m, string? items = null, int? summoner1Id = null, int? summoner2Id = null, bool hasReplay = false) => new
 {
     Items = items,
     Summoner1Id = summoner1Id,
     Summoner2Id = summoner2Id,
+    HasReplay = hasReplay,
     m.Id, m.QueueId, m.QueueName, m.IsRanked, m.GameMode,
     Date = m.GameCreationUtc, m.GameEndUtc,
     DurationMin = Math.Round(m.DurationSec / 60, 1),
