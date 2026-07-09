@@ -37,6 +37,8 @@ builder.Services.AddScoped<ChallengesBenchmarkService>();
 builder.Services.AddScoped<ReplayArchiveService>();
 builder.Services.AddScoped<ClipService>();
 builder.Services.AddScoped<FullGameService>();
+builder.Services.AddScoped<TimelineSeriesService>();
+builder.Services.AddScoped<LensService>();
 builder.Services.AddSingleton<RenderLeaseService>();
 builder.Services.AddSingleton<LiveGameState>();
 builder.Services.AddHostedService<MatchPollerService>();
@@ -70,6 +72,7 @@ using (var scope = app.Services.CreateScope())
         "ALTER TABLE Matches ADD COLUMN Level16LeadSec INTEGER NULL",
         "ALTER TABLE Matches ADD COLUMN FriendlyEpicObjectives INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE Matches ADD COLUMN ObjectivesPresentFor INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE Matches ADD COLUMN FightsJson TEXT NOT NULL DEFAULT ''",
     })
     {
         try { db.Database.ExecuteSqlRaw(alter); } catch { /* column already exists */ }
@@ -459,6 +462,14 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, ReplayArch
 // Deliberately centred on collapse count and contest quality, not KDA cosmetics.
 app.MapGet("/api/analytics/summary", async (LeagueDbContext db, int lastN = 20, CancellationToken ct = default) =>
     Results.Ok(await Reports.AnalyticsSummaryAsync(db, lastN, ct)));
+
+// Per-player cumulative curves from the raw timeline (gold/cs/damage/xp).
+app.MapGet("/api/matches/{id}/series", async (string id, TimelineSeriesService series, CancellationToken ct) =>
+    await series.GetAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+
+// The Lens: coaching scores for the recent window vs the player's own history.
+app.MapGet("/api/lens", async (LensService lens, int window = 20, CancellationToken ct = default) =>
+    await lens.GetAsync(window, ct) is { } result ? Results.Ok(result) : Results.NoContent());
 
 // Ladder percentiles (Challenges-V1) - how the player ranks vs everyone, the
 // external benchmark the wins-vs-losses analysis can't provide.

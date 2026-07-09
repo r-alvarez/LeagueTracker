@@ -42,6 +42,9 @@ public sealed class TimelineAnalysis
     // Objective presence: friendly epic objectives I was actually near when taken.
     public int FriendlyEpicObjectives { get; init; }
     public int ObjectivesPresentFor { get; init; }
+    /// Kill clusters classified duel / skirmish / teamfight, with outcome,
+    /// participation, gold swing and objective conversion.
+    public List<TimelineAnalyzer.Fight> Fights { get; init; } = [];
 }
 
 /// Everything derivable from one timeline pass. Frames arrive every 60s, so any
@@ -78,6 +81,22 @@ public static class TimelineAnalyzer
         int MyKills = 0, int MyDeaths = 0, int OppKills = 0, int OppDeaths = 0);
 
     private readonly record struct ItemLogEntry(int T, int Pid, string Kind, int ItemId, int BeforeId, int AfterId);
+
+    // Fight clustering: kills chain into one fight while they stay within this
+    // window and range of the cluster's centroid; headcount comes from killers,
+    // victims and anyone interpolated near the centroid mid-fight.
+    private const int FightChainSec = 15;
+    private const int FightChainUnits = 3500;
+    private const int FightNearUnits = 2500;
+    private const int FightConversionSec = 45;
+
+    /// One detected fight. Kind: duel (1v1) / skirmish / teamfight (3+ a side).
+    /// Result is from my team's perspective; GoldSwing is the team-gold-diff
+    /// change across the fight (frame-coarse); ConvertedObjective = the winner
+    /// took an objective within 45s.
+    public sealed record Fight(
+        int StartSec, int EndSec, string Kind, string Result, bool Participated,
+        int Allies, int Enemies, int AllyKills, int EnemyKills, int GoldSwing, bool ConvertedObjective);
 
     private sealed record Frame(int TimeSec, Dictionary<int, (int X, int Y)> Positions, Dictionary<int, FrameStats> Stats);
 
@@ -268,6 +287,8 @@ public static class TimelineAnalyzer
         double? dpmLate = my20 is not null && myEnd is not null && last!.TimeSec > 20 * 60 + 30
             ? Math.Round((myEnd.DmgToChamps - my20.DmgToChamps) / ((last.TimeSec - 1200) / 60.0), 1) : null;
 
+        var fights = DetectFights(kills, frames, objectives, allyPids, enemyPids, me.ParticipantId);
+
         return new TimelineAnalysis
         {
             Deaths = deaths,
@@ -275,6 +296,7 @@ public static class TimelineAnalyzer
             Kills = kills,
             Objectives = objectives,
             ItemEvents = itemEvents,
+            Fights = fights,
             TimeInEnemyHalfPct = enemyHalfPct,
             AvgNearestAllyDist = avgNearestAlly,
             CsAt10 = my10?.Cs,
@@ -386,6 +408,99 @@ public static class TimelineAnalyzer
 
     private static Frame? FrameAtMinute(List<Frame> frames, int minute) =>
         frames.FirstOrDefault(f => Math.Abs(f.TimeSec - minute * 60) <= 2);
+
+    private static List<Fight> DetectFights(
+        List<KillEvent> kills, List<Frame> frames, List<ObjectiveEvent> objectives,
+        HashSet<int> allyPids, HashSet<int> enemyPids, int myPid)
+    {
+        var fights = new List<Fight>();
+        var cluster = new List<KillEvent>();
+
+        void Flush()
+        {
+            if (cluster.Count > 0) fights.Add(BuildFight(cluster, frames, objectives, allyPids, enemyPids, myPid));
+            cluster = [];
+        }
+
+        foreach (var k in kills.OrderBy(k => k.TimeSec))
+        {
+            if (cluster.Count > 0)
+            {
+                var cx = cluster.Average(c => c.X);
+                var cy = cluster.Average(c => c.Y);
+                if (k.TimeSec - cluster[^1].TimeSec > FightChainSec
+                    || Math.Sqrt(Math.Pow(k.X - cx, 2) + Math.Pow(k.Y - cy, 2)) > FightChainUnits)
+                {
+                    Flush();
+                }
+            }
+            cluster.Add(k);
+        }
+        Flush();
+        return fights;
+    }
+
+    private static Fight BuildFight(
+        List<KillEvent> cluster, List<Frame> frames, List<ObjectiveEvent> objectives,
+        HashSet<int> allyPids, HashSet<int> enemyPids, int myPid)
+    {
+        var start = cluster[0].TimeSec;
+        var end = cluster[^1].TimeSec;
+        var midSec = (start + end) / 2;
+        var cx = cluster.Average(c => c.X);
+        var cy = cluster.Average(c => c.Y);
+
+        var involved = new HashSet<int>();
+        foreach (var k in cluster)
+        {
+            if (k.KillerParticipantId > 0) involved.Add(k.KillerParticipantId);
+            involved.Add(k.VictimParticipantId);
+        }
+        foreach (var pid in allyPids.Concat(enemyPids).Append(myPid))
+        {
+            if (involved.Contains(pid)) continue;
+            if (InterpolatedPosition(frames, pid, midSec) is { } pos
+                && Math.Sqrt(Math.Pow(pos.X - cx, 2) + Math.Pow(pos.Y - cy, 2)) <= FightNearUnits)
+            {
+                involved.Add(pid);
+            }
+        }
+
+        var allies = involved.Count(p => p == myPid || allyPids.Contains(p));
+        var enemies = involved.Count(enemyPids.Contains);
+        // Sides are counted by the victim: executions (killer id 0) still cost a team a member.
+        var allyKills = cluster.Count(k => enemyPids.Contains(k.VictimParticipantId));
+        var enemyKills = cluster.Count - allyKills;
+
+        var kind = allies <= 1 && enemies <= 1 ? "duel"
+            : allies >= 3 && enemies >= 3 ? "teamfight"
+            : "skirmish";
+        var result = allyKills > enemyKills ? "won" : allyKills < enemyKills ? "lost" : "draw";
+        var participated = involved.Contains(myPid);
+
+        var goldSwing = TeamGoldDiffAt(frames, end + 60, allyPids, myPid, enemyPids)
+            - TeamGoldDiffAt(frames, start - 1, allyPids, myPid, enemyPids);
+
+        var converted = result switch
+        {
+            "won" => objectives.Any(o => o.ByMyTeam && o.TimeSec > end && o.TimeSec <= end + FightConversionSec),
+            "lost" => objectives.Any(o => !o.ByMyTeam && o.TimeSec > end && o.TimeSec <= end + FightConversionSec),
+            _ => false,
+        };
+
+        return new Fight(start, end, kind, result, participated, allies, enemies, allyKills, enemyKills, goldSwing, converted);
+    }
+
+    /// My team's total-gold lead at the last frame at or before the given second
+    /// (clamped to the game's frames - the 60s cadence makes this approximate).
+    private static int TeamGoldDiffAt(List<Frame> frames, int sec, HashSet<int> allyPids, int myPid, HashSet<int> enemyPids)
+    {
+        var frame = frames.LastOrDefault(f => f.TimeSec <= sec) ?? frames.FirstOrDefault();
+        if (frame is null) return 0;
+        var ally = frame.Stats.Where(kv => kv.Key == myPid || allyPids.Contains(kv.Key)).Sum(kv => kv.Value.Gold);
+        var enemy = frame.Stats.Where(kv => enemyPids.Contains(kv.Key)).Sum(kv => kv.Value.Gold);
+        return ally - enemy;
+    }
 
     /// A player's position at an arbitrary second, linearly interpolated between
     /// the two bounding 60s frames (an estimate, like every position query here).
