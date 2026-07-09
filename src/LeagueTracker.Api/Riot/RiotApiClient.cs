@@ -36,7 +36,7 @@ public sealed class RiotApiClient(HttpClient http, IOptions<RiotOptions> options
 
     /// The player's challenge standings vs the ladder (per-challenge level + percentile).
     public Task<string> GetChallengesPlayerDataRawAsync(string puuid, CancellationToken ct) =>
-        GetStringAsync($"{PlatformBase}/lol/challenges/v1/player-data/by-puuid/{puuid}", ct);
+        GetStringAsync($"{PlatformBase}/lol/challenges/v1/player-data/{puuid}", ct);
 
     /// Challenge metadata (id -> localized name/description). Static-ish; cache it.
     public Task<string> GetChallengesConfigRawAsync(CancellationToken ct) =>
