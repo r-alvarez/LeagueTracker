@@ -508,7 +508,7 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .mr-duel { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; }
 .mr-duel .vs-badge { font-size: 10px; font-weight: 800; color: var(--muted); text-transform: uppercase; }
 .mr-portrait.sm img, .mr-portrait.sm .champ-mono { width: 34px; height: 34px; border-radius: 8px; opacity: 0.9; }
-.match-row { grid-template-columns: 104px 235px 130px minmax(160px, 220px) 1fr 130px 86px 34px; }
+.match-row { grid-template-columns: 104px 235px 130px minmax(160px, 220px) 1fr 175px 86px 34px; }
 @media (max-width: 1100px) {
   .match-row { grid-template-columns: 96px 215px 120px 1fr 86px; }
 }
@@ -531,3 +531,7 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .rank-duel .side { display: flex; flex-direction: column; gap: 1px; }
 .side-label { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
 .rank-big { font-size: 17px; font-weight: 750; white-space: nowrap; }
+
+/* Row rank duel: both teams' averages, compact chips, favored line beneath. */
+.rank-pair { display: inline-flex; align-items: center; gap: 5px; }
+.mr-rank .rank-chip { font-size: 11px; padding: 1px 5px; }

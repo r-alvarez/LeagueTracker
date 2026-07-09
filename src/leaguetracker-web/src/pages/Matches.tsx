@@ -90,10 +90,14 @@ function Row({ m }: { m: MatchSummary }) {
       </div>
 
       <div className="mr-rank">
-        <RankChip label={m.avgEnemyRank} />
-        {m.rankGapLp !== null && (
-          <span className={`sm-text ${m.rankGapLp > 0 ? 'win' : m.rankGapLp < 0 ? 'loss' : 'mut'}`}>
-            gap {m.rankGapLp > 0 ? '+' : ''}{m.rankGapLp} LP
+        <span className="rank-pair">
+          <RankChip label={m.avgAllyRank} />
+          <span className="vs-badge">vs</span>
+          <RankChip label={m.avgEnemyRank} />
+        </span>
+        {m.rankGapLp !== null && m.rankGapLp !== 0 && (
+          <span className={`sm-text ${m.rankGapLp < 0 ? 'win' : 'loss'}`}>
+            {m.rankGapLp < 0 ? `favored by ${-m.rankGapLp} LP` : `outranked by ${m.rankGapLp} LP`}
           </span>
         )}
       </div>
