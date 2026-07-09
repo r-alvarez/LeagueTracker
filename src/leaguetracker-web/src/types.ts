@@ -81,6 +81,9 @@ export interface MatchSummary {
   summoner1Id: number | null
   summoner2Id: number | null
   hasReplay: boolean
+  myCompanion: string | null
+  enemyCompanion: string | null
+  companionRole: string | null
 }
 
 export interface MatchPage {

@@ -5,7 +5,7 @@ import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Parti
 import { sourceLabel, unitKind, useAbilityLabels, useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
 import { ItemIcon, PerkIcon, UnitGlyph } from '../components/GameIcons'
-import { tierClass } from '../components/Stats'
+import { RelTime, tierClass } from '../components/Stats'
 
 type Tab = 'general' | 'details' | 'runes' | 'timeline'
 
@@ -561,32 +561,59 @@ export default function MatchDetail() {
 
       <div className="grid tiles" style={{ marginBottom: 14 }}>
         <div className="card tile">
-          <div className="label">{new Date(m.date).toLocaleString()} · {m.queueName}</div>
-          <div className="value">
-            {m.isRemake
-              ? <span className="mut">Remake</span>
-              : <span className={m.win ? 'win' : 'loss'}>{m.win ? 'Victory' : 'Defeat'}</span>} — {m.champion}
-          </div>
-          <div className="sub">
-            {m.kills}/{m.deaths}/{m.assists} · {m.durationMin.toFixed(0)} min · {m.cs} CS
-            {m.opponentChampion && ` · vs ${m.opponentChampion}`}
-            {m.laneGoldDiff10 !== null && ` · ${m.laneGoldDiff10 > 0 ? '+' : ''}${m.laneGoldDiff10}g @10`}
-            {m.hasReplay && (
-              <>
-                {' · '}
-                <a href={`/api/matches/${m.id}/replay`} download
-                  title="Official .rofl — plays in the client while this patch is live">watch replay ⬇︎</a>
-              </>
-            )}
+          <div className="label"><RelTime date={m.gameEndUtc} /> · {m.queueName} · {m.durationMin.toFixed(0)} min</div>
+          <div className="mh-row">
+            <span className="mr-duel">
+              <ChampIcon name={m.champion} size={46} level={m.champLevel} />
+              {m.opponentChampion && (
+                <>
+                  <span className="vs-badge">vs</span>
+                  <ChampIcon name={m.opponentChampion} size={36} />
+                </>
+              )}
+            </span>
+            <div className="mh-main">
+              <div className="value" style={{ marginTop: 0 }}>
+                {m.isRemake
+                  ? <span className="mut">Remake</span>
+                  : <span className={m.win ? 'win' : 'loss'}>{m.win ? 'Victory' : 'Defeat'}</span>} — {m.champion}
+              </div>
+              <div className="sub">
+                <span>{m.kills}/<span className="loss">{m.deaths}</span>/{m.assists}</span> · {m.cs} CS
+                {m.laneGoldDiff10 !== null && <> · <span className={m.laneGoldDiff10 >= 0 ? 'win' : 'loss'}>{m.laneGoldDiff10 > 0 ? '+' : ''}{m.laneGoldDiff10}g</span> @10</>}
+                {m.hasReplay && (
+                  <>
+                    {' · '}
+                    <a href={`/api/matches/${m.id}/replay`} download
+                      title="Official .rofl — plays in the client while this patch is live">watch replay ⬇︎</a>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </div>
         <div className="card tile">
           <div className="label">Team ranks {detail.ranksAtGameTime ? '(at game time)' : '(as of capture)'}</div>
-          <div className="value">{m.avgAllyRank ?? '—'} <span className="mut">vs</span> {m.avgEnemyRank ?? '—'}</div>
-          <div className="sub">
-            known: {m.allyRanksKnown}/5 allies, {m.enemyRanksKnown}/5 enemies
-            {m.rankGapLp !== null && ` · gap ${m.rankGapLp > 0 ? '+' : ''}${m.rankGapLp} LP`}
+          <div className="rank-duel">
+            <div className="side">
+              <span className="side-label win">My team</span>
+              <span className={`rank-big ${tierClass(m.avgAllyRank)}`}>{m.avgAllyRank ?? '—'}</span>
+              <span className="sub">{m.allyRanksKnown}/5 known</span>
+            </div>
+            <span className="vs-badge">vs</span>
+            <div className="side">
+              <span className="side-label loss">Enemy</span>
+              <span className={`rank-big ${tierClass(m.avgEnemyRank)}`}>{m.avgEnemyRank ?? '—'}</span>
+              <span className="sub">{m.enemyRanksKnown}/5 known</span>
+            </div>
           </div>
+          {m.rankGapLp !== null && m.rankGapLp !== 0 && (
+            <div className="sub">
+              <span className={m.rankGapLp > 0 ? 'loss' : 'win'}>
+                {m.rankGapLp > 0 ? `enemy favored by ${m.rankGapLp} LP` : `your side favored by ${-m.rankGapLp} LP`}
+              </span>
+            </div>
+          )}
         </div>
         {m.lpChange !== null && (
           <div className="card tile">
