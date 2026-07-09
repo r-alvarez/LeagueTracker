@@ -155,6 +155,10 @@ export interface LaneDiffCheckpoint {
   oppLevel: number
   myItems: number[]
   oppItems: number[]
+  myKills: number
+  myDeaths: number
+  oppKills: number
+  oppDeaths: number
 }
 
 export interface TeamObjectiveCounts {

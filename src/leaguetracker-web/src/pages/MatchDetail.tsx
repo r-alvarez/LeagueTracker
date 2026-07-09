@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts } from '../types'
-import { useChampionIcons, useLoadoutIcons } from '../champions'
+import { useAbilityLabels, useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
 import { ItemIcon, PerkIcon } from '../components/GameIcons'
 import { tierClass } from '../components/Stats'
@@ -175,12 +175,11 @@ function damageSummary(d: DeathEvent): string {
   return `${d.damageInstanceCount} hits, ${Math.round(d.topSourceShare * 100)}% ${d.topSource} (${style})`
 }
 
-// "assassinsmark" -> readable-ish; empty spell names are basic attacks.
-const spellLabel = (s: string) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : 'Basic attacks')
-
 /// In-game-style death recap: the final ~10s of damage grouped by source
 /// champion, split physical / magic / true.
 function DeathRecap({ d }: { d: DeathEvent }) {
+  const sourceNames = useMemo(() => [...new Set(d.damageInstances.map(i => i.source))], [d])
+  const abilityLabel = useAbilityLabels(sourceNames)
   const bySource = new Map<string, { phys: number; magic: number; tru: number; spells: Map<string, number> }>()
   for (const i of d.damageInstances) {
     const s = bySource.get(i.source) ?? { phys: 0, magic: 0, tru: 0, spells: new Map<string, number>() }
@@ -216,7 +215,7 @@ function DeathRecap({ d }: { d: DeathEvent }) {
           </span>
           <span className="recap-spells">
             {[...s.spells.entries()].sort((a, b) => b[1] - a[1]).map(([spell, dmg]) => (
-              <span key={spell} className="obj-chip">{spellLabel(spell)} <strong>{dmg.toLocaleString()}</strong></span>
+              <span key={spell} className="obj-chip">{abilityLabel(s.source, spell)} <strong>{dmg.toLocaleString()}</strong></span>
             ))}
           </span>
         </div>
@@ -302,6 +301,7 @@ function DetailsTab({ detail }: { detail: Detail }) {
                   <tr>
                     <th>At</th><th className="num">Gold diff</th><th className="num">XP diff</th>
                     <th className="num">CS diff</th><th className="num">Level diff</th>
+                    <th className="num">My K/D</th><th className="num">{m.opponentChampion ?? 'Opp'} K/D</th>
                     <th className="num">My CS (lvl)</th><th className="num">{m.opponentChampion ?? 'Opp'} CS (lvl)</th>
                   </tr>
                 </thead>
@@ -314,6 +314,10 @@ function DetailsTab({ detail }: { detail: Detail }) {
                       <td className={`num ${c.xp >= 0 ? 'win' : 'loss'}`}>{signed(c.xp)}</td>
                       <td className={`num ${c.cs >= 0 ? 'win' : 'loss'}`}>{signed(c.cs)}</td>
                       <td className={`num ${c.level >= 0 ? 'win' : 'loss'}`}>{signed(c.level)}</td>
+                      <td className="num">
+                        <span className={c.myKills - c.myDeaths > 0 ? 'win' : c.myKills - c.myDeaths < 0 ? 'loss' : ''}>{c.myKills ?? 0}/{c.myDeaths ?? 0}</span>
+                      </td>
+                      <td className="num mut">{c.oppKills ?? 0}/{c.oppDeaths ?? 0}</td>
                       <td className="num">{c.myCs} <span className="mut sm-text">({c.myLevel})</span></td>
                       <td className="num mut">{c.oppCs} <span className="sm-text">({c.oppLevel})</span></td>
                     </tr>

@@ -17,6 +17,7 @@ interface Assets {
   version: string
   champs: Record<string, string>
   champNames: Record<number, string>
+  champIds: Record<string, string>
   spells: Record<number, string>
   runes: Record<number, { icon: string; name: string }>
   perks: Record<number, PerkInfo>
@@ -42,11 +43,14 @@ async function load(): Promise<Assets> {
   }
   const champs: Record<string, string> = {}
   const champNames: Record<number, string> = {}
+  const champIds: Record<string, string> = {}
   for (const c of Object.values(champ.data)) {
     const url = `${cdn}/img/champion/${c.id}.png`
     champs[norm(c.name)] = url // display name, e.g. "Nunu & Willump"
     champs[norm(c.id)] = url // image id, e.g. "MonkeyKing" (Wukong)
     champNames[parseInt(c.key, 10)] = c.name // numeric id (spectator only sends these)
+    champIds[norm(c.name)] = c.id // display name -> DDragon id, for per-champion data fetches
+    champIds[norm(c.id)] = c.id
   }
 
   const summ = (await fetch(`${cdn}/data/en_US/summoner.json`).then(r => r.json())) as {
@@ -104,7 +108,70 @@ async function load(): Promise<Assets> {
     }
   } catch { /* item tooltips degrade to ids */ }
 
-  return { version: v, champs, champNames, spells, runes, perks, items }
+  return { version: v, champs, champNames, champIds, spells, runes, perks, items }
+}
+
+// Per-champion ability maps for the death recap: internal lowercase spell id
+// ("vaynesilveredbolts") -> "W · Silver Bolts". Fetched lazily per champion.
+const abilityCache: Record<string, Record<string, string>> = {}
+const abilityInflight: Record<string, Promise<void>> = {}
+
+async function loadAbilities(version: string, ddragonId: string): Promise<void> {
+  try {
+    const raw = (await fetch(`https://ddragon.leagueoflegends.com/cdn/${version}/data/en_US/champion/${ddragonId}.json`)
+      .then(r => r.json())) as {
+      data: Record<string, { spells: Array<{ id: string; name: string }>; passive: { name: string } }>
+    }
+    const champ = raw.data[ddragonId]
+    const map: Record<string, string> = {}
+    champ.spells.forEach((s, i) => { map[s.id.toLowerCase()] = `${'QWER'[i]} · ${s.name}` })
+    map.passive = champ.passive.name
+    abilityCache[ddragonId] = map
+  } catch {
+    abilityCache[ddragonId] = {}
+  }
+}
+
+const SPECIAL_SPELLS: Record<string, string> = {
+  summonerdot: 'Ignite', summonerexhaust: 'Exhaust', burning: 'Burn',
+  attack: 'Basic attack', turretbasicattack: 'Turret shot',
+}
+
+/// Labels damage-recap spell names for the given source champions. Triggers the
+/// per-champion fetches and re-renders as they land; unresolvable names fall
+/// back to a cleaned-up version of the raw id.
+export function useAbilityLabels(sources: string[]): (source: string, spellName: string) => string {
+  const assets = useAssets()
+  const [, bump] = useState(0)
+
+  useEffect(() => {
+    if (!assets?.version) return
+    for (const source of sources) {
+      const id = assets.champIds[norm(source)]
+      if (!id || abilityCache[id]) continue
+      abilityInflight[id] ??= loadAbilities(assets.version, id).then(() => bump(t => t + 1))
+    }
+  }, [assets, sources])
+
+  return useMemo(() => (source: string, spellName: string) => {
+    const n = spellName.toLowerCase().trim()
+    if (!n) return 'Basic attacks'
+    const s = norm(source)
+    if (n === `${s}basicattack` || n === 'basicattack') return 'Basic attack'
+    if (SPECIAL_SPELLS[n]) return SPECIAL_SPELLS[n]
+
+    const id = assets?.champIds[s]
+    const fromData = id ? abilityCache[id]?.[n] : undefined
+    if (fromData) return fromData
+
+    // "gragasq" -> "Q" even when the spell id spells it differently.
+    if (n.startsWith(s)) {
+      const rest = n.slice(s.length)
+      if (/^[qwer]$/.test(rest)) return rest.toUpperCase()
+      if (rest.length > 1) return rest[0].toUpperCase() + rest.slice(1)
+    }
+    return spellName
+  }, [assets])
 }
 
 // Stat shards aren't in runesReforged - small stable set, text is enough.
@@ -117,7 +184,7 @@ function useAssets(): Assets | null {
   const [assets, setAssets] = useState<Assets | null>(cache)
   useEffect(() => {
     if (cache) return
-    if (!inflight) inflight = load().then(a => (cache = a)).catch(() => (cache = { version: '', champs: {}, champNames: {}, spells: {}, runes: {}, perks: {}, items: {} }))
+    if (!inflight) inflight = load().then(a => (cache = a)).catch(() => (cache = { version: '', champs: {}, champNames: {}, champIds: {}, spells: {}, runes: {}, perks: {}, items: {} }))
     let alive = true
     void inflight.then(a => alive && setAssets(a))
     return () => { alive = false }
