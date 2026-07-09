@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 interface Assets {
   version: string
   champs: Record<string, string>
+  champNames: Record<number, string>
   spells: Record<number, string>
   runes: Record<number, { icon: string; name: string }>
 }
@@ -20,13 +21,15 @@ async function load(): Promise<Assets> {
   const cdn = `https://ddragon.leagueoflegends.com/cdn/${v}`
 
   const champ = (await fetch(`${cdn}/data/en_US/champion.json`).then(r => r.json())) as {
-    data: Record<string, { id: string; name: string }>
+    data: Record<string, { id: string; name: string; key: string }>
   }
   const champs: Record<string, string> = {}
+  const champNames: Record<number, string> = {}
   for (const c of Object.values(champ.data)) {
     const url = `${cdn}/img/champion/${c.id}.png`
     champs[norm(c.name)] = url // display name, e.g. "Nunu & Willump"
     champs[norm(c.id)] = url // image id, e.g. "MonkeyKing" (Wukong)
+    champNames[parseInt(c.key, 10)] = c.name // numeric id (spectator only sends these)
   }
 
   const summ = (await fetch(`${cdn}/data/en_US/summoner.json`).then(r => r.json())) as {
@@ -53,7 +56,7 @@ async function load(): Promise<Assets> {
     }
   }
 
-  return { version: v, champs, spells, runes }
+  return { version: v, champs, champNames, spells, runes }
 }
 
 // Stat shards aren't in runesReforged - small stable set, text is enough.
@@ -66,7 +69,7 @@ function useAssets(): Assets | null {
   const [assets, setAssets] = useState<Assets | null>(cache)
   useEffect(() => {
     if (cache) return
-    if (!inflight) inflight = load().then(a => (cache = a)).catch(() => (cache = { version: '', champs: {}, spells: {}, runes: {} }))
+    if (!inflight) inflight = load().then(a => (cache = a)).catch(() => (cache = { version: '', champs: {}, champNames: {}, spells: {}, runes: {} }))
     let alive = true
     void inflight.then(a => alive && setAssets(a))
     return () => { alive = false }
@@ -79,6 +82,11 @@ function useAssets(): Assets | null {
 export function useChampionIcons(): (name: string) => string | null {
   const assets = useAssets()
   return useMemo(() => (name: string) => assets?.champs[norm(name)] ?? null, [assets])
+}
+
+export function useChampionNames(): (id: number) => string | null {
+  const assets = useAssets()
+  return useMemo(() => (id: number) => assets?.champNames[id] ?? null, [assets])
 }
 
 export function useLoadoutIcons(): {

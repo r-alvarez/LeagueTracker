@@ -11,9 +11,16 @@ namespace LeagueTracker.Api.Services;
 public sealed class MatchPollerService(
     IServiceScopeFactory scopes,
     IOptions<RiotOptions> options,
+    LiveGameState live,
     ILogger<MatchPollerService> logger) : BackgroundService
 {
+    /// After a live game ends, poll fast until its match shows up - Riot takes a
+    /// minute or two to publish - then give up and fall back to the normal cadence.
+    private static readonly TimeSpan FastCaptureWindow = TimeSpan.FromMinutes(6);
+    private static readonly TimeSpan FastCaptureDelay = TimeSpan.FromSeconds(15);
+
     private readonly RiotOptions _options = options.Value;
+    private bool _firstPass = true;
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -43,7 +50,35 @@ public sealed class MatchPollerService(
                 logger.LogError(ex, "Poll pass failed");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(Math.Max(30, _options.PollSeconds)), ct);
+            var delay = live.FastCapturePending ? FastCaptureDelay : TimeSpan.FromSeconds(Math.Max(30, _options.PollSeconds));
+            await Task.Delay(delay, ct);
+        }
+    }
+
+    private async Task CheckLiveGameAsync(string puuid, RiotApiClient riot, CancellationToken ct)
+    {
+        string? activeRaw;
+        try
+        {
+            activeRaw = await riot.GetActiveGameRawAsync(puuid, ct);
+        }
+        catch (RiotApiException ex) when (!ex.IsAuthFailure)
+        {
+            // Spectator hiccups must never stall match capture.
+            logger.LogWarning("Spectator check failed ({Status}); skipping this pass", ex.StatusCode);
+            return;
+        }
+
+        if (activeRaw is not null)
+        {
+            var snapshot = LiveGameSnapshot.Parse(activeRaw, puuid);
+            var isNew = live.Current?.GameId != snapshot.GameId;
+            live.SetLive(snapshot);
+            if (isNew) logger.LogInformation("Live game detected: {MatchId} (queue {QueueId})", snapshot.MatchId, snapshot.QueueId);
+        }
+        else if (live.EndLiveIfAny(FastCaptureWindow) is { } endedMatchId)
+        {
+            logger.LogInformation("Live game {MatchId} ended - fast-capture mode until it is ingested", endedMatchId);
         }
     }
 
@@ -57,6 +92,16 @@ public sealed class MatchPollerService(
         var player = scope.ServiceProvider.GetRequiredService<TrackedPlayerService>();
 
         var puuid = await player.GetPuuidAsync(ct);
+
+        await CheckLiveGameAsync(puuid, riot, ct);
+
+        // Service (re)start: grab whatever of the last games' replays is still on
+        // offer - the window is ~5 games, so an offline stretch can't be recovered later.
+        if (_firstPass)
+        {
+            _firstPass = false;
+            await scope.ServiceProvider.GetRequiredService<ReplayArchiveService>().SweepAsync(puuid, ct);
+        }
 
         // First pass ever: current history is old news - baseline it and only watch forward.
         // (Backfill is explicit via /api/sync/history, mirroring the exporter.)
@@ -75,12 +120,14 @@ public sealed class MatchPollerService(
         var recent = await riot.GetMatchIdsAsync(puuid, 0, 15, rankedOnly: false, ct);
         recent.Reverse();   // oldest first, so multi-game bursts stay in order
 
+        var ingested = 0;
         foreach (var matchId in recent)
         {
             if (await db.KnownMatches.FindAsync([matchId], ct) is not null) continue;
             try
             {
                 await IngestNewMatchAsync(matchId, puuid, db, riot, ingest, lp, ct);
+                ingested++;
             }
             catch (RiotApiException ex) when (ex.IsAuthFailure)
             {
@@ -101,6 +148,12 @@ public sealed class MatchPollerService(
                 logger.LogWarning(ex, "Failed to ingest {MatchId}; will retry next pass", matchId);
                 db.ChangeTracker.Clear();
             }
+        }
+
+        if (ingested > 0)
+        {
+            live.CaptureArrived();
+            await scope.ServiceProvider.GetRequiredService<ReplayArchiveService>().SweepAsync(puuid, ct);
         }
     }
 

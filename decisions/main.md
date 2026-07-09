@@ -101,3 +101,40 @@ underlying metrics instead. Chart greens/blues re-validated per surface
 machine); dev uses the Vite proxy. Chart palette (blue/red diverging for LP
 gain/loss, single blue series for LP-over-time) validated with the dataviz
 skill's CVD/contrast validator in both light and dark modes.
+
+## 2026-07-09 — Personal API key features (spectator, challenges context, replays)
+
+**Spectator polling lives inside MatchPollerService, not a second background
+service.** One pass = one spectator call + the match-list check, sharing the
+scope, error handling, and the rate-limiter budget. A separate service was
+rejected: two independent cadences would race the "game just ended → fast
+capture" transition that this feature exists for. Shared state is a tiny
+`LiveGameState` singleton (poller writes, `/api/live` reads); the end-of-game
+transition arms a 6-minute fast-capture window (15s cadence) that disarms as
+soon as any new match is ingested.
+
+**Live banner shows champions only, no lobby ranks.** Enriching 9 opponents with
+league-v4 would cost 9 calls per game start for scouting data the tool's
+philosophy (review your own play) doesn't need. Revisit only if lobby scouting
+becomes a real goal.
+
+**Replay archiving uses the official match-v5 `/replays` endpoint — probed live
+on 2026-07-09, returns pre-signed S3 URLs for the last ~5 games (1h expiry),
+verified to serve real .rofl files (RIOT magic).** Chosen over the two
+alternatives: LCU-driven client downloads (works, but needs a host-side bridge
+into the container and an open client) and op.gg-style spectator chunk
+recording (undocumented endpoints; the app registration explicitly promised not
+to use those). Downloads go through a plain HttpClient — the pre-signed URL is
+the auth; sending X-Riot-Token to S3 would leak the key off Riot's hosts, and
+the rate limiter must not throttle S3 transfers. Sweeps run at poller startup
+and after every ingest; the ~5-game window means an offline stretch loses its
+replays, accepted for a tool whose PC is always on. Trade-off accepted: .rofl
+playback is patch-locked by the client, so the archive is "review this patch",
+not a permanent library.
+
+**Challenges ladder context ships as `levelShare`/`nextLevel`/`nextLevelShare`
+on the existing percentiles payload** (one extra cached-7d call to
+`challenges/percentiles`), rendered as "GOLD = top 9% · next: PLAT = top 3%".
+A separate leaderboards-per-challenge endpoint exists but costs a call per
+challenge; rejected as 200+ calls for context the aggregate distribution
+already gives. A missing distribution degrades the row, never hides it.
