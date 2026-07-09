@@ -469,8 +469,8 @@ app.MapGet("/api/matches/{id}/series", async (string id, TimelineSeriesService s
 
 // The Lens: coaching scores for the recent window vs the player's own history,
 // optionally scoped to one role (TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY).
-app.MapGet("/api/lens", async (LensService lens, int window = 20, string? role = null, CancellationToken ct = default) =>
-    await lens.GetAsync(window, role, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+app.MapGet("/api/lens", async (LensService lens, int window = 20, int? days = null, string? role = null, CancellationToken ct = default) =>
+    await lens.GetAsync(window, days, role, ct) is { } result ? Results.Ok(result) : Results.NoContent());
 
 // Ladder percentiles (Challenges-V1) - how the player ranks vs everyone, the
 // external benchmark the wins-vs-losses analysis can't provide.
