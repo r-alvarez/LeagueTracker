@@ -138,21 +138,23 @@ const SPECIAL_SPELLS: Record<string, string> = {
 }
 
 // Non-champion damage sources use Riot's internal unit names.
-const UNIT_NAMES: Array<[RegExp, string]> = [
-  [/^$/, 'Turret'],
-  [/^turret/i, 'Turret'],
-  [/^sru_(order|chaos)minion/i, 'Minions'],
-  [/^sru_baron/i, 'Baron Nashor'],
-  [/^sru_riftherald/i, 'Rift Herald'],
-  [/^sru_horde/i, 'Void Grubs'],
-  [/^sru_dragon_?(\w*)/i, 'Dragon'],
-  [/^sru_red/i, 'Red Brambleback'],
-  [/^sru_blue/i, 'Blue Sentinel'],
-  [/^sru_gromp/i, 'Gromp'],
-  [/^sru_murkwolf/i, 'Murk Wolves'],
-  [/^sru_razorbeak/i, 'Raptors'],
-  [/^sru_krug/i, 'Krugs'],
-  [/^sru_crab/i, 'Scuttle Crab'],
+export type UnitKind = 'turret' | 'minions' | 'monster'
+
+const UNIT_NAMES: Array<[RegExp, string, UnitKind]> = [
+  [/^$/, 'Turret', 'turret'],
+  [/^turret/i, 'Turret', 'turret'],
+  [/^sru_(order|chaos)minion/i, 'Minions', 'minions'],
+  [/^sru_baron/i, 'Baron Nashor', 'monster'],
+  [/^sru_riftherald/i, 'Rift Herald', 'monster'],
+  [/^sru_horde/i, 'Void Grubs', 'monster'],
+  [/^sru_dragon_?(\w*)/i, 'Dragon', 'monster'],
+  [/^sru_red/i, 'Red Brambleback', 'monster'],
+  [/^sru_blue/i, 'Blue Sentinel', 'monster'],
+  [/^sru_gromp/i, 'Gromp', 'monster'],
+  [/^sru_murkwolf/i, 'Murk Wolves', 'monster'],
+  [/^sru_razorbeak/i, 'Raptors', 'monster'],
+  [/^sru_krug/i, 'Krugs', 'monster'],
+  [/^sru_crab/i, 'Scuttle Crab', 'monster'],
 ]
 
 /// Champion names pass through; internal unit names ("SRU_OrderMinionMelee",
@@ -162,6 +164,14 @@ export function sourceLabel(source: string): string {
     if (re.test(source)) return label
   }
   return source.startsWith('SRU_') ? source.slice(4).replace(/_/g, ' ') : source
+}
+
+/// Which glyph a non-champion source gets; null = a champion (or unknown).
+export function unitKind(source: string): UnitKind | null {
+  for (const [re, , kind] of UNIT_NAMES) {
+    if (re.test(source)) return kind
+  }
+  return source.startsWith('SRU_') ? 'monster' : null
 }
 
 /// Labels damage-recap spell names for the given source champions. Triggers the
