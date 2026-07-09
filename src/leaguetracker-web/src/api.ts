@@ -1,4 +1,4 @@
-import type { AnalyticsSummary, ChallengeBenchmark, ClipInfo, FullGameStatus, JobStatus, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchPage, RenderQueueRow, Stats, StorageInfo, Status } from './types'
+import type { AnalyticsSummary, ChallengeBenchmark, ClipInfo, FullGameStatus, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchPage, RenderQueueRow, Stats, StorageInfo, Status } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const resp = await fetch(url)
@@ -25,6 +25,12 @@ export const api = {
   deleteFullGame: async (id: string) => { await fetch(`/api/matches/${id}/fullgame`, { method: 'DELETE' }) },
   retryRender: async (id: string, kind: 'clips' | 'full') => { await fetch(`/api/render/${id}/retry?kind=${kind}`, { method: 'POST' }) },
   storage: () => get<StorageInfo>('/api/storage'),
+  lens: async (window: number): Promise<LensResponse | null> => {
+    const r = await fetch(`/api/lens?window=${window}`)
+    if (r.status === 204) return null   // not enough games yet
+    if (!r.ok) throw new Error(`/api/lens -> HTTP ${r.status}`)
+    return r.json()
+  },
   lpHistory: (queue: string) => get<LpPoint[]>(`/api/lp/history?queue=${encodeURIComponent(queue)}`),
   lpPerGame: () => get<LpPerGame[]>('/api/lp/per-game'),
   jobStatus: () => get<JobStatus>('/api/jobs/status'),

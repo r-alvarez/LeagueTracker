@@ -397,6 +397,40 @@ export interface StorageInfo {
   databaseMb: number
 }
 
+export interface LensTile {
+  key: string
+  label: string
+  desc: string
+  unit: string
+  decimals: number
+  higherIsBetter: boolean
+  value: number | null
+  old: number | null
+}
+
+export interface LensSub {
+  key: string
+  label: string
+  desc: string
+  score: number | null
+  tiles: LensTile[]
+}
+
+export interface LensCategory {
+  key: string
+  label: string
+  score: number | null
+  subs: LensSub[] | null
+  tiles: LensTile[] | null
+}
+
+export interface LensResponse {
+  games: number
+  window: number
+  hasBaseline: boolean
+  categories: LensCategory[]
+}
+
 export interface LiveParticipant {
   championId: number
   teamId: number

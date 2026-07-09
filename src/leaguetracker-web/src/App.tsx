@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import Matches from './pages/Matches'
 import MatchDetail from './pages/MatchDetail'
 import DataPage from './pages/DataPage'
+import Coach from './pages/Coach'
 import LiveGameBanner from './components/LiveGameBanner'
 
 export default function App() {
@@ -31,6 +32,7 @@ export default function App() {
 
       <nav className="tabs">
         <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>Dashboard</NavLink>
+        <NavLink to="/coach" className={({ isActive }) => (isActive ? 'active' : '')}>Coach</NavLink>
         <NavLink to="/matches" className={({ isActive }) => (isActive ? 'active' : '')}>Matches</NavLink>
         <NavLink to="/data" className={({ isActive }) => (isActive ? 'active' : '')}>Data & sync</NavLink>
       </nav>
@@ -39,6 +41,7 @@ export default function App() {
 
       <Routes>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/coach" element={<Coach />} />
         <Route path="/matches" element={<Matches />} />
         <Route path="/matches/:id" element={<MatchDetail />} />
         <Route path="/data" element={<DataPage />} />

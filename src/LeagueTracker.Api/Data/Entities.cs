@@ -118,6 +118,10 @@ public sealed class Match
     /// ([{min, gold, xp, cs, level, myCs, myLevel}]).
     public string LaneDiffsJson { get; set; } = "";
 
+    /// Detected fights (duel/skirmish/teamfight with outcome, participation,
+    /// gold swing, conversion) as JSON - the Lens fighting metrics' source.
+    public string FightsJson { get; set; } = "";
+
     public List<MatchParticipant> Participants { get; set; } = [];
     public List<Death> DeathEvents { get; set; } = [];
     public List<PositionSample> PositionSamples { get; set; } = [];

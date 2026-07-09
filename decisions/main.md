@@ -204,3 +204,24 @@ only kind-aware upload/complete routing.
 evaluated and parked**: an mp4 in <video> natively covers pause/seek/speed;
 the only capability lost is changing the camera target after render, which
 does not justify HLS streaming + a control relay for a single-user tool.
+
+## 2026-07-09 — The Lens (Phase C, rescoped from per-match curves)
+
+**Per-match metric curves were demoted mid-phase** on user direction — dpm.lol's
+Lens (fight-level coaching scores) is the model, not u.gg's line charts. The
+/api/matches/{id}/series endpoint was kept (built and cheap) but has no UI.
+
+**Fight detection is ours, from stored data**: kill events chain into a fight
+while within 15s and 3500 units of the cluster centroid; headcount = killers +
+victims + anyone interpolated within 2500 units at mid-fight; duel = 1v1,
+teamfight = 3+ both sides, else skirmish. Result counts victims per side (so
+executions count), gold swing is the team-gold-diff change across the fight
+(60s-frame coarse — honest ceiling), conversion = winner takes an objective
+within 45s. Persisted per game as FightsJson (schema-free, like ChallengesJson).
+
+**Lens scores are self-percentiles, not cohort estimates**: score 73 = the
+recent window's mean sits at the player's own 73rd percentile across all
+stored games. We deliberately do NOT fake a "vs Gold" cohort baseline (no
+population data); Riot's Challenges percentiles remain the external anchor
+and are cross-linked in the UI copy. dpm's NEW vs OLD compare is the model
+for the tile detail (recent window vs everything before it).

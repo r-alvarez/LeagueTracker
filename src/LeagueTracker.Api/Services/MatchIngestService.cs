@@ -157,6 +157,7 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
         match.LaneCsDiff15 = analysis.LaneCsDiff15;
         match.FirstToLevel2 = analysis.FirstToLevel2;
         match.LaneDiffsJson = analysis.LaneDiffs is { Count: > 0 } ? JsonSerializer.Serialize(analysis.LaneDiffs, WebJson) : "";
+        match.FightsJson = analysis.Fights is { Count: > 0 } ? JsonSerializer.Serialize(analysis.Fights, WebJson) : "";
         match.SkillOrder = analysis.SkillOrder;
         match.AvgUnspentGold = analysis.AvgUnspentGold;
         match.MaxUnspentGold = analysis.MaxUnspentGold;
