@@ -428,6 +428,9 @@ export interface LensResponse {
   games: number
   window: number
   hasBaseline: boolean
+  winrate: number
+  topChampion: string | null
+  topChampionOld: string | null
   categories: LensCategory[]
 }
 
