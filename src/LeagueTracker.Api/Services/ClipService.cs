@@ -169,10 +169,10 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
             var failed = FailReason(m.Id);
             var status = clips ? "done"
                 : failed is not null ? "failed"
-                : leases.IsLeased(m.Id) ? "rendering"
+                : leases.IsLeased($"clips:{m.Id}") ? "rendering"
                 : m.HasTimeline && await PlanAsync(m.Id, ct) is { Windows.Count: > 0 } ? "pending"
                 : "no-events";
-            rows.Add(new { MatchId = m.Id, m.Champion, m.GameEndUtc, Status = status, Error = failed });
+            rows.Add(new { MatchId = m.Id, m.Champion, m.GameEndUtc, Kind = "clips", Status = status, Error = failed });
         }
         return rows;
     }

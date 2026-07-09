@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
-import type { ClipInfo, DeathEvent, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts } from '../types'
+import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts } from '../types'
 import { STAT_SHARDS, useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
 
@@ -427,12 +427,14 @@ export default function MatchDetail() {
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('general')
   const [clips, setClips] = useState<ClipInfo[]>([])
+  const [fullGame, setFullGame] = useState<FullGameStatus | null>(null)
   const clipRefs = useRef<Record<number, HTMLVideoElement | null>>({})
 
   useEffect(() => {
     if (!id) return
     api.match(id).then(setDetail).catch(e => setError(String(e)))
     api.clips(id).then(setClips).catch(() => setClips([]))
+    api.fullGameStatus(id).then(setFullGame).catch(() => setFullGame(null))
   }, [id])
 
   // Jump the covering clip to ~5s before the moment and play it.
@@ -501,6 +503,52 @@ export default function MatchDetail() {
           </div>
         )}
       </div>
+
+      {fullGame && (fullGame.state !== 'none' || m.hasReplay) && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <h2>
+            Full game <span className="mut" style={{ fontWeight: 400 }}>— the whole match as one video, camera on you</span>
+          </h2>
+          {fullGame.state === 'done' && (
+            <>
+              <video src={`/api/matches/${id}/fullgame`} controls preload="metadata"
+                style={{ width: '100%', maxWidth: 960, borderRadius: 8, background: '#000' }} />
+              <p className="mut sm-text" style={{ margin: '8px 0 0' }}>
+                {fullGame.sizeMb} MB{fullGame.renderedUtc && ` · rendered ${new Date(fullGame.renderedUtc).toLocaleDateString()}`}
+                {fullGame.keep ? ' · kept forever' : ' · auto-deleted after the retention window'}
+                {' · '}
+                <button className="action" style={{ padding: '0 8px' }}
+                  onClick={() => id && api.toggleFullGameKeep(id).then(setFullGame)}>
+                  {fullGame.keep ? 'unkeep' : 'keep'}
+                </button>
+                {' '}
+                <button className="action" style={{ padding: '0 8px' }}
+                  onClick={() => { if (id && window.confirm('Delete this render? The replay may no longer be re-renderable on a newer patch.')) { void api.deleteFullGame(id).then(() => api.fullGameStatus(id).then(setFullGame)) } }}>
+                  delete
+                </button>
+              </p>
+            </>
+          )}
+          {(fullGame.state === 'requested' || fullGame.state === 'rendering') && (
+            <p className="mut" style={{ margin: 0 }}>
+              {fullGame.state === 'requested' ? 'Queued — waiting for the render agent on the gaming PC.' : 'Rendering now on the gaming PC…'}
+            </p>
+          )}
+          {fullGame.state === 'failed' && (
+            <p style={{ margin: 0 }}>
+              <span className="loss">Render failed:</span> <span className="mut">{fullGame.error}</span>{' '}
+              <button className="action" onClick={() => id && api.retryRender(id, 'full').then(() => api.fullGameStatus(id).then(setFullGame))}>Retry</button>
+            </p>
+          )}
+          {fullGame.state === 'none' && (
+            <p className="mut" style={{ margin: 0 }}>
+              <button className="action" onClick={() => id && api.requestFullGame(id).then(setFullGame)}>Render full game</button>
+              {' '}~500 MB and a real-time render on the gaming PC — worth it for games you want to study start to finish.
+              Unkept renders are deleted automatically after the retention window; the clips below stay forever.
+            </p>
+          )}
+        </div>
+      )}
 
       {clips.length > 0 && (
         <div className="card" style={{ marginBottom: 14 }}>

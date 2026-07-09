@@ -15,4 +15,7 @@ public sealed class RiotOptions
     /// Root for the SQLite db and raw per-game JSON. Relative paths resolve against content root.
     public string DataDir { get; set; } = "Data";
     public double RateSafetyMargin { get; set; } = 0.05;
+    /// Full-game renders are big (~500MB); auto-delete this many days after
+    /// rendering unless marked keep. Clips are small and live forever.
+    public int FullGameRetentionDays { get; set; } = 60;
 }

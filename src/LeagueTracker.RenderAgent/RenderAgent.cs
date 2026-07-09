@@ -104,14 +104,14 @@ public sealed class RenderAgent(AgentConfig config)
         if (job is null) return false;
 
         var windows = config.MaxWindowsPerJob > 0 ? job.Windows.Take(config.MaxWindowsPerJob).ToList() : job.Windows;
-        Log.Info($"Job {job.MatchId}: {windows.Count} window(s), following \"{job.MyName}\" ({job.MyChampion})");
+        Log.Info($"Job {job.MatchId} ({job.Kind}): {windows.Count} window(s), following \"{job.MyName}\" ({job.MyChampion})");
 
         try
         {
             if (MockRender) await MockRenderJobAsync(job, windows, ct);
             else await RenderJobAsync(job, windows, ct);
 
-            await _tracker.CompleteAsync(job.MatchId, ct);
+            await _tracker.CompleteAsync(job, ct);
             Log.Info($"Job {job.MatchId} complete");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -121,7 +121,7 @@ public sealed class RenderAgent(AgentConfig config)
         catch (Exception ex)
         {
             Log.Error($"Job {job.MatchId} failed: {ex.Message}");
-            await _tracker.FailAsync(job.MatchId, ex.Message, CancellationToken.None);
+            await _tracker.FailAsync(job, ex.Message, CancellationToken.None);
         }
         return true;
     }
@@ -171,7 +171,7 @@ public sealed class RenderAgent(AgentConfig config)
                 await CaptureAsync(output, window.EndSec - window.StartSec, ct);
                 await replayApi.SetPlaybackAsync(time: null, paused: true, speed: null, ct);
 
-                await _tracker.UploadClipAsync(job.MatchId, window.Index, output, ct);
+                await _tracker.UploadAsync(job, window.Index, output, ct);
                 File.Delete(output);
                 Log.Info($"Window {window.Index}: uploaded");
             }
@@ -191,11 +191,12 @@ public sealed class RenderAgent(AgentConfig config)
         foreach (var window in windows)
         {
             var output = Path.Combine(_workDir, $"{job.MatchId}-w{window.Index:00}.mp4");
-            var duration = Math.Max(2, window.EndSec - window.StartSec);
+            // Cap mock durations: a mock "full game" only needs to prove the route.
+            var duration = Math.Clamp(window.EndSec - window.StartSec, 2, 30);
             // Plain test pattern - drawtext needs fontconfig, which Windows ffmpeg
             // builds crash on; the burnt-in frame counter is enough to eyeball.
             await RunFfmpegAsync($"-y -f lavfi -i testsrc2=size=1280x720:rate=30 -t {duration} -c:v libx264 -preset veryfast -crf 28 -pix_fmt yuv420p \"{output}\"", ct);
-            await _tracker.UploadClipAsync(job.MatchId, window.Index, output, ct);
+            await _tracker.UploadAsync(job, window.Index, output, ct);
             File.Delete(output);
             Log.Info($"Window {window.Index}: mock clip uploaded ({duration}s)");
         }
