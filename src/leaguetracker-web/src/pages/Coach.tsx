@@ -66,56 +66,18 @@ function Delta({ t }: { t: LensTile }) {
   return <span className={`lens-delta ${improved ? 'win' : 'loss'}`}>{up ? '▲' : '▼'}</span>
 }
 
-/// Tile-sized trace of the metric across the window.
-function Spark({ series }: { series: (number | null)[] }) {
-  const pts = series.map((v, i) => ({ v, i })).filter((p): p is { v: number; i: number } => p.v !== null)
-  if (pts.length < 2) return <span style={{ height: 22 }} />
-  const min = Math.min(...pts.map(p => p.v))
-  const max = Math.max(...pts.map(p => p.v))
-  const W = 120
-  const H = 22
-  const x = (i: number) => (series.length > 1 ? (i / (series.length - 1)) * W : 0)
-  const y = (v: number) => (max === min ? H / 2 : H - 2 - ((v - min) / (max - min)) * (H - 4))
+/// Does this stat decide games? The same metric split by result - a number
+/// pair, deliberately not a chart.
+function WinLossSplit({ t, wins }: { t: LensTile; wins: boolean[] }) {
+  const inWins = t.series.filter((v, i) => v !== null && wins[i]) as number[]
+  const inLosses = t.series.filter((v, i) => v !== null && !wins[i]) as number[]
+  if (inWins.length < 2 || inLosses.length < 2) return null
+  const mean = (a: number[]) => Math.round((a.reduce((x, y) => x + y, 0) / a.length) * 100) / 100
   return (
-    <svg className="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden>
-      <polyline fill="none" stroke="var(--series-1)" strokeWidth="1.6" strokeLinejoin="round"
-        points={pts.map(p => `${x(p.i)},${y(p.v)}`).join(' ')} />
-    </svg>
-  )
-}
-
-/// The detail's actual payload: this metric game by game, bars colored by the
-/// game's result, with the OLD-era average as a dashed reference line.
-function Trend({ t, wins }: { t: LensTile; wins: boolean[] }) {
-  const s = t.series
-  const vals = s.filter((v): v is number => v !== null)
-  if (vals.length < 2) return <p className="mut sm-text" style={{ margin: 0 }}>Not enough games with this stat.</p>
-  const lo = Math.min(0, ...vals, t.old ?? Infinity)
-  const hi = Math.max(...vals, t.old ?? -Infinity, 0.0001)
-  const W = 600
-  const H = 130
-  const pad = 4
-  const bw = Math.max(3, W / s.length - 3)
-  const yOf = (v: number) => pad + (1 - (v - lo) / (hi - lo)) * (H - 2 * pad)
-  const zero = yOf(Math.max(0, lo))
-  return (
-    <svg className="trend" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={`${t.label} per game`}>
-      {t.old !== null && (
-        <line x1="0" x2={W} y1={yOf(t.old)} y2={yOf(t.old)} stroke="var(--muted)" strokeWidth="1" strokeDasharray="5 4" />
-      )}
-      {s.map((v, i) => {
-        if (v === null) return null
-        const x = (i / s.length) * W + 1.5
-        const yTop = Math.min(yOf(v), zero)
-        const h = Math.max(2, Math.abs(yOf(v) - zero))
-        return (
-          <rect key={i} x={x} y={yTop} width={bw} height={h} rx="2"
-            fill={wins[i] ? 'var(--delta-good)' : 'var(--lp-loss)'} opacity="0.85">
-            <title>{`game ${i + 1} (${wins[i] ? 'win' : 'loss'}): ${fmt(t, v)}`}</title>
-          </rect>
-        )
-      })}
-    </svg>
+    <span className="wl-split">
+      <span className="obj-chip win">in wins <strong>{fmt(t, mean(inWins))}</strong></span>
+      <span className="obj-chip loss">in losses <strong>{fmt(t, mean(inLosses))}</strong></span>
+    </span>
   )
 }
 
@@ -130,8 +92,6 @@ function TileGrid({ tiles, data }: { tiles: LensTile[]; data: LensResponse }) {
           <button key={t.key} className={`lens-tile ${t.key === active?.key ? 'on' : ''}`} onClick={() => setSelected(t.key)} title={t.desc}>
             <span className="lt-label">{t.label}</span>
             <span className="lt-value">{fmt(t, t.value)} <Delta t={t} /></span>
-            {t.old !== null && <span className="lt-old mut">was {fmt(t, t.old)}</span>}
-            <Spark series={t.series} />
           </button>
         ))}
       </div>
@@ -139,21 +99,22 @@ function TileGrid({ tiles, data }: { tiles: LensTile[]; data: LensResponse }) {
         <div className="lens-detail">
           <div className="ld-top">
             <div className="ld-hero">
-              <span className="ld-value">{fmt(active, active.value)} <Delta t={active} /></span>
-              <span className="ld-label">{active.label} <span className="mut sm-text">· last {data.window} games, oldest → newest</span></span>
+              <span className="ld-value">{fmt(active, active.value)}</span>
+              <span className="ld-label">{active.label}</span>
             </div>
-            {data.hasBaseline && active.old !== null && (
-              <span className="ld-side">
-                <ChampFace name={data.topChampion} /> <strong>{fmt(active, active.value)}</strong> <span className="mut sm-text">NEW</span>
-                <span className="vs-badge">vs</span>
-                <strong>{fmt(active, active.old)}</strong> <span className="mut sm-text">OLD</span> <ChampFace name={data.topChampionOld} />
-              </span>
-            )}
+            <span className="ld-right">
+              <WinLossSplit t={active} wins={data.recentWins} />
+              {data.hasBaseline && active.old !== null && (
+                <span className="ld-side">
+                  <ChampFace name={data.topChampion} /> <Delta t={active} /> <strong>{fmt(active, active.value)}</strong> <span className="mut sm-text">NEW</span>
+                  <span className="vs-badge">vs</span>
+                  <strong>{fmt(active, active.old)}</strong> <span className="mut sm-text">OLD</span> <ChampFace name={data.topChampionOld} />
+                </span>
+              )}
+            </span>
           </div>
-          <Trend t={active} wins={data.recentWins} />
           <p className="mut sm-text" style={{ margin: 0 }}>
-            {active.desc}.{!active.higherIsBetter && ' Lower is better.'} Bars are single games, green = won, red = lost;
-            the dashed line is your pre-window average.
+            {active.desc}.{!active.higherIsBetter && ' Lower is better.'}
           </p>
         </div>
       )}

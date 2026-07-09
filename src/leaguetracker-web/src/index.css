@@ -697,3 +697,8 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .spark { width: 100%; height: 22px; margin-top: 3px; opacity: 0.85; }
 .trend { width: 100%; height: 130px; margin: 10px 0 8px; }
 .ld-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+/* Coach detail: dpm footer shape - hero left, win/loss chips + NEW vs OLD right. */
+.ld-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.wl-split { display: inline-flex; gap: 8px; }
+.wl-split .obj-chip strong { font-variant-numeric: tabular-nums; }
