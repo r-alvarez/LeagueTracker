@@ -120,9 +120,15 @@ export default function Matches() {
   const [rankedOnly, setRankedOnly] = useState(true)
 
   useEffect(() => {
-    api.matches(page, PAGE_SIZE, rankedOnly ? true : undefined)
-      .then(p => { setItems(p.items); setTotal(p.total) })
-      .catch(console.error)
+    const load = () =>
+      api.matches(page, PAGE_SIZE, rankedOnly ? true : undefined)
+        .then(p => { setItems(p.items); setTotal(p.total) })
+        .catch(console.error)
+    load()
+    // Freshly finished games land server-side minutes after the game ends;
+    // refetch quietly so they appear without a manual reload.
+    const id = setInterval(load, 30_000)
+    return () => clearInterval(id)
   }, [page, rankedOnly])
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))

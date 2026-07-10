@@ -124,20 +124,34 @@ export default function Dashboard() {
   const [lpGames, setLpGames] = useState<LpPerGame[]>([])
   const [deaths, setDeaths] = useState<AnalyticsSummary | null>(null)
 
+  // Freshly captured games should show up without a manual reload, so every
+  // loader refetches on a quiet interval alongside its trigger.
   useEffect(() => {
-    api.status().then(setStatus).catch(console.error)
-    api.lpPerGame().then(setLpGames).catch(console.error)
-    api.analytics(20).then(setDeaths).catch(console.error)
+    const load = () => {
+      api.status().then(setStatus).catch(console.error)
+      api.lpPerGame().then(setLpGames).catch(console.error)
+      api.analytics(20).then(setDeaths).catch(console.error)
+    }
+    load()
+    const id = setInterval(load, 60_000)
+    return () => clearInterval(id)
   }, [])
 
   useEffect(() => {
     const w = WINDOWS.find(x => x.key === windowKey)!
-    api.stats({ days: 'days' in w ? w.days : undefined, lastGames: 'lastGames' in w ? w.lastGames : undefined })
-      .then(setStats).catch(console.error)
+    const load = () =>
+      api.stats({ days: 'days' in w ? w.days : undefined, lastGames: 'lastGames' in w ? w.lastGames : undefined })
+        .then(setStats).catch(console.error)
+    load()
+    const id = setInterval(load, 60_000)
+    return () => clearInterval(id)
   }, [windowKey])
 
   useEffect(() => {
-    api.lpHistory(queue).then(setLpPoints).catch(console.error)
+    const load = () => api.lpHistory(queue).then(setLpPoints).catch(console.error)
+    load()
+    const id = setInterval(load, 60_000)
+    return () => clearInterval(id)
   }, [queue])
 
   const queueGames = useMemo(
