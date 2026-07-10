@@ -47,12 +47,19 @@ builder.Services.AddHostedService<MatchPollerService>();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins("http://localhost:5173").AllowAnyHeader().AllowAnyMethod()));
 
+// Compress JSON app-side: the Traefik deployment doesn't compress (the old
+// Caddy proxy did), and this way every proxy setup gets it for free.
+builder.Services.AddResponseCompression(o => o.EnableForHttps = true);
+
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<LeagueDbContext>();
     db.Database.EnsureCreated();
+    // WAL lets match pages read while the poller/backfill writes (the default
+    // rollback journal blocks readers for the whole write). Persistent setting.
+    db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL");
     // Additive columns land via idempotent ALTERs - EnsureCreated never alters an
     // existing table, and wiping the db would cost capture-time-only data (ranks, LP).
     foreach (var alter in new[]
@@ -80,6 +87,7 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseCors();
+app.UseResponseCompression();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -379,7 +387,10 @@ app.MapPost("/api/render/{matchId}/retry", (string matchId, ClipService clips, F
 
 app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, ReplayArchiveService replays, CancellationToken ct) =>
 {
+    // Four collection includes in one query = a cartesian product across all of
+    // them (millions of rows per match on SQLite). Split runs one query each.
     var match = await db.Matches.AsNoTracking()
+        .AsSplitQuery()
         .Include(m => m.Participants.OrderBy(p => p.ParticipantId))
         .Include(m => m.DeathEvents.OrderBy(d => d.TimeSec)).ThenInclude(d => d.DamageInstances)
         .Include(m => m.ObjectiveEvents.OrderBy(o => o.TimeSec))
