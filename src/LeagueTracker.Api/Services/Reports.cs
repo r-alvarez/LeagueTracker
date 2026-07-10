@@ -365,7 +365,7 @@ public static class Reports
                 DeathsPerGame = Math.Round(Avg(g.Select(m => (double)m.Deaths)), 2),
                 // Real LP attributed to this split - the number ranked sites can only estimate.
                 LpTotal = g.Sum(m => m.LpChange ?? 0),
-                LpKnown = g.Count(m => m.LpChange != null),
+                LpKnown = g.Count(m => m.LpChange is not null),
                 // Drill-down extras: score-line averages and lane matchups.
                 Detail = withDetail
                     ? (object?)new
