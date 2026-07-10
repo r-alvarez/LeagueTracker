@@ -24,8 +24,15 @@ public sealed class TrackerClient(string serverUrl, string agentName)
 
     public async Task<bool> PingAsync(CancellationToken ct)
     {
-        using var resp = await _http.GetAsync($"{serverUrl}/api/status", ct);
-        return resp.IsSuccessStatusCode;
+        try
+        {
+            using var resp = await _http.GetAsync($"{serverUrl}/api/status", ct);
+            return resp.IsSuccessStatusCode;
+        }
+        catch when (!ct.IsCancellationRequested)
+        {
+            return false;   // down/refusing server = unreachable, not a crash
+        }
     }
 
     public async Task<bool> PlayerInGameAsync(CancellationToken ct)
