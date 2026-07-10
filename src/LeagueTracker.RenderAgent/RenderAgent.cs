@@ -15,6 +15,7 @@ public sealed class RenderAgent(AgentConfig config)
     private string _gameDir = "";
     private string _gameExe = "";
     private string _ffmpeg = "";
+    private bool _reportedUserActive;
 
     /// MockRender skips the game entirely and renders test-pattern clips with
     /// ffmpeg - lets the whole queue/upload pipeline be verified on a machine
@@ -122,6 +123,17 @@ public sealed class RenderAgent(AgentConfig config)
             {
                 if (!await lcu.IsUpAsync(ct)) { Log.Info("League client still starting - waiting"); return false; }
             }
+
+            // Idle gate: the camera lock needs the game window focused, which
+            // can only be taken reliably (and politely) when nobody is using
+            // the PC - so renders wait until the keyboard/mouse go quiet.
+            if (GameWindow.UserIdleTime < TimeSpan.FromSeconds(config.IdleSeconds))
+            {
+                if (!_reportedUserActive) Log.Info($"User is active - rendering waits for {config.IdleSeconds}s of idle");
+                _reportedUserActive = true;
+                return false;
+            }
+            _reportedUserActive = false;
         }
 
         foreach (var tracker in _trackers)
@@ -157,6 +169,10 @@ public sealed class RenderAgent(AgentConfig config)
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (RenderPostponedException ex)
+        {
+            Log.Warn($"Job {job.MatchId} postponed: {ex.Message} - retried automatically when the lease expires (~30 min)");
         }
         catch (Exception ex)
         {
@@ -214,9 +230,9 @@ public sealed class RenderAgent(AgentConfig config)
             {
                 await EngageCameraLockAsync(replayApi, cameraName, windows[0].StartSec, ct);
             }
-            else
+            else if (windows.Count > 0)
             {
-                Log.Warn("No verified selection - skipping the camera-lock key (free camera)");
+                throw new RenderPostponedException("no verified selection for the camera");
             }
 
             foreach (var window in windows)
@@ -342,8 +358,13 @@ public sealed class RenderAgent(AgentConfig config)
         }
         await replayApi.SetPlaybackAsync(time: null, paused: true, speed: null, ct);
         if (locked) Log.Info($"Camera locked on \"{cameraName}\" (verified tracking)");
-        else Log.Warn("Camera lock could not be verified - recording with a free camera");
+        else throw new RenderPostponedException("the camera lock could not be engaged (user became active?)");
     }
+
+    /// Not a failure: the conditions for a quality render weren't met (camera
+    /// lock, selection). The job is left unfailed so it becomes claimable
+    /// again when its lease expires, instead of needing a manual retry.
+    private sealed class RenderPostponedException(string message) : Exception(message);
 
     private static async Task<bool> CameraTracksAsync(ReplayApiClient api, CancellationToken ct)
     {

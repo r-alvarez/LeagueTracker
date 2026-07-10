@@ -17,6 +17,11 @@ public sealed class AgentConfig
     public int CaptureFramerate { get; set; } = 30;
     public int MaxWindowsPerJob { get; set; }
 
+    /// Renders only start after this much keyboard/mouse idle time - the
+    /// camera lock needs the game window focused, which can only be taken
+    /// reliably (and politely) when nobody is using the PC.
+    public int IdleSeconds { get; set; } = 120;
+
     /// appsettings.json next to the exe, then LT_* environment variables on top.
     public static AgentConfig Load()
     {

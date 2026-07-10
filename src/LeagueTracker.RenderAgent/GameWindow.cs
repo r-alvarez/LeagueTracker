@@ -27,6 +27,17 @@ internal static class GameWindow
         return width > 0 && height > 0 ? (origin.X, origin.Y, width, height) : null;
     }
 
+    /// Time since the last keyboard/mouse input, session-wide.
+    public static TimeSpan UserIdleTime
+    {
+        get
+        {
+            var info = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
+            if (!GetLastInputInfo(ref info)) return TimeSpan.Zero;
+            return TimeSpan.FromMilliseconds(unchecked((uint)Environment.TickCount - info.Tick));
+        }
+    }
+
     /// Restores the game window if it was minimized - a minimized window
     /// reports a degenerate client rect, which breaks the capture crop.
     public static bool TryRestore(string title)
@@ -47,7 +58,12 @@ internal static class GameWindow
     {
         var hwnd = FindWindowW(null, title);
         if (hwnd == 0) return false;
+        // Windows only grants SetForegroundWindow to the process that owns the
+        // foreground or received recent input - a synthesized Alt press counts
+        // as recent input and unlocks it (the classic background-focus trick).
+        keybd_event(VkMenu, 0, 0, 0);
         SetForegroundWindow(hwnd);
+        keybd_event(VkMenu, 0, KeyeventfKeyup, 0);
         Thread.Sleep(400);
         if (GetForegroundWindow() != hwnd) return false;
         keybd_event(virtualKey, 0, 0, 0);
@@ -57,6 +73,7 @@ internal static class GameWindow
     }
 
     private const uint KeyeventfKeyup = 2;
+    private const byte VkMenu = 0x12;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint FindWindowW(string? className, string windowName);
@@ -81,6 +98,11 @@ internal static class GameWindow
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(nint hwnd, int cmd);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetLastInputInfo(ref LastInputInfo info);
+
+    private struct LastInputInfo { public uint Size; public uint Tick; }
 
     private struct NativeRect { public int Left, Top, Right, Bottom; }
 
