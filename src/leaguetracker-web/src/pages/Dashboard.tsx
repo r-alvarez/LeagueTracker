@@ -59,9 +59,12 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
                     <td><WinrateBar wins={r.wins} losses={r.games - r.wins} /></td>
                     <td className="num"><span className={`kda-ratio ${kdaCls(r.kda)}`} style={{ fontSize: 13 }}>{r.kda.toFixed(2)}</span></td>
                     {!compact && <>
-                      <td className="num">
+                      <td className="num" title="Sum of real attributed LP changes; only live-captured games carry one">
                         {r.lpKnown > 0
-                          ? <span className={r.lpTotal >= 0 ? 'win' : 'loss'}>{r.lpTotal >= 0 ? '+' : ''}{r.lpTotal}</span>
+                          ? <>
+                              <span className={r.lpTotal >= 0 ? 'win' : 'loss'}>{r.lpTotal >= 0 ? '+' : ''}{r.lpTotal}</span>
+                              {r.lpKnown < r.games && <span className="mut sm-text"> /{r.lpKnown}g</span>}
+                            </>
                           : <span className="mut">—</span>}
                       </td>
                       <td className="num">{pct(r.kp)}</td>
