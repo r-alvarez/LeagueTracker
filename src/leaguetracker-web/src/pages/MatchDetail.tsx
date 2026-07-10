@@ -584,8 +584,11 @@ export default function MatchDetail() {
                 {m.hasReplay && (
                   <>
                     {' · '}
+                    <a href={`leaguereplay://${window.location.host}/${m.id}`}
+                      title="Launch in the League client — needs the replay launcher registered on this PC (LeagueTracker.ReplayLauncher --register)">watch replay ▶</a>
+                    {' · '}
                     <a href={`/api/matches/${m.id}/replay`} download
-                      title="Official .rofl — plays in the client while this patch is live">watch replay ⬇︎</a>
+                      title="Official .rofl — plays in the client while this patch is live">⬇︎</a>
                   </>
                 )}
               </div>
