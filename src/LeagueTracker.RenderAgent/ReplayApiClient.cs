@@ -39,18 +39,39 @@ public sealed class ReplayApiClient : IDisposable
     public Task SetPlaybackAsync(double? time, bool? paused, double? speed, CancellationToken ct) =>
         PostAsync("/replay/playback", new { time, paused, speed }, ct);
 
-    /// Locks the camera onto the tracked player, with fog of war from their
-    /// team's view, and hides the replay UI (timeline/controls) so recordings
-    /// look like a spectate rather than a replay session.
+    /// Selects the tracked player: fog of war renders from their team's view
+    /// and the target frame shows their abilities/cooldowns. The UI state is
+    /// asserted explicitly every time because the game persists replay UI
+    /// settings across sessions - whatever the last session (or a human
+    /// experimenting) left behind would silently leak into recordings.
+    /// interfaceFrames in particular replaces the target frame (and its
+    /// cooldowns) with spectate-style side frames, which defeats the point.
     public Task FollowPlayerAsync(string playerName, CancellationToken ct) =>
         PostAsync("/replay/render", new
         {
-            cameraAttached = true,
             selectionName = playerName,
             fogOfWar = true,
-            interfaceTimeline = false,
-            interfaceReplay = false,
+            interfaceFrames = false,
+            interfaceTarget = true,
+            interfaceReplay = true,
+            interfaceTimeline = true,
         }, ct);
+
+    /// Camera world position - the ground truth for whether a camera lock is
+    /// actually tracking (the position moves) or just claimed.
+    public async Task<(double X, double Z)?> GetCameraPositionAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{Base}/replay/render", ct));
+            var pos = doc.RootElement.GetProperty("cameraPosition");
+            return (pos.GetProperty("x").GetDouble(), pos.GetProperty("z").GetDouble());
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or KeyNotFoundException)
+        {
+            return null;
+        }
+    }
 
     /// The selection the game actually accepted - a name the game doesn't
     /// recognise leaves this empty, so callers can verify their follow stuck.
