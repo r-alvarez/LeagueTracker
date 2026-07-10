@@ -6,6 +6,7 @@ public sealed class RenderAgent(AgentConfig config)
 {
     private const string GameWindowTitle = "League of Legends (TM) Client";
     private const string GameProcessName = "League of Legends";
+    private const byte VkY = 0x59;
 
     private readonly List<TrackerClient> _trackers =
         [.. config.ServerUrls.Select(url => new TrackerClient(url, config.AgentName))];
@@ -176,6 +177,12 @@ public sealed class RenderAgent(AgentConfig config)
         // goes through the League client's replay flow: rofl into its Replays
         // folder (client naming: PLATFORM-gameId), scan, watch.
         var (platform, gameId) = ParseMatchId(job.MatchId);
+        // EnableDirectedCamera gates the replay's camera-mode system as a
+        // whole - with it off, only the manual camera exists and the Y lock
+        // toggle is inert (verified empirically). Keep it on; the engage loop
+        // below verifies the camera actually tracks before trusting it.
+        EnsureDirectedCameraEnabled();
+
         using var lcu = LcuClient.TryConnect(LeagueRoot)
             ?? throw new InvalidOperationException("League client not running - it must be open to launch replays under Vanguard");
         var roflPath = Path.Combine(await lcu.GetReplaysPathAsync(ct), $"{platform}-{gameId}.rofl");
@@ -195,6 +202,22 @@ public sealed class RenderAgent(AgentConfig config)
             await WaitForReplayApiAsync(game, replayApi, ct);
             await replayApi.SetPlaybackAsync(time: null, paused: true, speed: 1, ct);
             var cameraName = await ResolveCameraNameAsync(replayApi, job, ct);
+
+            // The API's cameraAttached flag is inert (the camera never moves);
+            // the game's own Y hotkey - toggle camera lock on the selected unit
+            // - is what actually engages the follow, and it survives seeks. But
+            // a press too early (loading/intro) is silently ignored, so engage
+            // at the first window's timestamp (mid-fight, movement guaranteed)
+            // and verify the camera actually tracks before trusting it. Only
+            // with a verified selection: Y without one flips camera modes.
+            if (cameraName is { Length: > 0 } && windows.Count > 0)
+            {
+                await EngageCameraLockAsync(replayApi, cameraName, windows[0].StartSec, ct);
+            }
+            else
+            {
+                Log.Warn("No verified selection - skipping the camera-lock key (free camera)");
+            }
 
             foreach (var window in windows)
             {
@@ -262,21 +285,29 @@ public sealed class RenderAgent(AgentConfig config)
     /// sticks. Falls back to the server-sent name with a warning.
     private static async Task<string?> ResolveCameraNameAsync(ReplayApiClient api, RenderJob job, CancellationToken ct)
     {
-        foreach (var name in await api.GetCameraCandidatesAsync(job.MyName, job.MyChampion, ct))
+        // The player list can lag the playback API by a few seconds while the
+        // game finishes loading - retry before giving up on a verified name.
+        for (var attempt = 1; attempt <= 5; attempt++)
         {
-            await api.FollowPlayerAsync(name, ct);
-            if (string.Equals(await api.GetSelectionAsync(ct), name, StringComparison.OrdinalIgnoreCase))
+            foreach (var name in await api.GetCameraCandidatesAsync(job.MyName, job.MyChampion, ct))
             {
-                Log.Info($"Camera locked on \"{name}\"");
-                return name;
+                await api.FollowPlayerAsync(name, ct);
+                if (string.Equals(await api.GetSelectionAsync(ct), name, StringComparison.OrdinalIgnoreCase))
+                {
+                    Log.Info($"Selected \"{name}\" (fog + target frame follow the selection)");
+                    return name;
+                }
             }
+            await Task.Delay(TimeSpan.FromSeconds(3), ct);
         }
+        // Unverified names must not reach the Y toggle - without a selection it
+        // flips the replay into the directed camera. Fog still gets a chance.
         if (job.MyName is { Length: > 0 })
         {
-            Log.Warn($"Could not verify a camera lock for \"{job.MyName}\" - using it unverified");
+            Log.Warn($"Could not verify a selection for \"{job.MyName}\" - recording with a free camera");
             await api.FollowPlayerAsync(job.MyName, ct);
         }
-        return job.MyName;
+        return null;
     }
 
     /// "EUW1_7913572469" -> ("EUW1", 7913572469).
@@ -286,6 +317,41 @@ public sealed class RenderAgent(AgentConfig config)
         return parts.Length == 2 && long.TryParse(parts[1], out var gameId)
             ? (parts[0], gameId)
             : throw new InvalidOperationException($"unexpected match id format: {matchId}");
+    }
+
+    /// Presses the camera-lock toggle and verifies the camera really tracks
+    /// (an unlocked camera sits still; nothing else moves it while recording).
+    /// A verified-locked toggle is never pressed again - Y would unlock it.
+    private async Task EngageCameraLockAsync(ReplayApiClient replayApi, string cameraName, int atSec, CancellationToken ct)
+    {
+        await replayApi.SetPlaybackAsync(atSec, paused: true, speed: 1, ct);
+        await WaitForSeekAsync(replayApi, atSec, ct);
+        var locked = false;
+        for (var attempt = 1; attempt <= 4 && !locked; attempt++)
+        {
+            await replayApi.SetPlaybackAsync(time: null, paused: false, speed: 1, ct);
+            await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            if (!GameWindow.TryPressKey(GameWindowTitle, VkY))
+            {
+                Log.Warn("Could not focus the game window for the camera-lock key");
+                await Task.Delay(TimeSpan.FromSeconds(2), ct);
+                continue;
+            }
+            locked = await CameraTracksAsync(replayApi, ct);
+            if (!locked) Log.Warn($"Camera lock attempt {attempt} did not take - pressing again");
+        }
+        await replayApi.SetPlaybackAsync(time: null, paused: true, speed: null, ct);
+        if (locked) Log.Info($"Camera locked on \"{cameraName}\" (verified tracking)");
+        else Log.Warn("Camera lock could not be verified - recording with a free camera");
+    }
+
+    private static async Task<bool> CameraTracksAsync(ReplayApiClient api, CancellationToken ct)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(2), ct);
+        var a = await api.GetCameraPositionAsync(ct);
+        await Task.Delay(TimeSpan.FromSeconds(2.5), ct);
+        var b = await api.GetCameraPositionAsync(ct);
+        return a is { } pa && b is { } pb && Math.Abs(pa.X - pb.X) + Math.Abs(pa.Z - pb.Z) > 75;
     }
 
     /// The client starts the game on its own schedule after watch; wait for it.
@@ -336,12 +402,21 @@ public sealed class RenderAgent(AgentConfig config)
     {
         // Desktop Duplication cropped to the game window - gdigrab's window
         // capture is black for Direct3D content.
-        var rect = GameWindow.FindClientRect(GameWindowTitle)
-            ?? throw new InvalidOperationException($"game window \"{GameWindowTitle}\" not found for capture");
-        var width = rect.Width & ~1;    // yuv420p needs even dimensions
-        var height = rect.Height & ~1;
+        var rect = GameWindow.FindClientRect(GameWindowTitle);
+        if (rect is not { Width: >= 32, Height: >= 32 })
+        {
+            // Minimized windows report a degenerate rect; bring it back.
+            GameWindow.TryRestore(GameWindowTitle);
+            rect = GameWindow.FindClientRect(GameWindowTitle);
+        }
+        if (rect is not { Width: >= 32, Height: >= 32 } r)
+        {
+            throw new InvalidOperationException("game window not found or minimized - the replay must stay visible while recording");
+        }
+        var width = r.Width & ~1;    // yuv420p needs even dimensions
+        var height = r.Height & ~1;
         return RunFfmpegAsync(
-            $"-y -f lavfi -i ddagrab=framerate={config.CaptureFramerate}:offset_x={Math.Max(0, rect.X)}:offset_y={Math.Max(0, rect.Y)}:video_size={width}x{height} " +
+            $"-y -f lavfi -i ddagrab=framerate={config.CaptureFramerate}:offset_x={Math.Max(0, r.X)}:offset_y={Math.Max(0, r.Y)}:video_size={width}x{height} " +
             $"-vf hwdownload,format=bgra -t {Math.Max(2, durationSec)} -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p \"{output}\"", ct);
     }
 
@@ -401,6 +476,30 @@ public sealed class RenderAgent(AgentConfig config)
         return parts.Length >= 2 && int.TryParse(parts[0], out _) && int.TryParse(parts[1], out _)
             ? $"{parts[0]}.{parts[1]}"
             : null;
+    }
+
+    /// The game persists EnableDirectedCamera in game.cfg's [Replay] section and
+    /// reads it at launch. Idempotent; called while no game runs.
+    private void EnsureDirectedCameraEnabled()
+    {
+        var cfg = Path.Combine(LeagueRoot, "Config", "game.cfg");
+        if (!File.Exists(cfg)) return;
+
+        var lines = File.ReadAllLines(cfg).ToList();
+        var existing = lines.FindIndex(l => l.Trim().StartsWith("EnableDirectedCamera", StringComparison.OrdinalIgnoreCase));
+        if (existing >= 0)
+        {
+            if (lines[existing].Trim().EndsWith("=1")) return;
+            lines[existing] = "EnableDirectedCamera=1";
+        }
+        else
+        {
+            var replay = lines.FindIndex(l => l.Trim().Equals("[Replay]", StringComparison.OrdinalIgnoreCase));
+            if (replay < 0) { lines.Add("[Replay]"); replay = lines.Count - 1; }
+            lines.Insert(replay + 1, "EnableDirectedCamera=1");
+        }
+        File.WriteAllLines(cfg, lines);
+        Log.Info("Enabled the replay camera system (EnableDirectedCamera) in game.cfg");
     }
 
     /// One-time setup the Replay API needs; idempotent, and the game only reads
