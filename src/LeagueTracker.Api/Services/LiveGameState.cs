@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace LeagueTracker.Api.Services;
 
-public sealed record LiveParticipant(int ChampionId, int TeamId, string? RiotId, bool IsMe);
+public sealed record LiveParticipant(int ChampionId, int TeamId, string? RiotId, string? Puuid, bool IsMe);
 
 public sealed record LiveGameSnapshot(
     long GameId,
@@ -14,6 +14,11 @@ public sealed record LiveGameSnapshot(
     int MyTeamId,
     IReadOnlyList<LiveParticipant> Participants)
 {
+    /// Team-average rank values (RankMath scale), filled in by the poller once
+    /// per game so the live banner can show the favored/outranked gap.
+    public double? AvgAllyRankValue { get; init; }
+    public double? AvgEnemyRankValue { get; init; }
+
     /// Spectator reports gameStartTime as 0 until a few minutes in; treat that as unknown.
     public static LiveGameSnapshot Parse(string raw, string myPuuid)
     {
@@ -35,13 +40,14 @@ public sealed record LiveGameSnapshot(
                 var championId = p.TryGetProperty("championId", out var ch) ? ch.GetInt32() : 0;
                 var teamId = p.TryGetProperty("teamId", out var t) ? t.GetInt32() : 0;
                 var riotId = p.TryGetProperty("riotId", out var r) ? r.GetString() : null;
-                var isMe = p.TryGetProperty("puuid", out var pu) && pu.GetString() == myPuuid;
+                var puuid = p.TryGetProperty("puuid", out var pu) ? pu.GetString() : null;
+                var isMe = puuid == myPuuid;
                 if (isMe)
                 {
                     myChampionId = championId;
                     myTeamId = teamId;
                 }
-                participants.Add(new LiveParticipant(championId, teamId, riotId, isMe));
+                participants.Add(new LiveParticipant(championId, teamId, riotId, puuid, isMe));
             }
         }
 
@@ -79,8 +85,17 @@ public sealed class LiveGameState
     {
         lock (_gate)
         {
-            // Keep the first snapshot's DetectedUtc while the same game stays live.
-            if (_current?.GameId == snapshot.GameId) snapshot = snapshot with { DetectedUtc = _current.DetectedUtc };
+            // Keep the first snapshot's DetectedUtc and rank averages while the
+            // same game stays live (ranks are looked up once, on detection).
+            if (_current?.GameId == snapshot.GameId)
+            {
+                snapshot = snapshot with
+                {
+                    DetectedUtc = _current.DetectedUtc,
+                    AvgAllyRankValue = snapshot.AvgAllyRankValue ?? _current.AvgAllyRankValue,
+                    AvgEnemyRankValue = snapshot.AvgEnemyRankValue ?? _current.AvgEnemyRankValue,
+                };
+            }
             _current = snapshot;
         }
     }

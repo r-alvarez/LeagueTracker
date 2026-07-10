@@ -56,7 +56,7 @@ public sealed class MatchPollerService(
         }
     }
 
-    private async Task CheckLiveGameAsync(string puuid, RiotApiClient riot, CancellationToken ct)
+    private async Task CheckLiveGameAsync(string puuid, RiotApiClient riot, RankLookupService ranks, CancellationToken ct)
     {
         string? activeRaw;
         try
@@ -74,6 +74,7 @@ public sealed class MatchPollerService(
         {
             var snapshot = LiveGameSnapshot.Parse(activeRaw, puuid);
             var isNew = live.Current?.GameId != snapshot.GameId;
+            if (isNew) snapshot = await WithLobbyRanksAsync(snapshot, ranks, ct);
             live.SetLive(snapshot);
             if (isNew) logger.LogInformation("Live game detected: {MatchId} (queue {QueueId})", snapshot.MatchId, snapshot.QueueId);
         }
@@ -81,6 +82,39 @@ public sealed class MatchPollerService(
         {
             logger.LogInformation("Live game {MatchId} ended - fast-capture mode until it is ingested", endedMatchId);
         }
+    }
+
+    /// Team-average rank values for the live lobby, same math as ingest uses
+    /// for finished matches. Ranks are garnish - a failed lookup never blocks
+    /// the live status.
+    private async Task<LiveGameSnapshot> WithLobbyRanksAsync(LiveGameSnapshot snapshot, RankLookupService ranks, CancellationToken ct)
+    {
+        var ally = new List<double>();
+        var enemy = new List<double>();
+        foreach (var participant in snapshot.Participants)
+        {
+            if (participant.Puuid is not { Length: > 0 } puuid) continue;
+            try
+            {
+                var entries = await ranks.GetEntriesAsync(puuid, TimeSpan.FromHours(1), ct);
+                if (RankMath.SelectEntryForQueue(entries, snapshot.QueueId) is not { Tier.Length: > 0 } entry) continue;
+                if (RankMath.ToValue(entry.Tier, entry.Rank, entry.LeaguePoints) is not { } value) continue;
+                (participant.TeamId == snapshot.MyTeamId ? ally : enemy).Add(value);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning("Rank lookup for a live participant failed: {Message}", ex.Message);
+            }
+        }
+        return snapshot with
+        {
+            AvgAllyRankValue = ally is { Count: > 0 } ? ally.Average() : null,
+            AvgEnemyRankValue = enemy is { Count: > 0 } ? enemy.Average() : null,
+        };
     }
 
     private async Task RunPassAsync(CancellationToken ct)
@@ -94,7 +128,7 @@ public sealed class MatchPollerService(
 
         var puuid = await player.GetPuuidAsync(ct);
 
-        await CheckLiveGameAsync(puuid, riot, ct);
+        await CheckLiveGameAsync(puuid, riot, scope.ServiceProvider.GetRequiredService<RankLookupService>(), ct);
 
         // Full-game renders are big; expire unkept ones on a slow cadence.
         if (DateTime.UtcNow - _lastRetentionSweepUtc > TimeSpan.FromHours(6))
