@@ -377,21 +377,26 @@ public sealed class RenderAgent(AgentConfig config)
         await Task.Delay(TimeSpan.FromMilliseconds(700), ct);
         var championRowY = CameraListBottomY - (10 - slot.Index) * DropdownRowH + DropdownRowH / 2;
         GameWindow.TryClickAt(GameWindowTitle, PanelX, championRowY);
-        await Task.Delay(TimeSpan.FromMilliseconds(400), ct);
+        GameWindow.TryMoveCursor(GameWindowTitle, 0.5, 0.35);
+
+        // Camera verification first - its ~5s doubles as settle time for the
+        // freshly-initialized UI, which made a fog click right after the
+        // camera clicks miss on the session's first window.
+        if (!await CameraTracksAsync(replayApi, ct)) return false;
 
         // Fog perspective: the dropdown defaults to All (no fog); pick the
-        // tracked player's side. Deterministic click, no readback available.
+        // tracked player's side. Deterministic click, no readback available,
+        // idempotent when already set.
         if (GameWindow.TryClickAt(GameWindowTitle, FogX, FogBoxY))
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(700), ct);
+            await Task.Delay(TimeSpan.FromMilliseconds(900), ct);
             GameWindow.TryClickAt(GameWindowTitle, FogX, slot.Blue ? FogBlueY : FogRedY);
         }
 
         // Park the cursor away from the panel and screen edges so it neither
         // shows over the HUD in recordings nor edge-scrolls the camera.
         GameWindow.TryMoveCursor(GameWindowTitle, 0.5, 0.35);
-
-        return await CameraTracksAsync(replayApi, ct);
+        return true;
     }
 
     /// Not a failure: the conditions for a quality render weren't met (camera
