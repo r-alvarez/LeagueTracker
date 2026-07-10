@@ -1,0 +1,55 @@
+# TrueNAS deployment (Portainer repository stack).
+# Traefik on the external `frontend` network is the only way in — no host
+# ports. The render agent on the gaming PC reaches the tracker through the
+# same hostnames (split-horizon DNS points them at the NAS on the LAN).
+
+x-lt-build: &lt-build
+  context: ../..
+  dockerfile: Dockerfile
+
+services:
+  leaguetracker:
+    build: *lt-build
+    image: leaguetracker:local
+    container_name: leaguetracker
+    user: "568:568"
+    environment:
+      - TZ=Europe/London
+    volumes:
+      - /mnt/MediaPool/apps/leaguetracker/main:/data
+    networks: [frontend]
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=frontend
+      - traefik.http.services.leaguetracker.loadbalancer.server.port=5170
+      - traefik.http.routers.leaguetracker.rule=Host(`league.rjav-tech.co.uk`)
+      - traefik.http.routers.leaguetracker.entrypoints=websecure
+      - traefik.http.routers.leaguetracker.priority=100
+      - traefik.http.routers.leaguetracker.service=leaguetracker
+
+  leaguetracker-alt:
+    build: *lt-build
+    image: leaguetracker:local
+    container_name: leaguetracker-alt
+    user: "568:568"
+    environment:
+      - TZ=Europe/London
+      - Riot__GameName=IamRA
+      - Riot__TagLine=6201
+    volumes:
+      - /mnt/MediaPool/apps/leaguetracker/alt:/data
+    networks: [frontend]
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=frontend
+      - traefik.http.services.leaguetracker-alt.loadbalancer.server.port=5170
+      - traefik.http.routers.leaguetracker-alt.rule=Host(`league-alt.rjav-tech.co.uk`)
+      - traefik.http.routers.leaguetracker-alt.entrypoints=websecure
+      - traefik.http.routers.leaguetracker-alt.priority=100
+      - traefik.http.routers.leaguetracker-alt.service=leaguetracker-alt
+
+networks:
+  frontend:
+    external: true
