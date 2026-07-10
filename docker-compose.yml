@@ -16,6 +16,24 @@ services:
       - ./data:/data
     restart: unless-stopped
 
+  # Second tracked account (IamRA#6201): a full separate instance so its games,
+  # baselines and LP never pollute the main account's coaching stats. Needs its
+  # own data-alt/riot-api-key.txt (same key file, copied).
+  leaguetracker-alt:
+    build: .
+    container_name: leaguetracker-alt
+    expose:
+      - "5170"
+    ports:
+      - "5171:5170"
+    environment:
+      - TZ=Europe/London
+      - Riot__GameName=IamRA
+      - Riot__TagLine=6201
+    volumes:
+      - ./data-alt:/data
+    restart: unless-stopped
+
   # Reverse proxy so the app is reachable at http://leaguetracker.localhost
   # (no port). Browsers resolve *.localhost to loopback; a hosts entry makes it
   # bulletproof for non-browser clients too.

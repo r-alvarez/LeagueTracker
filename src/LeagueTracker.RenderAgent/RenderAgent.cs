@@ -7,7 +7,8 @@ public sealed class RenderAgent(AgentConfig config)
     private const string GameWindowTitle = "League of Legends (TM) Client";
     private const string GameProcessName = "League of Legends";
 
-    private readonly TrackerClient _tracker = new(config.ServerUrl, config.AgentName);
+    private readonly List<TrackerClient> _trackers =
+        [.. config.ServerUrls.Select(url => new TrackerClient(url, config.AgentName))];
     private readonly string _workDir = Path.Combine(Path.GetTempPath(), "leaguetracker-agent");
 
     private string _gameDir = "";
@@ -26,12 +27,18 @@ public sealed class RenderAgent(AgentConfig config)
     {
         Directory.CreateDirectory(_workDir);
 
-        if (!await _tracker.PingAsync(ct))
+        var reachable = 0;
+        foreach (var tracker in _trackers)
         {
-            Log.Error($"Tracker server unreachable at {config.ServerUrl}");
+            if (await tracker.PingAsync(ct)) { reachable++; }
+            else Log.Warn($"Tracker unreachable: {tracker.ServerUrl} (will keep retrying)");
+        }
+        if (reachable == 0)
+        {
+            Log.Error("No tracker server reachable");
             return false;
         }
-        Log.Info("Tracker server reachable");
+        Log.Info($"{reachable}/{_trackers.Count} tracker server(s) reachable");
 
         _ffmpeg = ResolveFfmpeg();
         if (_ffmpeg is not { Length: > 0 })
@@ -92,26 +99,49 @@ public sealed class RenderAgent(AgentConfig config)
 
     private async Task<bool> RunOnceAsync(CancellationToken ct)
     {
-        // Never fight the player for the machine: skip while they're in a game
-        // (server-side knowledge) or while any game client is running locally.
+        // Never fight the player for the machine: skip while ANY tracked account
+        // is in a game (server-side knowledge) or a game client runs locally.
         if (!MockRender)
         {
-            if (await _tracker.PlayerInGameAsync(ct)) { Log.Info("Player is in game - waiting"); return false; }
+            foreach (var tracker in _trackers)
+            {
+                try
+                {
+                    if (await tracker.PlayerInGameAsync(ct)) { Log.Info("Player is in game - waiting"); return false; }
+                }
+                catch { /* unreachable tracker - checked again next pass */ }
+            }
             if (Process.GetProcessesByName(GameProcessName) is { Length: > 0 }) { Log.Info("Game client running - waiting"); return false; }
         }
 
-        var job = await _tracker.ClaimNextAsync(ct);
-        if (job is null) return false;
+        foreach (var tracker in _trackers)
+        {
+            RenderJob? job;
+            try
+            {
+                job = await tracker.ClaimNextAsync(ct);
+            }
+            catch
+            {
+                continue;   // tracker down; try the next one
+            }
+            if (job is not null) return await ProcessJobAsync(tracker, job, ct);
+        }
+        return false;
+    }
+
+    private async Task<bool> ProcessJobAsync(TrackerClient tracker, RenderJob job, CancellationToken ct)
+    {
 
         var windows = config.MaxWindowsPerJob > 0 ? job.Windows.Take(config.MaxWindowsPerJob).ToList() : job.Windows;
-        Log.Info($"Job {job.MatchId} ({job.Kind}): {windows.Count} window(s), following \"{job.MyName}\" ({job.MyChampion})");
+        Log.Info($"Job {job.MatchId} ({job.Kind}) from {tracker.ServerUrl}: {windows.Count} window(s), following \"{job.MyName}\" ({job.MyChampion})");
 
         try
         {
-            if (MockRender) await MockRenderJobAsync(job, windows, ct);
-            else await RenderJobAsync(job, windows, ct);
+            if (MockRender) await MockRenderJobAsync(tracker, job, windows, ct);
+            else await RenderJobAsync(tracker, job, windows, ct);
 
-            await _tracker.CompleteAsync(job, ct);
+            await tracker.CompleteAsync(job, ct);
             Log.Info($"Job {job.MatchId} complete");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -121,12 +151,12 @@ public sealed class RenderAgent(AgentConfig config)
         catch (Exception ex)
         {
             Log.Error($"Job {job.MatchId} failed: {ex.Message}");
-            await _tracker.FailAsync(job, ex.Message, CancellationToken.None);
+            await tracker.FailAsync(job, ex.Message, CancellationToken.None);
         }
         return true;
     }
 
-    private async Task RenderJobAsync(RenderJob job, List<ClipWindow> windows, CancellationToken ct)
+    private async Task RenderJobAsync(TrackerClient tracker, RenderJob job, List<ClipWindow> windows, CancellationToken ct)
     {
         if (InstalledPatch() is { } client && ParsePatch(job.GameVersion) is { } replay && client != replay)
         {
@@ -135,7 +165,7 @@ public sealed class RenderAgent(AgentConfig config)
 
         var roflPath = Path.Combine(_workDir, $"{job.MatchId}.rofl");
         Log.Info("Downloading replay...");
-        await _tracker.DownloadReplayAsync(job, roflPath, ct);
+        await tracker.DownloadReplayAsync(job, roflPath, ct);
 
         Process? game = null;
         using var replayApi = new ReplayApiClient();
@@ -171,7 +201,7 @@ public sealed class RenderAgent(AgentConfig config)
                 await CaptureAsync(output, window.EndSec - window.StartSec, ct);
                 await replayApi.SetPlaybackAsync(time: null, paused: true, speed: null, ct);
 
-                await _tracker.UploadAsync(job, window.Index, output, ct);
+                await tracker.UploadAsync(job, window.Index, output, ct);
                 File.Delete(output);
                 Log.Info($"Window {window.Index}: uploaded");
             }
@@ -186,7 +216,7 @@ public sealed class RenderAgent(AgentConfig config)
 
     /// The plumbing-test render: same seek/record/upload rhythm, but the "game"
     /// is an ffmpeg test pattern stamped with the window's in-game clock.
-    private async Task MockRenderJobAsync(RenderJob job, List<ClipWindow> windows, CancellationToken ct)
+    private async Task MockRenderJobAsync(TrackerClient tracker, RenderJob job, List<ClipWindow> windows, CancellationToken ct)
     {
         foreach (var window in windows)
         {
@@ -196,7 +226,7 @@ public sealed class RenderAgent(AgentConfig config)
             // Plain test pattern - drawtext needs fontconfig, which Windows ffmpeg
             // builds crash on; the burnt-in frame counter is enough to eyeball.
             await RunFfmpegAsync($"-y -f lavfi -i testsrc2=size=1280x720:rate=30 -t {duration} -c:v libx264 -preset veryfast -crf 28 -pix_fmt yuv420p \"{output}\"", ct);
-            await _tracker.UploadAsync(job, window.Index, output, ct);
+            await tracker.UploadAsync(job, window.Index, output, ct);
             File.Delete(output);
             Log.Info($"Window {window.Index}: mock clip uploaded ({duration}s)");
         }

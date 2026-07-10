@@ -20,6 +20,8 @@ public sealed class TrackerClient(string serverUrl, string agentName)
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
 
+    public string ServerUrl => serverUrl;
+
     public async Task<bool> PingAsync(CancellationToken ct)
     {
         using var resp = await _http.GetAsync($"{serverUrl}/api/status", ct);

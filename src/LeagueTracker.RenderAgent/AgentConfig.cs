@@ -4,7 +4,12 @@ namespace LeagueTracker.RenderAgent;
 
 public sealed class AgentConfig
 {
+    /// One or more tracker servers, comma-separated - one agent serves them all
+    /// (two agent processes would fight over the game client).
     public string ServerUrl { get; set; } = "http://localhost:5170";
+
+    public string[] ServerUrls => [.. ServerUrl.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        .Select(u => u.TrimEnd('/'))];
     public string LeaguePath { get; set; } = "";
     public string FfmpegPath { get; set; } = "";
     public string AgentName { get; set; } = "";
@@ -33,7 +38,6 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_FFMPEG_PATH") is { Length: > 0 } ffmpeg) config.FfmpegPath = ffmpeg;
         if (Environment.GetEnvironmentVariable("LT_MAX_WINDOWS") is { Length: > 0 } max && int.TryParse(max, out var m)) config.MaxWindowsPerJob = m;
 
-        config.ServerUrl = config.ServerUrl.TrimEnd('/');
         if (config.AgentName is not { Length: > 0 }) config.AgentName = Environment.MachineName;
         return config;
     }

@@ -3,6 +3,7 @@ riot-api-key.txt
 
 # Runtime data - personal match history, SQLite index, LP ledger. Never commit.
 /data/
+/data-alt/
 *.db
 *.db-shm
 *.db-wal
