@@ -10,6 +10,7 @@ x-lt-build: &lt-build
 services:
   leaguetracker:
     build: *lt-build
+    pull_policy: build
     image: leaguetracker:local
     container_name: leaguetracker
     user: "568:568"
@@ -30,6 +31,7 @@ services:
 
   leaguetracker-alt:
     build: *lt-build
+    pull_policy: build
     image: leaguetracker:local
     container_name: leaguetracker-alt
     user: "568:568"
