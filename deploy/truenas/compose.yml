@@ -26,6 +26,7 @@ services:
       - traefik.http.services.leaguetracker.loadbalancer.server.port=5170
       - traefik.http.routers.leaguetracker.rule=Host(`league.rjav-tech.co.uk`)
       - traefik.http.routers.leaguetracker.entrypoints=websecure
+      - traefik.http.routers.leaguetracker.tls.certResolver=cloudflare
       - traefik.http.routers.leaguetracker.priority=100
       - traefik.http.routers.leaguetracker.service=leaguetracker
 
@@ -49,6 +50,7 @@ services:
       - traefik.http.services.leaguetracker-alt.loadbalancer.server.port=5170
       - traefik.http.routers.leaguetracker-alt.rule=Host(`league-alt.rjav-tech.co.uk`)
       - traefik.http.routers.leaguetracker-alt.entrypoints=websecure
+      - traefik.http.routers.leaguetracker-alt.tls.certResolver=cloudflare
       - traefik.http.routers.leaguetracker-alt.priority=100
       - traefik.http.routers.leaguetracker-alt.service=leaguetracker-alt
 
