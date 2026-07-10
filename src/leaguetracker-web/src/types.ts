@@ -451,6 +451,9 @@ export interface LiveGame {
   detectedUtc: string
   myChampionId: number
   myTeamId: number
+  avgAllyRank: string | null
+  avgEnemyRank: string | null
+  rankGapLp: number | null
   participants: LiveParticipant[]
 }
 
