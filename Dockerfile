@@ -21,8 +21,10 @@ RUN dotnet publish LeagueTracker.Api -c Release -o /app/publish --no-restore
 # --- Runtime ------------------------------------------------------------------
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
-COPY --from=api /app/publish .
-COPY --from=web /web/dist ./wwwroot
+# chown beats whatever restrictive mode the build context arrived with (the
+# deploy clone's umask leaks into publish output via preserved source perms).
+COPY --chown=568:568 --from=api /app/publish .
+COPY --chown=568:568 --from=web /web/dist ./wwwroot
 # Unprefixed `Urls` because appsettings.json carries a localhost value for host
 # runs, and app config (JSON) outranks ASPNETCORE_URLS; plain env vars outrank both.
 ENV Urls=http://+:5170 \
