@@ -50,11 +50,11 @@ internal static class GameWindow
         return true;
     }
 
-    /// Presses a key in the game window - used for the camera-lock toggle (Y),
-    /// which the Replay API has no working equivalent for. Strictly guarded:
-    /// the key is only sent when the game window is verifiably foreground, so
-    /// it can never land in another application.
-    public static bool TryPressKey(string title, byte virtualKey)
+    /// Clicks at a position given as ratios of the game window's client area.
+    /// Used to drive the replay camera/fog dropdowns, which have no working
+    /// Replay API equivalent. Strictly guarded: clicks are only sent when the
+    /// game window is verifiably foreground, so they can never land elsewhere.
+    public static bool TryClickAt(string title, double rx, double ry)
     {
         var hwnd = FindWindowW(null, title);
         if (hwnd == 0) return false;
@@ -66,14 +66,28 @@ internal static class GameWindow
         keybd_event(VkMenu, 0, KeyeventfKeyup, 0);
         Thread.Sleep(400);
         if (GetForegroundWindow() != hwnd) return false;
-        keybd_event(virtualKey, 0, 0, 0);
+        if (FindClientRect(title) is not { Width: > 0, Height: > 0 } rect) return false;
+        SetCursorPos(rect.X + (int)(rect.Width * rx), rect.Y + (int)(rect.Height * ry));
+        Thread.Sleep(120);
+        mouse_event(MouseeventfLeftdown, 0, 0, 0, 0);
         Thread.Sleep(60);
-        keybd_event(virtualKey, 0, KeyeventfKeyup, 0);
+        mouse_event(MouseeventfLeftup, 0, 0, 0, 0);
         return true;
+    }
+
+    /// Moves the cursor (no click) to a ratio position within the client area.
+    public static void TryMoveCursor(string title, double rx, double ry)
+    {
+        if (FindClientRect(title) is { Width: > 0, Height: > 0 } rect)
+        {
+            SetCursorPos(rect.X + (int)(rect.Width * rx), rect.Y + (int)(rect.Height * ry));
+        }
     }
 
     private const uint KeyeventfKeyup = 2;
     private const byte VkMenu = 0x12;
+    private const uint MouseeventfLeftdown = 0x02;
+    private const uint MouseeventfLeftup = 0x04;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint FindWindowW(string? className, string windowName);
@@ -101,6 +115,12 @@ internal static class GameWindow
 
     [DllImport("user32.dll")]
     private static extern bool GetLastInputInfo(ref LastInputInfo info);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint flags, int dx, int dy, uint data, nuint extra);
 
     private struct LastInputInfo { public uint Size; public uint Tick; }
 
