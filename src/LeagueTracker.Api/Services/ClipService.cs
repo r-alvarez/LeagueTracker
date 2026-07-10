@@ -152,6 +152,13 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         if (File.Exists(marker)) File.Delete(marker);
     }
 
+    /// Drops rendered clips so the match re-qualifies for the render queue.
+    public void DeleteClips(string matchId)
+    {
+        if (DirFor(matchId) is not { } dir || !Directory.Exists(dir)) return;
+        foreach (var mp4 in Directory.EnumerateFiles(dir, "*.mp4")) File.Delete(mp4);
+    }
+
     /// Render-queue view over every match with an archived replay, newest first.
     public async Task<List<object>> QueueAsync(RenderLeaseService leases, CancellationToken ct)
     {

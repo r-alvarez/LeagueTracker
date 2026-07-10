@@ -377,11 +377,16 @@ app.MapPost("/api/render/{matchId}/fail", async (string matchId, HttpRequest req
     return Results.Ok();
 });
 
-// Clears the failed marker so the agent picks the match up again.
+// Re-queues the match: clears the failed marker AND deletes any existing
+// clips, so both failed and badly-rendered matches get picked up again.
 app.MapPost("/api/render/{matchId}/retry", (string matchId, ClipService clips, FullGameService full, string kind = "clips") =>
 {
     if (kind is "full") full.Request(matchId);
-    else clips.ClearFailed(matchId);
+    else
+    {
+        clips.ClearFailed(matchId);
+        clips.DeleteClips(matchId);
+    }
     return Results.Ok();
 });
 
