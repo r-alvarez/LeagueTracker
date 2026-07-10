@@ -6,8 +6,10 @@ import LpPerGameBars from '../components/LpPerGameBars'
 import { LaneGoldChart, RollingWinRateChart } from '../components/TrendCharts'
 import ChampBadge from '../components/ChampBadge'
 import ProfileCard from '../components/ProfileCard'
+import ProfileHeader from '../components/ProfileHeader'
 import ChallengesCard from '../components/ChallengesCard'
 import RoleIcon from '../components/RoleIcon'
+import { WinrateBar } from '../components/Stats'
 
 const QUEUES = ['Solo/Duo', 'Flex'] as const
 
@@ -27,6 +29,7 @@ const WINDOWS = [
 
 const signed = (v: number | null | undefined) => (v === null || v === undefined ? '—' : `${v > 0 ? '+' : ''}${v}`)
 const pct = (v: number) => `${Math.round(v * 100)}%`
+const kdaCls = (v: number) => (v >= 5 ? 'kda-5' : v >= 4 ? 'kda-4' : v >= 3 ? 'kda-3' : v < 1 ? 'kda-low' : '')
 
 function SplitTable({ title, rows, champIcons, compact }: { title: string; rows: SplitRow[]; champIcons?: boolean; compact?: boolean }) {
   const [open, setOpen] = useState<string | null>(null)
@@ -38,9 +41,9 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
           <table className="data">
             <thead>
               <tr>
-                <th>{champIcons ? 'Champion' : 'Role'}</th><th className="num">Games</th><th className="num">WR</th>
+                <th>{champIcons ? 'Champion' : 'Role'}</th><th className="num">Games</th><th>WR</th>
                 <th className="num">KDA</th>
-                {!compact && <><th className="num">KP</th><th className="num">CS/m</th><th className="num">G@10</th></>}
+                {!compact && <><th className="num">LP</th><th className="num">KP</th><th className="num">CS/m</th><th className="num">G@10</th></>}
                 <th className="num">Deaths</th>
               </tr>
             </thead>
@@ -53,12 +56,14 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
                       ? <ChampBadge name={r.key} small />
                       : <span className="champ sm"><RoleIcon role={r.key} /> <span className="champ-name">{r.key}</span></span>}</td>
                     <td className="num">{r.games}</td>
-                    <td className="num">
-                      <span className="meter" aria-hidden="true"><span style={{ width: `${Math.round(r.winRate * 100)}%` }} /></span>
-                      {pct(r.winRate)}
-                    </td>
-                    <td className="num">{r.kda}</td>
+                    <td><WinrateBar wins={r.wins} losses={r.games - r.wins} /></td>
+                    <td className="num"><span className={`kda-ratio ${kdaCls(r.kda)}`} style={{ fontSize: 13 }}>{r.kda.toFixed(2)}</span></td>
                     {!compact && <>
+                      <td className="num">
+                        {r.lpKnown > 0
+                          ? <span className={r.lpTotal >= 0 ? 'win' : 'loss'}>{r.lpTotal >= 0 ? '+' : ''}{r.lpTotal}</span>
+                          : <span className="mut">—</span>}
+                      </td>
                       <td className="num">{pct(r.kp)}</td>
                       <td className="num">{r.csPerMin}</td>
                       <td className="num">{signed(r.laneGoldAt10)}</td>
@@ -67,7 +72,7 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
                   </tr>
                   {open === r.key && r.detail && (
                     <tr className="drill">
-                      <td colSpan={8}>
+                      <td colSpan={9}>
                         <div className="drill-chips obj-chips">
                           <span className="obj-chip">{r.detail.avgKills} / {r.detail.avgDeaths} / {r.detail.avgAssists} <span className="mut">avg score</span></span>
                           <span className="obj-chip">{r.detail.csAt10} <span className="mut">CS@10</span></span>
@@ -149,6 +154,8 @@ export default function Dashboard() {
 
   return (
     <>
+      <ProfileHeader status={status} stats={stats} lpGames={lpGames} />
+
       <div className="filters">
         <div className="seg" role="tablist" aria-label="Window">
           {WINDOWS.map(w => (

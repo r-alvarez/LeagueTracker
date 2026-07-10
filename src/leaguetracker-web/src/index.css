@@ -702,3 +702,27 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .ld-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .wl-split { display: inline-flex; gap: 8px; }
 .wl-split .obj-chip strong { font-variant-numeric: tabular-nums; }
+
+/* Dashboard profile header: avatar, identity + form, rank emblem, WR ring. */
+.ph {
+  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, #1a2130, #12161f 60%);
+  border-radius: 14px; padding: 16px 20px;
+}
+.ph-avatar { position: relative; flex: 0 0 auto; }
+.ph-avatar img, .ph-avatar .champ-mono {
+  width: 64px; height: 64px; border-radius: 14px; border: 2px solid var(--baseline);
+  display: block; object-fit: cover; font-size: 18px;
+}
+.ph-id { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ph-name { font-size: 19px; font-weight: 800; }
+.ph-form { display: inline-flex; align-items: center; gap: 7px; margin-top: 2px; }
+.ph-rank { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.ph-emblem { width: 58px; height: 58px; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.5)); }
+.ph-rank-text { display: flex; flex-direction: column; gap: 2px; }
+.ph-tier { font-weight: 800; font-size: 16px; letter-spacing: 0.02em; }
+.ph-lp { font-size: 13px; color: var(--ink-2); font-weight: 600; }
+.ph-deltas { display: inline-flex; gap: 6px; margin-top: 3px; }
+.ph-ring { flex: 0 0 auto; }
+@media (max-width: 760px) { .ph-rank { margin-left: 0; } }
