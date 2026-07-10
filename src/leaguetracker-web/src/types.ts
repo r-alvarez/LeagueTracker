@@ -473,6 +473,8 @@ export interface SplitRow {
   dpm: number
   laneGoldAt10: number | null
   deathsPerGame: number
+  lpTotal: number
+  lpKnown: number
   detail: {
     avgKills: number
     avgDeaths: number
