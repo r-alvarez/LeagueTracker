@@ -377,6 +377,9 @@ public sealed class RenderAgent(AgentConfig config)
         await Task.Delay(TimeSpan.FromMilliseconds(700), ct);
         var championRowY = CameraListBottomY - (10 - slot.Index) * DropdownRowH + DropdownRowH / 2;
         GameWindow.TryClickAt(GameWindowTitle, PanelX, championRowY);
+        // The game hit-tests against the live cursor on the next frame, so
+        // moving the cursor in the same instant as the click voids it.
+        await Task.Delay(TimeSpan.FromMilliseconds(400), ct);
         GameWindow.TryMoveCursor(GameWindowTitle, 0.5, 0.35);
 
         // Camera verification first - its ~5s doubles as settle time for the
@@ -391,6 +394,7 @@ public sealed class RenderAgent(AgentConfig config)
         {
             await Task.Delay(TimeSpan.FromMilliseconds(900), ct);
             GameWindow.TryClickAt(GameWindowTitle, FogX, slot.Blue ? FogBlueY : FogRedY);
+            await Task.Delay(TimeSpan.FromMilliseconds(400), ct);
         }
 
         // Park the cursor away from the panel and screen edges so it neither
