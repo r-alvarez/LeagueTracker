@@ -406,12 +406,21 @@ public sealed class RenderAgent(AgentConfig config)
 
     private static async Task<bool> CameraTracksAsync(ReplayApiClient api, CancellationToken ct)
     {
+        // After any seek the world reloads and an unlocked camera sits at the
+        // default corner; a locked one snaps to the champion. Distance from
+        // that corner is therefore a lock signal that works even while the
+        // champion stands still; movement between samples is the fallback
+        // (e.g. for the rare fight right next to the default corner).
         await Task.Delay(TimeSpan.FromSeconds(2), ct);
         var a = await api.GetCameraPositionAsync(ct);
+        if (a is { } snap && Math.Abs(snap.X - DefaultCameraX) + Math.Abs(snap.Z - DefaultCameraZ) > 1500) return true;
         await Task.Delay(TimeSpan.FromSeconds(2.5), ct);
         var b = await api.GetCameraPositionAsync(ct);
         return a is { } pa && b is { } pb && Math.Abs(pa.X - pb.X) + Math.Abs(pa.Z - pb.Z) > 75;
     }
+
+    private const double DefaultCameraX = 300;
+    private const double DefaultCameraZ = -770;
 
     /// The client starts the game on its own schedule after watch; wait for it.
     private static async Task<Process> WaitForGameProcessAsync(CancellationToken ct)
