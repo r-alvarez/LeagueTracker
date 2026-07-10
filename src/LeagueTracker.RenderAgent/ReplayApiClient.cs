@@ -57,6 +57,33 @@ public sealed class ReplayApiClient : IDisposable
             interfaceTimeline = true,
         }, ct);
 
+    /// The tracked player's slot in the player list (0-9, list order matches
+    /// the camera dropdown's champion entries) and whether they're on the
+    /// first team (blue). Champions are unique per game in ranked/normals.
+    public async Task<(int Index, bool Blue)?> GetPlayerSlotAsync(string champion, CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{Base}/liveclientdata/playerlist", ct));
+            var index = 0;
+            foreach (var player in doc.RootElement.EnumerateArray())
+            {
+                if (player.TryGetProperty("championName", out var champ)
+                    && string.Equals(champ.GetString(), champion, StringComparison.OrdinalIgnoreCase))
+                {
+                    var blue = !player.TryGetProperty("team", out var team) || team.GetString() == "ORDER";
+                    return (index, blue);
+                }
+                index++;
+            }
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return null;
+        }
+    }
+
     /// Camera world position - the ground truth for whether a camera lock is
     /// actually tracking (the position moves) or just claimed.
     public async Task<(double X, double Z)?> GetCameraPositionAsync(CancellationToken ct)
