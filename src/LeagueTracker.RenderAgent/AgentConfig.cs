@@ -43,9 +43,28 @@ public sealed class AgentConfig
     }
 }
 
+/// Console when one is attached (dev runs), and always agent.log next to the
+/// exe - the published agent is a WinExe with no console at all.
 public static class Log
 {
-    public static void Info(string message) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {message}");
-    public static void Warn(string message) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] WARN {message}");
-    public static void Error(string message) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] ERROR {message}");
+    private static readonly object Gate = new();
+    private static readonly string LogPath = Path.Combine(AppContext.BaseDirectory, "agent.log");
+
+    static Log()
+    {
+        try { if (new FileInfo(LogPath) is { Exists: true, Length: > 5_000_000 }) File.Delete(LogPath); } catch { /* keep logging best-effort */ }
+    }
+
+    public static void Info(string message) => Write($"[{DateTime.Now:HH:mm:ss}] {message}");
+    public static void Warn(string message) => Write($"[{DateTime.Now:HH:mm:ss}] WARN {message}");
+    public static void Error(string message) => Write($"[{DateTime.Now:HH:mm:ss}] ERROR {message}");
+
+    private static void Write(string line)
+    {
+        Console.WriteLine(line);
+        lock (Gate)
+        {
+            try { File.AppendAllText(LogPath, line + Environment.NewLine); } catch { /* disk hiccup - console still got it */ }
+        }
+    }
 }

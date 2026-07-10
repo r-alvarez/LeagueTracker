@@ -27,18 +27,19 @@ public sealed class RenderAgent(AgentConfig config)
     {
         Directory.CreateDirectory(_workDir);
 
-        var reachable = 0;
-        foreach (var tracker in _trackers)
+        // The NAS may be rebooting or the stack redeploying when we start (we
+        // run at logon) - wait for a tracker rather than giving up.
+        while (true)
         {
-            if (await tracker.PingAsync(ct)) { reachable++; }
-            else Log.Warn($"Tracker unreachable: {tracker.ServerUrl} (will keep retrying)");
+            var reachable = 0;
+            foreach (var tracker in _trackers)
+            {
+                if (await tracker.PingAsync(ct)) { reachable++; }
+                else Log.Warn($"Tracker unreachable: {tracker.ServerUrl} (will keep retrying)");
+            }
+            if (reachable > 0) { Log.Info($"{reachable}/{_trackers.Count} tracker server(s) reachable"); break; }
+            await Task.Delay(TimeSpan.FromSeconds(60), ct);
         }
-        if (reachable == 0)
-        {
-            Log.Error("No tracker server reachable");
-            return false;
-        }
-        Log.Info($"{reachable}/{_trackers.Count} tracker server(s) reachable");
 
         _ffmpeg = ResolveFfmpeg();
         if (_ffmpeg is not { Length: > 0 })
@@ -112,6 +113,14 @@ public sealed class RenderAgent(AgentConfig config)
                 catch { /* unreachable tracker - checked again next pass */ }
             }
             if (Process.GetProcessesByName(GameProcessName) is { Length: > 0 }) { Log.Info("Game client running - waiting"); return false; }
+
+            // Vanguard only allows replay launches through the League client, so
+            // there's no point claiming a job while it's closed.
+            if (LcuClient.TryConnect(LeagueRoot) is not { } lcu) { Log.Info("League client not running - waiting"); return false; }
+            using (lcu)
+            {
+                if (!await lcu.IsUpAsync(ct)) { Log.Info("League client still starting - waiting"); return false; }
+            }
         }
 
         foreach (var tracker in _trackers)
@@ -163,7 +172,13 @@ public sealed class RenderAgent(AgentConfig config)
             throw new InvalidOperationException($"patch mismatch: replay {replay}, client {client} - replay no longer playable");
         }
 
-        var roflPath = Path.Combine(_workDir, $"{job.MatchId}.rofl");
+        // Vanguard denies direct CreateProcess on the game binary, so the launch
+        // goes through the League client's replay flow: rofl into its Replays
+        // folder (client naming: PLATFORM-gameId), scan, watch.
+        var (platform, gameId) = ParseMatchId(job.MatchId);
+        using var lcu = LcuClient.TryConnect(LeagueRoot)
+            ?? throw new InvalidOperationException("League client not running - it must be open to launch replays under Vanguard");
+        var roflPath = Path.Combine(await lcu.GetReplaysPathAsync(ct), $"{platform}-{gameId}.rofl");
         Log.Info("Downloading replay...");
         await tracker.DownloadReplayAsync(job, roflPath, ct);
 
@@ -171,19 +186,15 @@ public sealed class RenderAgent(AgentConfig config)
         using var replayApi = new ReplayApiClient();
         try
         {
-            Log.Info("Launching replay...");
-            game = Process.Start(new ProcessStartInfo(_gameExe, $"\"{roflPath}\"")
-            {
-                WorkingDirectory = _gameDir,
-                UseShellExecute = false,
-            }) ?? throw new InvalidOperationException("could not start the game process");
+            Log.Info("Launching replay through the client...");
+            await lcu.ScanAsync(ct);
+            await Task.Delay(TimeSpan.FromSeconds(2), ct);
+            await lcu.WatchAsync(gameId, ct);
+            game = await WaitForGameProcessAsync(ct);
 
             await WaitForReplayApiAsync(game, replayApi, ct);
             await replayApi.SetPlaybackAsync(time: null, paused: true, speed: 1, ct);
-            if (job.MyName is { Length: > 0 })
-            {
-                await replayApi.FollowPlayerAsync(job.MyName, ct);
-            }
+            var cameraName = await ResolveCameraNameAsync(replayApi, job, ct);
 
             foreach (var window in windows)
             {
@@ -193,7 +204,7 @@ public sealed class RenderAgent(AgentConfig config)
                 await replayApi.SetPlaybackAsync(window.StartSec, paused: true, speed: 1, ct);
                 await WaitForSeekAsync(replayApi, window.StartSec, ct);
                 // Selection can drop across seeks; re-assert before recording.
-                if (job.MyName is { Length: > 0 }) await replayApi.FollowPlayerAsync(job.MyName, ct);
+                if (cameraName is { Length: > 0 }) await replayApi.FollowPlayerAsync(cameraName, ct);
                 await replayApi.SetPlaybackAsync(time: null, paused: false, speed: 1, ct);
                 await Task.Delay(TimeSpan.FromSeconds(1), ct);
 
@@ -232,6 +243,58 @@ public sealed class RenderAgent(AgentConfig config)
         }
     }
 
+    private string LeagueRoot => Path.GetDirectoryName(_gameDir)!;
+
+    /// selectionName only takes a name exactly as the game knows it, and Riot
+    /// ID formats vary - so try what the game itself reports for the tracked
+    /// player (champion matches first) and keep the first that verifiably
+    /// sticks. Falls back to the server-sent name with a warning.
+    private static async Task<string?> ResolveCameraNameAsync(ReplayApiClient api, RenderJob job, CancellationToken ct)
+    {
+        foreach (var name in await api.GetCameraCandidatesAsync(job.MyName, job.MyChampion, ct))
+        {
+            await api.FollowPlayerAsync(name, ct);
+            if (string.Equals(await api.GetSelectionAsync(ct), name, StringComparison.OrdinalIgnoreCase))
+            {
+                Log.Info($"Camera locked on \"{name}\"");
+                return name;
+            }
+        }
+        if (job.MyName is { Length: > 0 })
+        {
+            Log.Warn($"Could not verify a camera lock for \"{job.MyName}\" - using it unverified");
+            await api.FollowPlayerAsync(job.MyName, ct);
+        }
+        return job.MyName;
+    }
+
+    /// "EUW1_7913572469" -> ("EUW1", 7913572469).
+    private static (string Platform, long GameId) ParseMatchId(string matchId)
+    {
+        var parts = matchId.Split('_');
+        return parts.Length == 2 && long.TryParse(parts[1], out var gameId)
+            ? (parts[0], gameId)
+            : throw new InvalidOperationException($"unexpected match id format: {matchId}");
+    }
+
+    /// The client starts the game on its own schedule after watch; wait for it.
+    private static async Task<Process> WaitForGameProcessAsync(CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(90);
+        while (DateTime.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            var procs = Process.GetProcessesByName(GameProcessName);
+            if (procs.Length > 0)
+            {
+                foreach (var extra in procs[1..]) extra.Dispose();
+                return procs[0];
+            }
+            await Task.Delay(TimeSpan.FromSeconds(1), ct);
+        }
+        throw new TimeoutException("the client did not start the replay within 90s");
+    }
+
     private async Task WaitForReplayApiAsync(Process game, ReplayApiClient api, CancellationToken ct)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(3);
@@ -258,10 +321,18 @@ public sealed class RenderAgent(AgentConfig config)
         throw new TimeoutException($"seek to {targetSec}s did not settle");
     }
 
-    private Task CaptureAsync(string output, int durationSec, CancellationToken ct) =>
-        RunFfmpegAsync(
-            $"-y -f gdigrab -framerate {config.CaptureFramerate} -i title=\"{GameWindowTitle}\" " +
-            $"-t {Math.Max(2, durationSec)} -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p \"{output}\"", ct);
+    private Task CaptureAsync(string output, int durationSec, CancellationToken ct)
+    {
+        // Desktop Duplication cropped to the game window - gdigrab's window
+        // capture is black for Direct3D content.
+        var rect = GameWindow.FindClientRect(GameWindowTitle)
+            ?? throw new InvalidOperationException($"game window \"{GameWindowTitle}\" not found for capture");
+        var width = rect.Width & ~1;    // yuv420p needs even dimensions
+        var height = rect.Height & ~1;
+        return RunFfmpegAsync(
+            $"-y -f lavfi -i ddagrab=framerate={config.CaptureFramerate}:offset_x={Math.Max(0, rect.X)}:offset_y={Math.Max(0, rect.Y)}:video_size={width}x{height} " +
+            $"-vf hwdownload,format=bgra -t {Math.Max(2, durationSec)} -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p \"{output}\"", ct);
+    }
 
     private async Task RunFfmpegAsync(string args, CancellationToken ct)
     {
@@ -269,6 +340,8 @@ public sealed class RenderAgent(AgentConfig config)
         {
             UseShellExecute = false,
             RedirectStandardError = true,
+            // The agent runs windowless; without this ffmpeg would pop a console.
+            CreateNoWindow = true,
         }) ?? throw new InvalidOperationException("could not start ffmpeg");
 
         var stderr = await proc.StandardError.ReadToEndAsync(ct);

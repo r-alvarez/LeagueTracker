@@ -39,9 +39,62 @@ public sealed class ReplayApiClient : IDisposable
     public Task SetPlaybackAsync(double? time, bool? paused, double? speed, CancellationToken ct) =>
         PostAsync("/replay/playback", new { time, paused, speed }, ct);
 
-    /// Locks the camera onto the tracked player, with fog of war from their team's view.
+    /// Locks the camera onto the tracked player, with fog of war from their
+    /// team's view, and hides the replay UI (timeline/controls) so recordings
+    /// look like a spectate rather than a replay session.
     public Task FollowPlayerAsync(string playerName, CancellationToken ct) =>
-        PostAsync("/replay/render", new { cameraAttached = true, selectionName = playerName, fogOfWar = true }, ct);
+        PostAsync("/replay/render", new
+        {
+            cameraAttached = true,
+            selectionName = playerName,
+            fogOfWar = true,
+            interfaceTimeline = false,
+            interfaceReplay = false,
+        }, ct);
+
+    /// The selection the game actually accepted - a name the game doesn't
+    /// recognise leaves this empty, so callers can verify their follow stuck.
+    public async Task<string?> GetSelectionAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{Base}/replay/render", ct));
+            return doc.RootElement.TryGetProperty("selectionName", out var name) ? name.GetString() : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return null;
+        }
+    }
+
+    /// Name candidates for the tracked player, from the game's own player list
+    /// - the ground truth for what selectionName will accept. Only entries that
+    /// match the tracked player's name or champion qualify, so a wrong guess
+    /// can never land the camera on someone else.
+    public async Task<List<string>> GetCameraCandidatesAsync(string? playerName, string? champion, CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{Base}/liveclientdata/playerlist", ct));
+            var scored = new List<(int Score, string Name)>();
+            foreach (var player in doc.RootElement.EnumerateArray())
+            {
+                var names = ((string[])["summonerName", "riotId", "riotIdGameName"])
+                    .Select(field => player.TryGetProperty(field, out var v) ? v.GetString() : null)
+                    .OfType<string>().Where(n => n.Length > 0).ToList();
+                var score =
+                    (champion is { Length: > 0 } && player.TryGetProperty("championName", out var champ)
+                        && string.Equals(champ.GetString(), champion, StringComparison.OrdinalIgnoreCase) ? 2 : 0)
+                    + (playerName is { Length: > 0 } && names.Any(n => n.StartsWith(playerName, StringComparison.OrdinalIgnoreCase)) ? 1 : 0);
+                if (score > 0) scored.AddRange(names.Select(n => (score, n)));
+            }
+            return [.. scored.OrderByDescending(s => s.Score).Select(s => s.Name).Distinct()];
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return [];
+        }
+    }
 
     private async Task PostAsync(string path, object body, CancellationToken ct)
     {
