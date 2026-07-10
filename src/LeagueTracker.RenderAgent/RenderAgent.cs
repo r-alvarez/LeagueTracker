@@ -199,18 +199,29 @@ public sealed class RenderAgent(AgentConfig config)
             foreach (var window in windows)
             {
                 var output = Path.Combine(_workDir, $"{job.MatchId}-w{window.Index:00}.mp4");
-                Log.Info($"Window {window.Index} ({window.Label}, {window.StartSec}-{window.EndSec}s): seeking...");
+                var duration = Math.Max(2, window.EndSec - window.StartSec);
+                for (var attempt = 1; ; attempt++)
+                {
+                    Log.Info($"Window {window.Index} ({window.Label}, {window.StartSec}-{window.EndSec}s): seeking...");
+                    await replayApi.SetPlaybackAsync(window.StartSec, paused: true, speed: 1, ct);
+                    await WaitForSeekAsync(replayApi, window.StartSec, ct);
+                    // Selection can drop across seeks; re-assert before recording.
+                    if (cameraName is { Length: > 0 }) await replayApi.FollowPlayerAsync(cameraName, ct);
+                    await replayApi.SetPlaybackAsync(time: null, paused: false, speed: 1, ct);
+                    await Task.Delay(TimeSpan.FromSeconds(1), ct);
 
-                await replayApi.SetPlaybackAsync(window.StartSec, paused: true, speed: 1, ct);
-                await WaitForSeekAsync(replayApi, window.StartSec, ct);
-                // Selection can drop across seeks; re-assert before recording.
-                if (cameraName is { Length: > 0 }) await replayApi.FollowPlayerAsync(cameraName, ct);
-                await replayApi.SetPlaybackAsync(time: null, paused: false, speed: 1, ct);
-                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                    Log.Info($"Window {window.Index}: recording {duration}s...");
+                    var started = DateTime.UtcNow;
+                    await CaptureAsync(output, duration, ct);
+                    await replayApi.SetPlaybackAsync(time: null, paused: true, speed: null, ct);
 
-                Log.Info($"Window {window.Index}: recording {window.EndSec - window.StartSec}s...");
-                await CaptureAsync(output, window.EndSec - window.StartSec, ct);
-                await replayApi.SetPlaybackAsync(time: null, paused: true, speed: null, ct);
+                    // Desktop Duplication can end the stream early (e.g. a display
+                    // mode switch right after launch) with ffmpeg still exiting 0 -
+                    // trust the wall clock, not the exit code, and redo the window.
+                    var recorded = (DateTime.UtcNow - started).TotalSeconds;
+                    if (recorded >= duration - 3 || attempt >= 3) break;
+                    Log.Warn($"Window {window.Index}: capture ended after {recorded:0}s of {duration}s - retrying");
+                }
 
                 await tracker.UploadAsync(job, window.Index, output, ct);
                 File.Delete(output);
