@@ -111,7 +111,7 @@ export default function DataPage() {
             (it drives the game client's replay mode). Clips appear on the match pages as they land.
           </p>
           <p style={{ margin: 0 }}>
-            {(['pending', 'rendering', 'done', 'failed'] as const).map(s => {
+            {(['pending', 'partial', 'rendering', 'done', 'failed'] as const).map(s => {
               const n = renderQueue.filter(r => r.status === s).length
               return n > 0 ? <span key={s} style={{ marginRight: 14 }}><strong>{n}</strong> {s}</span> : null
             })}

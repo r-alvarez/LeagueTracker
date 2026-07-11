@@ -377,7 +377,7 @@ export interface RenderQueueRow {
   champion: string
   gameEndUtc: string
   kind: 'clips' | 'full'
-  status: 'pending' | 'rendering' | 'done' | 'failed' | 'no-events'
+  status: 'pending' | 'partial' | 'rendering' | 'done' | 'failed' | 'no-events'
   error: string | null
 }
 

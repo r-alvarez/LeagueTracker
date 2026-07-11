@@ -266,8 +266,23 @@ public sealed class RenderAgent(AgentConfig config)
                     // mode switch) with ffmpeg still exiting 0 - trust the wall
                     // clock, not the exit code, and redo the window.
                     var recorded = (DateTime.UtcNow - started).TotalSeconds;
-                    if (recorded >= duration - 3 || attempt >= 3) break;
-                    Log.Warn($"Window {window.Index}: capture ended after {recorded:0}s of {duration}s - retrying");
+                    if (recorded < duration - 3 && attempt < 3)
+                    {
+                        Log.Warn($"Window {window.Index}: capture ended after {recorded:0}s of {duration}s - retrying");
+                        continue;
+                    }
+
+                    // A hung replay keeps rendering frames (and the Replay API
+                    // keeps answering, seeks "settling" and all) while the
+                    // simulation is stuck - every API-side check passes and the
+                    // capture is a still image. The rendered game clock is the
+                    // ground truth the API can't fake; a hung game won't
+                    // recover, so postpone rather than retry in this instance.
+                    if (await SimFrozeDuringAsync(output, ct))
+                    {
+                        throw new RenderPostponedException($"the game clock froze during window {window.Index}'s recording - replay simulation hung");
+                    }
+                    break;
                 }
                 if (!engaged)
                 {
@@ -492,7 +507,20 @@ public sealed class RenderAgent(AgentConfig config)
             $"-vf hwdownload,format=bgra -t {Math.Max(2, durationSec)} -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p \"{output}\"", ct);
     }
 
-    private async Task RunFfmpegAsync(string args, CancellationToken ct)
+    /// True when the in-game clock (top-centre of the HUD, ticks every second
+    /// while the simulation runs) sits unchanged for 5s+ anywhere in the clip.
+    /// Cropping to the clock avoids false life from things that animate even
+    /// when the sim is hung: torch flames, water, the FPS counter, the cursor.
+    /// Calibrated against real clips: a hung job's clips freeze wall-to-wall
+    /// (bar one keyframe pulse); healthy clips report nothing.
+    private async Task<bool> SimFrozeDuringAsync(string clipPath, CancellationToken ct)
+    {
+        var stderr = await RunFfmpegAsync(
+            $"-i \"{clipPath}\" -vf \"crop=in_w*0.08:in_h*0.05:in_w*0.45:in_h*0.05,freezedetect=n=0.003:d=5\" -an -f null -", ct);
+        return stderr.Contains("freeze_start", StringComparison.Ordinal);
+    }
+
+    private async Task<string> RunFfmpegAsync(string args, CancellationToken ct)
     {
         using var proc = Process.Start(new ProcessStartInfo(_ffmpeg, args)
         {
@@ -509,6 +537,7 @@ public sealed class RenderAgent(AgentConfig config)
             var tail = stderr.Length > 400 ? stderr[^400..] : stderr;
             throw new InvalidOperationException($"ffmpeg exited {proc.ExitCode}: {tail}");
         }
+        return stderr;
     }
 
     private string ResolveFfmpeg()
