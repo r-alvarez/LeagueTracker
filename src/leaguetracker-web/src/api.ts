@@ -18,6 +18,7 @@ export const api = {
     get<MatchPage>(`/api/matches?page=${page}&pageSize=${pageSize}${ranked === undefined ? '' : `&ranked=${ranked}`}`),
   match: (id: string) => get<MatchDetail>(`/api/matches/${id}`),
   clips: (id: string) => get<ClipInfo[]>(`/api/matches/${id}/clips`),
+  deleteClip: async (id: string, index: number) => { await fetch(`/api/matches/${id}/clips/${index}`, { method: 'DELETE' }) },
   renderQueue: () => get<RenderQueueRow[]>('/api/render/queue'),
   fullGameStatus: (id: string) => get<FullGameStatus>(`/api/matches/${id}/fullgame/status`),
   requestFullGame: (id: string) => post<FullGameStatus>(`/api/matches/${id}/fullgame`),

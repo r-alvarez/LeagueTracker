@@ -211,6 +211,11 @@ app.MapGet("/api/matches/{id}/clips/{index:int}", (string id, int index, ClipSer
         ? Results.File(path, "video/mp4", enableRangeProcessing: true)
         : Results.NotFound());
 
+// Drop one bad clip (e.g. the render silently captured a hung replay); the
+// window re-enters the render queue and the agent re-creates just that mp4.
+app.MapDelete("/api/matches/{id}/clips/{index:int}", (string id, int index, ClipService clips) =>
+    clips.DeleteClip(id, index) ? Results.Ok() : Results.NotFound());
+
 // --- Full-game renders (opt-in per match; retention-swept unless kept) ----------
 
 app.MapGet("/api/matches/{id}/fullgame/status", (string id, FullGameService full, RenderLeaseService leases) =>
@@ -287,8 +292,15 @@ app.MapPost("/api/render/next", async (ClipService clips, FullGameService full, 
 
     foreach (var matchId in candidates)
     {
-        if (clips.HasClips(matchId) || clips.FailReason(matchId) is not null || leases.IsLeased($"clips:{matchId}")) continue;
-        if (await clips.PlanAsync(matchId, ct) is not { Windows.Count: > 0 } plan) continue;
+        if (clips.FailReason(matchId) is not null || leases.IsLeased($"clips:{matchId}")) continue;
+        // The saved plan is the manifest existing clips were rendered against
+        // - recomputing could renumber windows and mislabel surviving files.
+        var plan = await clips.LoadPlanAsync(matchId, ct) ?? await clips.PlanAsync(matchId, ct);
+        if (plan is not { Windows.Count: > 0 }) continue;
+        // Only windows without an mp4: deleting a single bad clip on the match
+        // page re-renders just that window, keeping the good ones.
+        var missing = plan.Windows.Where(w => clips.ClipPath(matchId, w.Index) is null).ToList();
+        if (missing.Count == 0) continue;
         if (!leases.TryClaim($"clips:{matchId}", agent)) continue;
         await clips.SavePlanAsync(plan, ct);
         var (myName, myChampion) = await CameraTargetAsync(matchId);
@@ -299,7 +311,7 @@ app.MapPost("/api/render/next", async (ClipService clips, FullGameService full, 
             ReplayUrl = $"/api/matches/{plan.MatchId}/replay",
             MyName = myName,
             MyChampion = myChampion,
-            plan.Windows,
+            Windows = missing,
         });
     }
 

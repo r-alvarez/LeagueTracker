@@ -693,6 +693,17 @@ export default function MatchDetail() {
                   <div className="sub-h" style={{ marginTop: 0 }}>
                     {c.label} · {fmtClock(c.startSec)}–{fmtClock(c.endSec)}
                     <span className="mut"> · {c.events.map(e => `${e.kind} ${fmtClock(e.timeSec)}`).join(', ')}</span>
+                    {c.ready && (
+                      <button className="action" style={{ padding: '0 8px', marginLeft: 8 }}
+                        title="Delete this clip and queue just this window for a fresh render on the gaming PC"
+                        onClick={() => {
+                          if (id && window.confirm('Delete this clip? The render agent will re-create it from the replay (needs the replay still playable on the current patch).')) {
+                            void api.deleteClip(id, c.index).then(() => api.clips(id).then(setClips))
+                          }
+                        }}>
+                        ✕ re-render
+                      </button>
+                    )}
                   </div>
                   {c.ready ? (
                     <video

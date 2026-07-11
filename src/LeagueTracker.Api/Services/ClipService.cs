@@ -159,6 +159,17 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         foreach (var mp4 in Directory.EnumerateFiles(dir, "*.mp4")) File.Delete(mp4);
     }
 
+    /// Drops one bad clip so just that window re-renders. Also clears the
+    /// failed marker - a match can hold good clips AND a failure (e.g. the
+    /// game died mid-job), and the marker would otherwise block the re-render.
+    public bool DeleteClip(string matchId, int index)
+    {
+        if (ClipPath(matchId, index) is not { } path) return false;
+        File.Delete(path);
+        ClearFailed(matchId);
+        return true;
+    }
+
     /// Render-queue view over every match with an archived replay, newest first.
     public async Task<List<object>> QueueAsync(RenderLeaseService leases, CancellationToken ct)
     {
@@ -172,13 +183,24 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         var rows = new List<object>();
         foreach (var m in matches)
         {
-            var clips = HasClips(m.Id);
             var failed = FailReason(m.Id);
-            var status = clips ? "done"
-                : failed is not null ? "failed"
-                : leases.IsLeased($"clips:{m.Id}") ? "rendering"
-                : m.HasTimeline && await PlanAsync(m.Id, ct) is { Windows.Count: > 0 } ? "pending"
-                : "no-events";
+            // The saved plan is the manifest existing clips were rendered
+            // against; only never-claimed matches need a fresh plan.
+            var plan = await LoadPlanAsync(m.Id, ct) ?? (m.HasTimeline ? await PlanAsync(m.Id, ct) : null);
+            string status;
+            if (plan is not { Windows.Count: > 0 })
+            {
+                status = HasClips(m.Id) ? "done" : failed is not null ? "failed" : "no-events";
+            }
+            else
+            {
+                var missing = plan.Windows.Count(w => ClipPath(m.Id, w.Index) is null);
+                status = missing == 0 ? "done"
+                    : failed is not null ? "failed"
+                    : leases.IsLeased($"clips:{m.Id}") ? "rendering"
+                    : missing < plan.Windows.Count ? "partial"
+                    : "pending";
+            }
             rows.Add(new { MatchId = m.Id, m.Champion, m.GameEndUtc, Kind = "clips", Status = status, Error = failed });
         }
         return rows;
