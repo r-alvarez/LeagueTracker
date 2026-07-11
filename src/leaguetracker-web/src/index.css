@@ -764,6 +764,13 @@ nav.tabs a { white-space: nowrap; flex: 0 0 auto; }
   .mr-vs .opp { overflow: hidden; text-overflow: ellipsis; }
 }
 
+/* Coach category view: the restyle block re-declares .lens-split with two
+   columns AFTER the original 900px collapse, overriding it at every width -
+   restack it here where the layer wins. */
+@media (max-width: 900px) {
+  .lens-split { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 700px) {
   .shell { padding: 0 12px 36px; }
   .card { padding: 14px; }
