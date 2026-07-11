@@ -726,3 +726,78 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .ph-deltas { display: inline-flex; gap: 6px; margin-top: 3px; }
 .ph-ring { flex: 0 0 auto; }
 @media (max-width: 760px) { .ph-rank { margin-left: 0; } }
+
+/* ============================================================================
+   Mobile layer. Wide strips (tab bar, segmented controls, tables) scroll
+   inside their own box instead of stretching the page; the match rows and
+   multi-column grids restack. Keep these rules last - several override
+   earlier breakpoint blocks by order.
+   ========================================================================== */
+
+/* Control strips: scroll sideways, never wrap or push the page wider. */
+nav.tabs { overflow-x: auto; }
+nav.tabs a { white-space: nowrap; flex: 0 0 auto; }
+.seg { max-width: 100%; overflow-x: auto; }
+.seg button { white-space: nowrap; flex: 0 0 auto; }
+.filters { min-width: 0; }
+.table-scroll { max-width: 100%; }
+
+/* Match rows: below the full-row breakpoint, restack each row into a compact
+   card - matchup + KDA + LP up top, then the meta line, loadout, ranks.
+   (.mr-minis / .mr-links stay hidden from the earlier 1100px rule.) */
+@media (max-width: 1100px) {
+  .match-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "champ   kda     lp"
+      "meta    meta    meta"
+      "loadout loadout loadout"
+      "rank    rank    rank";
+    gap: 8px 12px;
+  }
+  .match-row .mr-champ { grid-area: champ; }
+  .match-row .kda-block { grid-area: kda; }
+  .match-row .lp-chip, .match-row > .mut.sm-text { grid-area: lp; align-self: start; justify-self: end; }
+  .match-row .mr-meta { grid-area: meta; flex-direction: row; align-items: baseline; column-gap: 8px; flex-wrap: wrap; }
+  .match-row .loadout { grid-area: loadout; }
+  .match-row .mr-rank { grid-area: rank; flex-direction: row; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .mr-vs .opp { overflow: hidden; text-overflow: ellipsis; }
+}
+
+@media (max-width: 700px) {
+  .shell { padding: 0 12px 36px; }
+  .card { padding: 14px; }
+
+  /* Stat tiles read better two-up than as one long column. The match-detail
+     header tiles (portrait duel, team ranks) need the full width. */
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tile .value { font-size: 20px; }
+  .tile:has(.mh-row), .tile:has(.rank-duel) { grid-column: 1 / -1; }
+  .mh-row, .rank-duel { flex-wrap: wrap; }
+
+  .drill-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .profile-detail .tiles { grid-template-columns: repeat(2, 1fr); }
+
+  /* Strengths & weaknesses: the diverging bar drops to its own line under
+     label + values instead of squeezing three columns side by side. */
+  .profile-row { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
+  .profile-row .profile-bar { grid-column: 1 / -1; grid-row: 2; }
+
+  /* Death recap: the per-source split bar takes the full second line. */
+  .recap-row { grid-template-columns: 28px minmax(0, 1fr); row-gap: 6px; }
+  .recap-row > :last-child { grid-column: 1 / -1; }
+
+  /* Item race checkpoints hold two 7-slot strips; let them wrap. */
+  .item-race-row { flex-wrap: wrap; }
+
+  .ph { padding: 14px 16px; gap: 14px; }
+  .ph-avatar img, .ph-avatar .champ-mono { width: 52px; height: 52px; }
+
+  .lens-header { padding: 12px 14px; }
+  .lens-hstats { margin-left: 0; }
+  .lens-panel { padding: 14px; }
+  .lens-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  .dmg-cell { min-width: 100px; }
+  .dmgbar { width: 80px; }
+}
