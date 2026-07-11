@@ -54,6 +54,30 @@ services:
       - traefik.http.routers.leaguetracker-alt.priority=100
       - traefik.http.routers.leaguetracker-alt.service=leaguetracker-alt
 
+  leaguetracker-ben:
+    build: *lt-build
+    pull_policy: build
+    image: leaguetracker:local
+    container_name: leaguetracker-ben
+    user: "568:568"
+    environment:
+      - TZ=Europe/London
+      - Riot__GameName=TheCosmicPeach
+      - Riot__TagLine=TTV
+    volumes:
+      - /mnt/MediaPool/apps/leaguetracker/ben:/data
+    networks: [frontend]
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=frontend
+      - traefik.http.services.leaguetracker-ben.loadbalancer.server.port=5170
+      - traefik.http.routers.leaguetracker-ben.rule=Host(`league-ben.rjav-tech.co.uk`)
+      - traefik.http.routers.leaguetracker-ben.entrypoints=websecure
+      - traefik.http.routers.leaguetracker-ben.tls.certResolver=cloudflare
+      - traefik.http.routers.leaguetracker-ben.priority=100
+      - traefik.http.routers.leaguetracker-ben.service=leaguetracker-ben
+
 networks:
   frontend:
     external: true

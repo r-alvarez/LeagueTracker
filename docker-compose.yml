@@ -34,6 +34,22 @@ services:
       - ./data-alt:/data
     restart: unless-stopped
 
+  # Third tracked account (TheCosmicPeach#TTV), same isolation rationale.
+  leaguetracker-ben:
+    build: .
+    container_name: leaguetracker-ben
+    expose:
+      - "5170"
+    ports:
+      - "5172:5170"
+    environment:
+      - TZ=Europe/London
+      - Riot__GameName=TheCosmicPeach
+      - Riot__TagLine=TTV
+    volumes:
+      - ./data-ben:/data
+    restart: unless-stopped
+
   # Reverse proxy so the app is reachable at http://leaguetracker.localhost
   # (no port). Browsers resolve *.localhost to loopback; a hosts entry makes it
   # bulletproof for non-browser clients too.
