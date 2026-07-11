@@ -9,3 +9,8 @@ http://leaguetracker-alt.localhost {
 	encode gzip zstd
 	reverse_proxy leaguetracker-alt:5170
 }
+
+http://leaguetracker-ben.localhost {
+	encode gzip zstd
+	reverse_proxy leaguetracker-ben:5170
+}
