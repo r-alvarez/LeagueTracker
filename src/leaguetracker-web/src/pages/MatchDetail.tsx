@@ -298,6 +298,7 @@ function DetailsTab({ detail }: { detail: Detail }) {
           </h2>
           {l.checkpoints && l.checkpoints.length > 0 ? (
             <>
+              <div className="table-scroll">
               <table className="data">
                 <thead>
                   <tr>
@@ -327,6 +328,7 @@ function DetailsTab({ detail }: { detail: Detail }) {
                   ))}
                 </tbody>
               </table>
+              </div>
               <div className="sub-h">Item race</div>
               <div className="item-race">
                 {l.checkpoints.map(c => (

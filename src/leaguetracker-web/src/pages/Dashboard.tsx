@@ -85,22 +85,24 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
                           <span className="obj-chip">{Math.round(r.dpm)} <span className="mut">DPM</span></span>
                         </div>
                         {r.detail.matchups.length > 0 ? (
-                          <table className="data" style={{ marginTop: 8 }}>
-                            <thead>
-                              <tr><th>Lane matchup (2+ games)</th><th className="num">Games</th><th className="num">WR</th><th className="num">G@10</th><th className="num">KDA</th></tr>
-                            </thead>
-                            <tbody>
-                              {r.detail.matchups.map(mu => (
-                                <tr key={mu.opponent}>
-                                  <td><ChampBadge name={mu.opponent} small /></td>
-                                  <td className="num">{mu.games}</td>
-                                  <td className={`num ${mu.winRate >= 0.5 ? 'win' : 'loss'}`}>{pct(mu.winRate)}</td>
-                                  <td className="num">{signed(mu.laneGoldAt10)}</td>
-                                  <td className="num">{mu.kda}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                          <div className="table-scroll" style={{ marginTop: 8 }}>
+                            <table className="data">
+                              <thead>
+                                <tr><th>Lane matchup (2+ games)</th><th className="num">Games</th><th className="num">WR</th><th className="num">G@10</th><th className="num">KDA</th></tr>
+                              </thead>
+                              <tbody>
+                                {r.detail.matchups.map(mu => (
+                                  <tr key={mu.opponent}>
+                                    <td><ChampBadge name={mu.opponent} small /></td>
+                                    <td className="num">{mu.games}</td>
+                                    <td className={`num ${mu.winRate >= 0.5 ? 'win' : 'loss'}`}>{pct(mu.winRate)}</td>
+                                    <td className="num">{signed(mu.laneGoldAt10)}</td>
+                                    <td className="num">{mu.kda}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         ) : <p className="mut" style={{ margin: '8px 0 0' }}>No repeated lane matchups in this window.</p>}
                       </td>
                     </tr>
@@ -305,6 +307,7 @@ export default function Dashboard() {
           <div className="grid two-col" style={{ marginBottom: 16 }}>
             <div className="card">
               <h2>Lane state <span className="mut" style={{ fontWeight: 400 }}>— gold vs your laner, ±500</span></h2>
+              <div className="table-scroll">
               <table className="data">
                 <thead>
                   <tr>
@@ -329,6 +332,7 @@ export default function Dashboard() {
                   ))}
                 </tbody>
               </table>
+              </div>
               <div className="stat-list" style={{ marginTop: 10 }}>
                 <div className="stat-row">
                   <span className="k">Leads held to 20:00<small>still ≥ +500 vs your laner</small></span>
@@ -347,14 +351,16 @@ export default function Dashboard() {
             <div className="card">
               <h2>Where you die</h2>
               {stats.deathZones.length === 0 ? <div className="empty">No death data in this window.</div> : (
-                <table className="data">
-                  <thead><tr><th>Zone</th><th className="num">Deaths</th><th className="num">Share</th></tr></thead>
-                  <tbody>
-                    {stats.deathZones.map(z => (
-                      <tr key={z.key}><td>{z.key}</td><td className="num">{z.count}</td><td className="num">{pct(z.share)}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="table-scroll">
+                  <table className="data">
+                    <thead><tr><th>Zone</th><th className="num">Deaths</th><th className="num">Share</th></tr></thead>
+                    <tbody>
+                      {stats.deathZones.map(z => (
+                        <tr key={z.key}><td>{z.key}</td><td className="num">{z.count}</td><td className="num">{pct(z.share)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </div>
