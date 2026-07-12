@@ -35,12 +35,6 @@ public sealed class TrackerClient(string serverUrl, string agentName)
         }
     }
 
-    public async Task<bool> PlayerInGameAsync(CancellationToken ct)
-    {
-        using var resp = await _http.GetAsync($"{serverUrl}/api/live", ct);
-        return resp.StatusCode == HttpStatusCode.OK;
-    }
-
     public async Task<RenderJob?> ClaimNextAsync(CancellationToken ct)
     {
         using var resp = await _http.PostAsync($"{serverUrl}/api/render/next?agent={Uri.EscapeDataString(agentName)}", null, ct);

@@ -58,6 +58,22 @@ public sealed class LcuClient : IDisposable
         }
     }
 
+    /// Where the logged-in player is in the play flow: "None" when idle in
+    /// the client, otherwise "Lobby", "Matchmaking", "ChampSelect",
+    /// "InProgress", ... Null when the endpoint can't answer.
+    public async Task<string?> GetGameflowPhaseAsync(CancellationToken ct)
+    {
+        try
+        {
+            var json = await _http.GetStringAsync($"{_base}/lol-gameflow/v1/gameflow-phase", ct);
+            return JsonSerializer.Deserialize<string>(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public async Task<string> GetReplaysPathAsync(CancellationToken ct)
     {
         var json = await _http.GetStringAsync($"{_base}/lol-replays/v1/rofls/path", ct);

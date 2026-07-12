@@ -101,18 +101,12 @@ public sealed class RenderAgent(AgentConfig config)
 
     private async Task<bool> RunOnceAsync(CancellationToken ct)
     {
-        // Never fight the player for the machine: skip while ANY tracked account
-        // is in a game (server-side knowledge) or a game client runs locally.
+        // Never fight the player for the machine - judged from THIS machine
+        // only: a game client running locally, or the local League client
+        // anywhere in the play flow (lobby, queue, champ select, loading,
+        // in game). Tracked accounts playing elsewhere don't need this PC.
         if (!MockRender)
         {
-            foreach (var tracker in _trackers)
-            {
-                try
-                {
-                    if (await tracker.PlayerInGameAsync(ct)) { Log.Info("Player is in game - waiting"); return false; }
-                }
-                catch { /* unreachable tracker - checked again next pass */ }
-            }
             if (Process.GetProcessesByName(GameProcessName) is { Length: > 0 }) { Log.Info("Game client running - waiting"); return false; }
 
             // Vanguard only allows replay launches through the League client, so
@@ -121,6 +115,16 @@ public sealed class RenderAgent(AgentConfig config)
             using (lcu)
             {
                 if (!await lcu.IsUpAsync(ct)) { Log.Info("League client still starting - waiting"); return false; }
+                // Unknown phases block too: the safe default is to assume the
+                // player is (about to be) playing. None = idle in the client;
+                // WatchInProgress = a replay, which the process check already
+                // covers when one is really running.
+                if (await lcu.GetGameflowPhaseAsync(ct) is { Length: > 0 } phase
+                    and not ("None" or "WatchInProgress" or "TerminatedInError"))
+                {
+                    Log.Info($"Player is in {phase} on this machine - waiting");
+                    return false;
+                }
             }
 
             // Idle gate: the camera lock needs the game window focused, which
@@ -228,13 +232,32 @@ public sealed class RenderAgent(AgentConfig config)
             // few seconds early, engages, verifies tracking during the pre-roll
             // (trustworthy because the directed camera is off - nothing else
             // tracks), and rolls into the recording without further seeks.
-            var slot = job.MyChampion is { Length: > 0 } champion
-                ? await replayApi.GetPlayerSlotAsync(champion, ct)
-                : null;
-            if (slot is null && windows.Count > 0)
+            // Slot resolution distinguishes "can't see the list yet" (the list
+            // can lag the playback API while the game loads - postpone) from
+            // "the list is there but the champion isn't" (bad camera-target
+            // data that no amount of retrying fixes - fail so it surfaces
+            // instead of recycling on every lease expiry forever).
+            if (job.MyChampion is not { Length: > 0 } myChampion)
             {
-                throw new RenderPostponedException($"could not find {job.MyChampion} in the player list");
+                throw new InvalidOperationException("no camera target for this match - the tracked player's participant row is missing");
             }
+            List<(string Champion, bool Blue)> players = [];
+            for (var attempt = 1; attempt <= 5 && players.Count == 0; attempt++)
+            {
+                players = await replayApi.GetPlayerListAsync(ct);
+                if (players.Count == 0) await Task.Delay(TimeSpan.FromSeconds(3), ct);
+            }
+            if (players.Count == 0)
+            {
+                throw new RenderPostponedException("the replay's player list did not come up");
+            }
+            var slotIndex = players.FindIndex(p => ReplayApiClient.ChampionMatches(p.Champion, myChampion));
+            if (slotIndex < 0)
+            {
+                throw new InvalidOperationException(
+                    $"\"{myChampion}\" is not in the replay's player list ({string.Join(", ", players.Select(p => p.Champion))})");
+            }
+            var slot = (Index: slotIndex, Blue: players[slotIndex].Blue);
 
             foreach (var window in windows)
             {
@@ -249,7 +272,7 @@ public sealed class RenderAgent(AgentConfig config)
                     await WaitForSeekAsync(replayApi, preRoll, ct);
                     await replayApi.SetPlaybackAsync(time: null, paused: false, speed: 1, ct);
 
-                    engaged = await EngageCameraAsync(replayApi, slot!.Value, ct);
+                    engaged = await EngageCameraAsync(replayApi, slot, ct);
                     if (!engaged)
                     {
                         if (attempt >= 3) break;
