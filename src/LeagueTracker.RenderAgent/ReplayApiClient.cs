@@ -57,30 +57,49 @@ public sealed class ReplayApiClient : IDisposable
             interfaceTimeline = true,
         }, ct);
 
-    /// The tracked player's slot in the player list (0-9, list order matches
-    /// the camera dropdown's champion entries) and whether they're on the
-    /// first team (blue). Champions are unique per game in ranked/normals.
-    public async Task<(int Index, bool Blue)?> GetPlayerSlotAsync(string champion, CancellationToken ct)
+    /// The replay's player list in slot order (0-9, matching the camera
+    /// dropdown's champion entries): each player's champion and whether
+    /// they're on the first team (blue). Champions are unique per game in
+    /// ranked/normals. Empty while the game is still loading the list.
+    public async Task<List<(string Champion, bool Blue)>> GetPlayerListAsync(CancellationToken ct)
     {
         try
         {
             using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{Base}/liveclientdata/playerlist", ct));
-            var index = 0;
+            var players = new List<(string, bool)>();
             foreach (var player in doc.RootElement.EnumerateArray())
             {
-                if (player.TryGetProperty("championName", out var champ)
-                    && string.Equals(champ.GetString(), champion, StringComparison.OrdinalIgnoreCase))
-                {
-                    var blue = !player.TryGetProperty("team", out var team) || team.GetString() == "ORDER";
-                    return (index, blue);
-                }
-                index++;
+                var champ = player.TryGetProperty("championName", out var c) ? c.GetString() ?? "" : "";
+                var blue = !player.TryGetProperty("team", out var team) || team.GetString() == "ORDER";
+                players.Add((champ, blue));
             }
-            return null;
+            return players;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            return null;
+            return [];
+        }
+    }
+
+    /// Riot has two names per champion: the internal id that match data (and
+    /// therefore the job's MyChampion) uses ("MissFortune", "MonkeyKing") and
+    /// the display name the replay's player list reports ("Miss Fortune",
+    /// "Wukong"). Compare on letters/digits only and map the ids that differ
+    /// outright, or every multi-word champion becomes unrenderable.
+    public static bool ChampionMatches(string? a, string? b)
+    {
+        return a is { Length: > 0 } && b is { Length: > 0 } && Canon(a) == Canon(b);
+
+        static string Canon(string name)
+        {
+            var canon = string.Concat(name.Where(char.IsLetterOrDigit)).ToLowerInvariant();
+            return canon switch
+            {
+                "monkeyking" => "wukong",
+                "nunu" => "nunuwillump",
+                "renata" => "renataglasc",
+                _ => canon,
+            };
         }
     }
 
@@ -131,8 +150,8 @@ public sealed class ReplayApiClient : IDisposable
                     .Select(field => player.TryGetProperty(field, out var v) ? v.GetString() : null)
                     .OfType<string>().Where(n => n.Length > 0).ToList();
                 var score =
-                    (champion is { Length: > 0 } && player.TryGetProperty("championName", out var champ)
-                        && string.Equals(champ.GetString(), champion, StringComparison.OrdinalIgnoreCase) ? 2 : 0)
+                    (player.TryGetProperty("championName", out var champ)
+                        && ChampionMatches(champ.GetString(), champion) ? 2 : 0)
                     + (playerName is { Length: > 0 } && names.Any(n => n.StartsWith(playerName, StringComparison.OrdinalIgnoreCase)) ? 1 : 0);
                 if (score > 0) scored.AddRange(names.Select(n => (score, n)));
             }
