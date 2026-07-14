@@ -18,4 +18,8 @@ public sealed class RiotOptions
     /// Full-game renders are big (~500MB); auto-delete this many days after
     /// rendering unless marked keep. Clips are small and live forever.
     public int FullGameRetentionDays { get; set; } = 60;
+    /// Hide all rank/LP output (API responses, exports, SPA). Snapshots and
+    /// per-game LP attribution keep accruing - LP isn't reconstructable later,
+    /// so this suppresses display only.
+    public bool HideLp { get; set; }
 }

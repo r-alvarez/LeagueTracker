@@ -9,7 +9,7 @@ namespace LeagueTracker.Api.Services;
 /// everything-bundle zip. Shapes stay compatible with the PowerShell tooling.
 public static class Reports
 {
-    public static async Task<string> MatchesCsvAsync(LeagueDbContext db, CancellationToken ct)
+    public static async Task<string> MatchesCsvAsync(LeagueDbContext db, bool hideLp, CancellationToken ct)
     {
         var matches = await db.Matches.AsNoTracking().OrderByDescending(m => m.GameEndUtc).ToListAsync(ct);
         var i = System.Globalization.CultureInfo.InvariantCulture;
@@ -51,10 +51,11 @@ public static class Reports
                     m.FirstWardSec?.ToString() ?? "", m.FirstControlWardSec?.ToString() ?? "", m.WardsFirst10.ToString(),
                     m.Level6LeadSec?.ToString() ?? "", m.Level11LeadSec?.ToString() ?? "", m.Level16LeadSec?.ToString() ?? "",
                     m.FriendlyEpicObjectives.ToString(), m.ObjectivesPresentFor.ToString(),
-                    m.AvgAllyRankValue is { } ally ? RankMath.ToLabel(ally) : "",
-                    m.AvgEnemyRankValue is { } enemy ? RankMath.ToLabel(enemy) : "",
-                    m is { AvgAllyRankValue: { } a, AvgEnemyRankValue: { } e } ? Math.Round(e - a).ToString() : "",
-                    $"{m.AllyRanksKnown}/5", $"{m.EnemyRanksKnown}/5", m.LpChange?.ToString() ?? "",
+                    !hideLp && m.AvgAllyRankValue is { } ally ? RankMath.ToLabel(ally) : "",
+                    !hideLp && m.AvgEnemyRankValue is { } enemy ? RankMath.ToLabel(enemy) : "",
+                    !hideLp && m is { AvgAllyRankValue: { } a, AvgEnemyRankValue: { } e } ? Math.Round(e - a).ToString() : "",
+                    hideLp ? "" : $"{m.AllyRanksKnown}/5", hideLp ? "" : $"{m.EnemyRanksKnown}/5",
+                    hideLp ? "" : m.LpChange?.ToString() ?? "",
                 };
             }));
     }
@@ -194,7 +195,7 @@ public static class Reports
             }));
     }
 
-    public static async Task<string> RanksCsvAsync(LeagueDbContext db, CancellationToken ct)
+    public static async Task<string> RanksCsvAsync(LeagueDbContext db, bool hideLp, CancellationToken ct)
     {
         var rows = await db.Participants.AsNoTracking()
             .Where(p => p.Tier != null)
@@ -212,18 +213,20 @@ public static class Reports
                 x.p.IsMe ? "Me" : x.p.IsAlly ? "Ally" : "Enemy", x.p.Position, x.p.RiotId, x.p.Champion, x.p.Win.ToString(),
                 x.p.Kills.ToString(), x.p.Deaths.ToString(), x.p.Assists.ToString(), x.p.Cs.ToString(),
                 x.p.Gold.ToString(), x.p.DamageToChampions.ToString(), x.p.VisionScore.ToString(),
-                x.p.Tier ?? "", x.p.Division ?? "", x.p.Lp?.ToString() ?? "",
-                x.p.SeasonWins?.ToString() ?? "", x.p.SeasonLosses?.ToString() ?? "",
-                x.p is { SeasonWins: int w, SeasonLosses: int l } && w + l > 0 ? Math.Round(100.0 * w / (w + l), 1).ToString() : "",
-                x.p.RankValue?.ToString() ?? "", x.p.RankQueue ?? "",
+                hideLp ? "" : x.p.Tier ?? "", hideLp ? "" : x.p.Division ?? "", hideLp ? "" : x.p.Lp?.ToString() ?? "",
+                hideLp ? "" : x.p.SeasonWins?.ToString() ?? "", hideLp ? "" : x.p.SeasonLosses?.ToString() ?? "",
+                !hideLp && x.p is { SeasonWins: int w, SeasonLosses: int l } && w + l > 0 ? Math.Round(100.0 * w / (w + l), 1).ToString() : "",
+                hideLp ? "" : x.p.RankValue?.ToString() ?? "", hideLp ? "" : x.p.RankQueue ?? "",
                 x.p.Summoner1Id.ToString(), x.p.Summoner2Id.ToString(), x.p.KeystoneId.ToString(),
                 x.p.PrimaryStyleId.ToString(), x.p.SubStyleId.ToString(), x.p.Items,
             }));
     }
 
-    public static async Task<string> LpHistoryCsvAsync(LeagueDbContext db, CancellationToken ct)
+    public static async Task<string> LpHistoryCsvAsync(LeagueDbContext db, bool hideLp, CancellationToken ct)
     {
-        var rows = await db.LpSnapshots.AsNoTracking().OrderBy(s => s.TimestampUtc).ToListAsync(ct);
+        List<LpSnapshot> rows = hideLp
+            ? []
+            : await db.LpSnapshots.AsNoTracking().OrderBy(s => s.TimestampUtc).ToListAsync(ct);
         return Csv(
             ["Timestamp", "Queue", "Tier", "Division", "LP", "Wins", "Losses", "RankValue"],
             rows.Select(s => new[]
@@ -268,7 +271,7 @@ public static class Reports
     /// The dashboard aggregate: coach-style season stats over a window of recent
     /// ranked games (lastGames takes precedence over days; both null = all).
     /// Definitions follow the League Coach engine so numbers match like-for-like.
-    public static async Task<object> StatsAsync(LeagueDbContext db, int? days, int? lastGames, CancellationToken ct)
+    public static async Task<object> StatsAsync(LeagueDbContext db, int? days, int? lastGames, bool hideLp, CancellationToken ct)
     {
         // Remakes (<5 min) carry no LP and no signal - they don't count as games here.
         var query = db.Matches.AsNoTracking()
@@ -364,8 +367,8 @@ public static class Reports
                     : null,
                 DeathsPerGame = Math.Round(Avg(g.Select(m => (double)m.Deaths)), 2),
                 // Real LP attributed to this split - the number ranked sites can only estimate.
-                LpTotal = g.Sum(m => m.LpChange ?? 0),
-                LpKnown = g.Count(m => m.LpChange is not null),
+                LpTotal = hideLp ? (int?)null : g.Sum(m => m.LpChange ?? 0),
+                LpKnown = hideLp ? 0 : g.Count(m => m.LpChange is not null),
                 // Drill-down extras: score-line averages and lane matchups.
                 Detail = withDetail
                     ? (object?)new
@@ -416,7 +419,7 @@ public static class Reports
         }
 
         var lpDeltas = new List<object>();
-        foreach (var queue in new[] { "Solo/Duo", "Flex" })
+        foreach (var queue in hideLp ? Array.Empty<string>() : new[] { "Solo/Duo", "Flex" })
         {
             var rows = await db.LpSnapshots.AsNoTracking().Where(s => s.Queue == queue).OrderBy(s => s.TimestampUtc).ToListAsync(ct);
             if (rows is not { Count: > 0 }) continue;

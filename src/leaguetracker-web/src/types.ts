@@ -30,6 +30,7 @@ export interface Status {
   patches: string[]
   dateFrom: string | null
   dateTo: string | null
+  hideLp: boolean
   ranks: RankInfo[]
   job: JobStatus
 }
@@ -476,7 +477,7 @@ export interface SplitRow {
   dpm: number
   laneGoldAt10: number | null
   deathsPerGame: number
-  lpTotal: number
+  lpTotal: number | null
   lpKnown: number
   detail: {
     avgKills: number

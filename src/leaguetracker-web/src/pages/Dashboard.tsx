@@ -31,7 +31,7 @@ const signed = (v: number | null | undefined) => (v === null || v === undefined 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 const kdaCls = (v: number) => (v >= 5 ? 'kda-5' : v >= 4 ? 'kda-4' : v >= 3 ? 'kda-3' : v < 1 ? 'kda-low' : '')
 
-function SplitTable({ title, rows, champIcons, compact }: { title: string; rows: SplitRow[]; champIcons?: boolean; compact?: boolean }) {
+function SplitTable({ title, rows, champIcons, compact, hideLp }: { title: string; rows: SplitRow[]; champIcons?: boolean; compact?: boolean; hideLp?: boolean }) {
   const [open, setOpen] = useState<string | null>(null)
   return (
     <div className="card">
@@ -43,7 +43,7 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
               <tr>
                 <th>{champIcons ? 'Champion' : 'Role'}</th><th className="num">Games</th><th>WR</th>
                 <th className="num">KDA</th>
-                {!compact && <><th className="num">LP</th><th className="num">KP</th><th className="num">CS/m</th><th className="num">G@10</th></>}
+                {!compact && <>{!hideLp && <th className="num">LP</th>}<th className="num">KP</th><th className="num">CS/m</th><th className="num">G@10</th></>}
                 <th className="num">Deaths</th>
               </tr>
             </thead>
@@ -59,14 +59,14 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
                     <td><WinrateBar wins={r.wins} losses={r.games - r.wins} /></td>
                     <td className="num"><span className={`kda-ratio ${kdaCls(r.kda)}`} style={{ fontSize: 13 }}>{r.kda.toFixed(2)}</span></td>
                     {!compact && <>
-                      <td className="num" title="Sum of real attributed LP changes; only live-captured games carry one">
-                        {r.lpKnown > 0
+                      {!hideLp && <td className="num" title="Sum of real attributed LP changes; only live-captured games carry one">
+                        {r.lpTotal !== null && r.lpKnown > 0
                           ? <>
                               <span className={r.lpTotal >= 0 ? 'win' : 'loss'}>{r.lpTotal >= 0 ? '+' : ''}{r.lpTotal}</span>
                               {r.lpKnown < r.games && <span className="mut sm-text"> /{r.lpKnown}g</span>}
                             </>
                           : <span className="mut">—</span>}
-                      </td>
+                      </td>}
                       <td className="num">{pct(r.kp)}</td>
                       <td className="num">{r.csPerMin}</td>
                       <td className="num">{signed(r.laneGoldAt10)}</td>
@@ -366,7 +366,7 @@ export default function Dashboard() {
           </div>
 
           <div className="grid two-col" style={{ marginBottom: 16 }}>
-            <SplitTable title="Champion performance" rows={stats.byChampion} champIcons />
+            <SplitTable title="Champion performance" rows={stats.byChampion} champIcons hideLp={status?.hideLp} />
             <div className="grid" style={{ alignContent: 'start' }}>
               <SplitTable title="Role performance" rows={stats.byRole} compact />
               {deaths && deaths.games > 0 && (
@@ -404,23 +404,27 @@ export default function Dashboard() {
         </>
       )}
 
-      <div className="filters">
-        <div className="seg" role="tablist" aria-label="Queue">
-          {QUEUES.map(q => (
-            <button key={q} className={q === queue ? 'on' : ''} onClick={() => setQueue(q)}>{q}</button>
-          ))}
-        </div>
-      </div>
-      <div className="grid two-col">
-        <div className="card">
-          <h2>LP over time — {queue}</h2>
-          <LpLineChart points={lpPoints} />
-        </div>
-        <div className="card">
-          <h2>LP per game — {queue}</h2>
-          <LpPerGameBars games={queueGames} />
-        </div>
-      </div>
+      {status && !status.hideLp && (
+        <>
+          <div className="filters">
+            <div className="seg" role="tablist" aria-label="Queue">
+              {QUEUES.map(q => (
+                <button key={q} className={q === queue ? 'on' : ''} onClick={() => setQueue(q)}>{q}</button>
+              ))}
+            </div>
+          </div>
+          <div className="grid two-col">
+            <div className="card">
+              <h2>LP over time — {queue}</h2>
+              <LpLineChart points={lpPoints} />
+            </div>
+            <div className="card">
+              <h2>LP per game — {queue}</h2>
+              <LpPerGameBars games={queueGames} />
+            </div>
+          </div>
+        </>
+      )}
     </>
   )
 }

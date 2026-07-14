@@ -107,6 +107,9 @@ function Scoreboard({ title, side, won, players, objectives, maxDamage, duration
   scores: Record<number, { score: number; ord: number }>
 }) {
   const icons = useLoadoutIcons()
+  // No rank line at all when nobody has one (ranks hidden or all unranked) -
+  // a column of "Unranked" tags would just be noise.
+  const anyRanked = players.some(p => p.tier)
   return (
     <div className="card" style={{ marginBottom: 14 }}>
       <div className="sb-head">
@@ -129,7 +132,7 @@ function Scoreboard({ title, side, won, players, objectives, maxDamage, duration
                       <ChampIcon name={p.champion} level={p.champLevel} />
                       <span className="sb-name">
                         <span>{p.riotId}{p.isMe && <span className="mut"> (me)</span>}</span>
-                        <span className={`sm-text ${p.tier ? tierClass(p.tier) : 'mut'}`}>{p.tier ? `${p.tier} ${p.division}` : 'Unranked'}</span>
+                        {anyRanked && <span className={`sm-text ${p.tier ? tierClass(p.tier) : 'mut'}`}>{p.tier ? `${p.tier} ${p.division}` : 'Unranked'}</span>}
                       </span>
                     </span>
                   </td>
@@ -597,6 +600,7 @@ export default function MatchDetail() {
             </div>
           </div>
         </div>
+        {(m.avgAllyRank !== null || m.avgEnemyRank !== null) && (
         <div className="card tile">
           <div className="label">Team ranks {detail.ranksAtGameTime ? '(at game time)' : '(as of capture)'}</div>
           <div className="rank-duel">
@@ -620,6 +624,7 @@ export default function MatchDetail() {
             </div>
           )}
         </div>
+        )}
         {m.lpChange !== null && (
           <div className="card tile">
             <div className="label">LP</div>
