@@ -90,11 +90,13 @@ function Row({ m }: { m: MatchSummary }) {
       </div>
 
       <div className="mr-rank">
-        <span className="rank-pair">
-          <RankChip label={m.avgAllyRank} />
-          <span className="vs-badge">vs</span>
-          <RankChip label={m.avgEnemyRank} />
-        </span>
+        {(m.avgAllyRank !== null || m.avgEnemyRank !== null) && (
+          <span className="rank-pair">
+            <RankChip label={m.avgAllyRank} />
+            <span className="vs-badge">vs</span>
+            <RankChip label={m.avgEnemyRank} />
+          </span>
+        )}
         {m.rankGapLp !== null && m.rankGapLp !== 0 && (
           <span className={`sm-text ${m.rankGapLp < 0 ? 'win' : 'loss'}`}>
             {m.rankGapLp < 0 ? `favored by ${-m.rankGapLp} LP` : `outranked by ${m.rankGapLp} LP`}
@@ -102,7 +104,7 @@ function Row({ m }: { m: MatchSummary }) {
         )}
       </div>
 
-      <LpChip change={m.lpChange} />
+      {m.lpChange !== null ? <LpChip change={m.lpChange} /> : <span />}
 
       <div className="mr-links" onClick={e => e.stopPropagation()}>
         {m.hasReplay && (

@@ -16,6 +16,8 @@ services:
     user: "568:568"
     environment:
       - TZ=Europe/London
+      # Rank/LP still captured (can't be backfilled), just never shown.
+      - Riot__HideLp=true
     volumes:
       - /mnt/MediaPool/apps/leaguetracker/main:/data
     networks: [frontend]
@@ -40,6 +42,7 @@ services:
       - TZ=Europe/London
       - Riot__GameName=IamRA
       - Riot__TagLine=6201
+      - Riot__HideLp=true
     volumes:
       - /mnt/MediaPool/apps/leaguetracker/alt:/data
     networks: [frontend]

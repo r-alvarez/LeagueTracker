@@ -86,6 +86,10 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+// Display-only gate: rank/LP keeps being captured (it can't be backfilled),
+// but no endpoint emits it when hidden.
+var hideLp = riotOptions.HideLp;
+
 app.UseCors();
 app.UseResponseCompression();
 app.UseDefaultFiles();
@@ -110,7 +114,8 @@ app.MapGet("/api/status", async (LeagueDbContext db, LpService lp, TrackedPlayer
         Patches = await Reports.PatchesAsync(db, ct),
         DateFrom = hasMatches ? (await db.Matches.MinAsync(m => m.GameCreationUtc, ct)).ToLocalTime().ToString("yyyy-MM-dd") : null,
         DateTo = hasMatches ? (await db.Matches.MaxAsync(m => m.GameCreationUtc, ct)).ToLocalTime().ToString("yyyy-MM-dd") : null,
-        Ranks = new[] { solo, flex }.Where(s => s is not null).Select(s => new
+        HideLp = hideLp,
+        Ranks = new[] { solo, flex }.Where(s => s is not null && !hideLp).Select(s => new
         {
             s!.Queue, s.Tier, s.Division, s.Lp, s.Wins, s.Losses, s.RankValue,
             Label = $"{s.Tier} {s.Division} {s.Lp} LP",
@@ -127,9 +132,9 @@ app.MapGet("/api/live", (LiveGameState live) =>
         {
             g.MatchId, g.QueueId, Queue = RankMath.QueueName(g.QueueId),
             g.StartedUtc, g.DetectedUtc, g.MyChampionId, g.MyTeamId,
-            AvgAllyRank = g.AvgAllyRankValue is { } ally ? RankMath.ToLabel(ally) : null,
-            AvgEnemyRank = g.AvgEnemyRankValue is { } enemy ? RankMath.ToLabel(enemy) : null,
-            RankGapLp = g is { AvgAllyRankValue: { } a, AvgEnemyRankValue: { } e } ? (int?)Math.Round(e - a) : null,
+            AvgAllyRank = !hideLp && g.AvgAllyRankValue is { } ally ? RankMath.ToLabel(ally) : null,
+            AvgEnemyRank = !hideLp && g.AvgEnemyRankValue is { } enemy ? RankMath.ToLabel(enemy) : null,
+            RankGapLp = !hideLp && g is { AvgAllyRankValue: { } a, AvgEnemyRankValue: { } e } ? (int?)Math.Round(e - a) : null,
             Participants = g.Participants.Select(p => new { p.ChampionId, p.TeamId, p.RiotId, p.IsMe }),
         })
         : Results.NoContent());
@@ -180,7 +185,8 @@ app.MapGet("/api/matches", async (LeagueDbContext db, ReplayArchiveService repla
                 archived.Contains(m.Id),
                 myCompanion: ps?.FirstOrDefault(p => p.IsAlly && !p.IsMe && p.Position == role)?.Champion,
                 enemyCompanion: ps?.FirstOrDefault(p => !p.IsAlly && p.Position == role)?.Champion,
-                companionRole: role);
+                companionRole: role,
+                hideLp: hideLp);
         }),
     });
 });
@@ -432,7 +438,7 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, ReplayArch
 
     return Results.Ok(new
     {
-        Summary = MatchListItem(match, hasReplay: replays.PathFor(match.Id) is not null),
+        Summary = MatchListItem(match, hasReplay: replays.PathFor(match.Id) is not null, hideLp: hideLp),
         match.RanksAtGameTime,
         MySide = match.Participants.FirstOrDefault(p => p.IsMe)?.TeamId == 100 ? "Blue" : "Red",
         TeamObjectives = new { Ally = TeamObjectives(true), Enemy = TeamObjectives(false) },
@@ -459,9 +465,15 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, ReplayArch
         {
             p.ParticipantId, p.RiotId, p.Champion, p.Position, p.TeamId, p.IsMe, p.IsAlly, p.Win,
             p.Kills, p.Deaths, p.Assists, p.Cs, p.Gold, p.DamageToChampions, p.VisionScore, p.ChampLevel,
-            p.Tier, p.Division, p.Lp, p.SeasonWins, p.SeasonLosses, p.RankValue, p.RankQueue,
-            RankLabel = p.Tier is null ? null : $"{p.Tier} {p.Division} {p.Lp} LP",
-            WinratePct = p is { SeasonWins: int w, SeasonLosses: int l } && w + l > 0 ? Math.Round(100.0 * w / (w + l), 1) : (double?)null,
+            Tier = hideLp ? null : p.Tier,
+            Division = hideLp ? null : p.Division,
+            Lp = hideLp ? null : p.Lp,
+            SeasonWins = hideLp ? null : p.SeasonWins,
+            SeasonLosses = hideLp ? null : p.SeasonLosses,
+            RankValue = hideLp ? null : p.RankValue,
+            RankQueue = hideLp ? null : p.RankQueue,
+            RankLabel = hideLp || p.Tier is null ? null : $"{p.Tier} {p.Division} {p.Lp} LP",
+            WinratePct = !hideLp && p is { SeasonWins: int w, SeasonLosses: int l } && w + l > 0 ? Math.Round(100.0 * w / (w + l), 1) : (double?)null,
             p.Summoner1Id, p.Summoner2Id, p.PrimaryStyleId, p.SubStyleId, p.KeystoneId, p.Items,
             p.SkillshotsHit, p.SkillshotsDodged, p.SkillshotDodgesLateWindow, p.KillParticipation,
             p.PerksJson, p.PingsJson,
@@ -511,7 +523,7 @@ app.MapGet("/api/challenges/percentiles", async (ChallengesBenchmarkService svc,
 // The dashboard aggregate: coach-style stats over recent ranked games.
 // lastGames takes precedence over days; neither = whole history.
 app.MapGet("/api/stats", async (LeagueDbContext db, int? days, int? lastGames, CancellationToken ct) =>
-    Results.Ok(await Reports.StatsAsync(db, days, lastGames, ct)));
+    Results.Ok(await Reports.StatsAsync(db, days, lastGames, hideLp, ct)));
 app.MapPost("/api/ranks/backfill", (IServiceScopeFactory scopeFactory, JobStatusService jobs, int days = 7) =>
 {
     if (!jobs.TryStart("rank-backfill")) return Results.Conflict(jobs.Snapshot());
@@ -552,6 +564,7 @@ app.MapPost("/api/analytics/reprocess", (IServiceScopeFactory scopeFactory, JobS
 
 app.MapGet("/api/lp/history", async (LeagueDbContext db, string? queue, CancellationToken ct) =>
 {
+    if (hideLp) return Results.Ok(Array.Empty<object>());
     var query = db.LpSnapshots.AsNoTracking();
     if (queue is not null) query = query.Where(s => s.Queue == queue);
     var rows = await query.OrderBy(s => s.TimestampUtc).ToListAsync(ct);
@@ -573,7 +586,9 @@ app.MapGet("/api/lp/per-game", async (LeagueDbContext db, CancellationToken ct) 
     {
         m.Id, m.GameEndUtc, m.QueueName, m.Champion, m.Position, m.Win,
         Kda = $"{m.Kills}/{m.Deaths}/{m.Assists}",
-        m.LpBefore, m.LpAfter, m.LpChange,
+        LpBefore = hideLp ? null : m.LpBefore,
+        LpAfter = hideLp ? null : m.LpAfter,
+        LpChange = hideLp ? null : m.LpChange,
     }));
 });
 
@@ -623,16 +638,16 @@ app.MapGet("/api/jobs/status", (JobStatusService jobs) => Results.Ok(jobs.Snapsh
 // --- Exports (PowerShell-tooling-compatible CSV shapes + an everything-bundle) --
 
 app.MapGet("/api/export/matches.csv", async (LeagueDbContext db, CancellationToken ct) =>
-    CsvFile("matches-summary.csv", await Reports.MatchesCsvAsync(db, ct)));
+    CsvFile("matches-summary.csv", await Reports.MatchesCsvAsync(db, hideLp, ct)));
 
 app.MapGet("/api/export/deaths.csv", async (LeagueDbContext db, CancellationToken ct) =>
     CsvFile("deaths.csv", await Reports.DeathsCsvAsync(db, ct)));
 
 app.MapGet("/api/export/ranks.csv", async (LeagueDbContext db, CancellationToken ct) =>
-    CsvFile("ranks.csv", await Reports.RanksCsvAsync(db, ct)));
+    CsvFile("ranks.csv", await Reports.RanksCsvAsync(db, hideLp, ct)));
 
 app.MapGet("/api/export/lp-history.csv", async (LeagueDbContext db, CancellationToken ct) =>
-    CsvFile("lp-history.csv", await Reports.LpHistoryCsvAsync(db, ct)));
+    CsvFile("lp-history.csv", await Reports.LpHistoryCsvAsync(db, hideLp, ct)));
 
 app.MapGet("/api/export/challenges.csv", async (LeagueDbContext db, CancellationToken ct) =>
     CsvFile("challenges.csv", await Reports.ChallengesCsvAsync(db, ct)));
@@ -655,7 +670,7 @@ app.MapGet("/api/export/all.zip", async (LeagueDbContext db, LpService lp, Track
         Deaths = await db.Deaths.CountAsync(ct),
         Patches = await Reports.PatchesAsync(db, ct),
         Ranks = new[] { await lp.GetLatestAsync("Solo/Duo", ct), await lp.GetLatestAsync("Flex", ct) }
-            .Where(s => s is not null)
+            .Where(s => s is not null && !hideLp)
             .Select(s => new { s!.Queue, s.Tier, s.Division, s.Lp, s.Wins, s.Losses }),
         Files = new[]
         {
@@ -671,7 +686,7 @@ app.MapGet("/api/export/all.zip", async (LeagueDbContext db, LpService lp, Track
     };
     // The dashboard's computed views (overall, lane state, strengths/weaknesses,
     // champion/role splits, follow-in) over the entire ranked history.
-    var dashboard = await Reports.StatsAsync(db, days: null, lastGames: null, ct);
+    var dashboard = await Reports.StatsAsync(db, days: null, lastGames: null, hideLp, ct);
 
     using var ms = new MemoryStream();
     using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
@@ -682,13 +697,13 @@ app.MapGet("/api/export/all.zip", async (LeagueDbContext db, LpService lp, Track
             await entry.WriteAsync(Encoding.UTF8.GetBytes(content), ct);
         }
         var jsonOpts = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
-        await AddAsync("matches-summary.csv", await Reports.MatchesCsvAsync(db, ct));
+        await AddAsync("matches-summary.csv", await Reports.MatchesCsvAsync(db, hideLp, ct));
         await AddAsync("challenges.csv", await Reports.ChallengesCsvAsync(db, ct));
         await AddAsync("lane-checkpoints.csv", await Reports.LaneCheckpointsCsvAsync(db, ct));
-        await AddAsync("ranks.csv", await Reports.RanksCsvAsync(db, ct));
+        await AddAsync("ranks.csv", await Reports.RanksCsvAsync(db, hideLp, ct));
         await AddAsync("deaths.csv", await Reports.DeathsCsvAsync(db, ct));
         await AddAsync("objectives.csv", await Reports.ObjectivesCsvAsync(db, ct));
-        await AddAsync("lp-history.csv", await Reports.LpHistoryCsvAsync(db, ct));
+        await AddAsync("lp-history.csv", await Reports.LpHistoryCsvAsync(db, hideLp, ct));
         await AddAsync("dashboard.json", System.Text.Json.JsonSerializer.Serialize(dashboard, jsonOpts));
         await AddAsync("summary.json", System.Text.Json.JsonSerializer.Serialize(summary, jsonOpts));
     }
@@ -699,7 +714,7 @@ app.MapFallbackToFile("index.html");
 app.Run();
 
 static object MatchListItem(Match m, string? items = null, int? summoner1Id = null, int? summoner2Id = null, bool hasReplay = false,
-    string? myCompanion = null, string? enemyCompanion = null, string? companionRole = null) => new
+    string? myCompanion = null, string? enemyCompanion = null, string? companionRole = null, bool hideLp = false) => new
 {
     Items = items,
     Summoner1Id = summoner1Id,
@@ -714,11 +729,15 @@ static object MatchListItem(Match m, string? items = null, int? summoner1Id = nu
     m.Champion, m.Position, m.Win, m.Kills, m.Deaths, m.Assists,
     Kda = m.Deaths == 0 ? (m.Kills + m.Assists > 0 ? "Perfect" : "0") : Math.Round((m.Kills + m.Assists) / (double)m.Deaths, 2).ToString(),
     m.Cs, m.Gold, m.DamageToChampions, m.VisionScore, m.ChampLevel, m.HasTimeline,
-    AvgAllyRank = m.AvgAllyRankValue is { } ally ? RankMath.ToLabel(ally) : null,
-    AvgEnemyRank = m.AvgEnemyRankValue is { } enemy ? RankMath.ToLabel(enemy) : null,
-    RankGapLp = m is { AvgAllyRankValue: { } a, AvgEnemyRankValue: { } e } ? (int?)Math.Round(e - a) : null,
-    m.AllyRanksKnown, m.EnemyRanksKnown, m.RanksAtGameTime,
-    m.LpChange, m.LpBefore, m.LpAfter,
+    AvgAllyRank = !hideLp && m.AvgAllyRankValue is { } ally ? RankMath.ToLabel(ally) : null,
+    AvgEnemyRank = !hideLp && m.AvgEnemyRankValue is { } enemy ? RankMath.ToLabel(enemy) : null,
+    RankGapLp = !hideLp && m is { AvgAllyRankValue: { } a, AvgEnemyRankValue: { } e } ? (int?)Math.Round(e - a) : null,
+    AllyRanksKnown = hideLp ? 0 : m.AllyRanksKnown,
+    EnemyRanksKnown = hideLp ? 0 : m.EnemyRanksKnown,
+    m.RanksAtGameTime,
+    LpChange = hideLp ? null : m.LpChange,
+    LpBefore = hideLp ? null : m.LpBefore,
+    LpAfter = hideLp ? null : m.LpAfter,
     m.TimeInEnemyHalfPct, m.AvgNearestAllyDist,
     m.SkillshotsHit, m.SkillshotsDodged,
     m.OpponentChampion, m.EnemyJungler, m.AllyJungler, m.CsAt10, m.LaneGoldDiff10, m.KillParticipation, m.SoloKills,
