@@ -18,7 +18,7 @@ services:
       - ./data:/data
     restart: unless-stopped
 
-  # Second tracked account (IamRA#6201): a full separate instance so its games,
+  # Second tracked account (ImRA#5957): a full separate instance so its games,
   # baselines and LP never pollute the main account's coaching stats. Needs its
   # own data-alt/riot-api-key.txt (same key file, copied).
   leaguetracker-alt:
@@ -30,8 +30,8 @@ services:
       - "5171:5170"
     environment:
       - TZ=Europe/London
-      - Riot__GameName=IamRA
-      - Riot__TagLine=6201
+      - Riot__GameName=ImRA
+      - Riot__TagLine=5957
       - Riot__HideLp=true
     volumes:
       - ./data-alt:/data
