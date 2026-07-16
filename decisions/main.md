@@ -294,3 +294,31 @@ the kill centroid (mirroring the analyzer headcount). Fourth question added:
 lead stewardship - lane gold @10 vs the last checkpoint at 20/25/30, verdict
 by state transition (grew/held/flipped, recovered/reduced/grew), team gold
 15->20 shown as context. Dots are L/F/D/S.
+
+**2026-07-16 addendum 2 — the contest verdict (fifth verdict, five tiers).**
+Four dots answered four questions but never the one the mindset work
+actually needs answered: did I win the CONTEST, overall — definitively,
+regardless of the game's result. Added a derived fifth verdict, a pure fold
+of the four question verdicts (mixed and unanswerable questions excluded):
+dominated (3+ won, none lost) / won / split / lost / run over (the mirror).
+Result-blind by construction — winnable in a Defeat, losable in a Victory.
+Both ends are deliberately harsh: the exposure only works if the tool can
+say "you got run over" as plainly as "you dominated"; a sanitized bottom
+tier would teach the brain the tool lies.
+
+This does not reopen the 2026-07-05 "no composite scores" decision: that
+rejected cross-game skill ratings, and the refinement stands — the contest
+verdict is per-game only, folds nothing across games, and estimates no
+rank. Guardrail extended deliberately: no contest win-rates, streaks, or
+aggregation of verdicts anywhere in the product, ever — that would rebuild
+the LP gauge out of new material.
+
+UI hierarchy now states the values: on Matches the contest verdict is the
+primary row label and tints the row (green/amber/red), while Victory/Defeat
+demotes to the muted sub-line — visible, never hidden (hiding it would be
+avoidance, not exposure), just no longer the headline. Rows without a
+review (no timeline) keep the old result-primary look. The review card
+opens with the full verdict chip plus a one-sentence summary composed from
+the decisive questions ("You out-dueled your lane, but your fights bought
+nothing — that's the game") — the post-game "one honest sentence" rep,
+automated.

@@ -44,6 +44,7 @@ public sealed class ReviewService(LeagueDbContext db)
             ? new
             {
                 MatchId = matchId,
+                Contest = Contest(r),
                 LaneDuel = Payload(r.Lane),
                 Fights = Payload(r.Fights),
                 Discipline = Payload(r.Discipline),
@@ -56,11 +57,33 @@ public sealed class ReviewService(LeagueDbContext db)
     public async Task<object> VerdictsAsync(string[] ids, CancellationToken ct) =>
         (await BuildAsync(ids, ct)).ToDictionary(kv => kv.Key, kv => new
         {
+            Contest = Contest(kv.Value),
             LaneDuel = kv.Value.Lane?.Verdict,
             Fights = kv.Value.Fights.Verdict,
             Discipline = kv.Value.Discipline.Verdict,
             Stewardship = kv.Value.Stewardship?.Verdict,
         });
+
+    /// This many questions won with none lost (or the mirror) is the
+    /// difference between winning the contest and dominating it.
+    private const int SweepCount = 3;
+
+    /// The fifth verdict, a pure fold of the four question verdicts (mixed
+    /// and unanswerable questions excluded). It describes the CONTEST, never
+    /// the game: you can win it in a defeat and get run over in a victory.
+    /// Both ends are deliberately harsh - the honest bottom tier is the point.
+    private static string? Contest(Review r)
+    {
+        string?[] verdicts = [r.Lane?.Verdict, r.Fights.Verdict, r.Discipline.Verdict, r.Stewardship?.Verdict];
+        if (verdicts.All(v => v is null)) return null;
+        var won = verdicts.Count(v => v == "yes");
+        var lost = verdicts.Count(v => v == "no");
+        return won >= SweepCount && lost == 0 ? "dominated"
+            : lost >= SweepCount && won == 0 ? "runover"
+            : won > lost ? "won"
+            : lost > won ? "lost"
+            : "split";
+    }
 
     private static object? Payload(Verdicted? v) => v is null ? null : new { v.Verdict, v.Detail };
 

@@ -440,6 +440,9 @@ export interface LensResponse {
 
 export type ReviewVerdict = 'yes' | 'mixed' | 'no' | null
 
+/** The fifth verdict, folded from the four questions - describes the contest, never the game. */
+export type ContestVerdict = 'dominated' | 'won' | 'split' | 'lost' | 'runover' | null
+
 export interface ReviewComponent { label: string; delta: number }
 /** One consequential absence; where/paid describe the ABSENT laner. */
 export interface LedgerMoment { timeSec: number; kills: number; where: string; distance: number | null; paid: boolean }
@@ -447,6 +450,7 @@ export interface ConcededEpic { kind: string; timeSec: number; myDistance: numbe
 
 export interface MatchReview {
   matchId: string
+  contest: ContestVerdict
   laneDuel: {
     verdict: ReviewVerdict
     detail: {
@@ -494,6 +498,7 @@ export interface MatchReview {
 }
 
 export type ReviewVerdicts = Record<string, {
+  contest: ContestVerdict
   laneDuel: ReviewVerdict
   fights: ReviewVerdict
   discipline: ReviewVerdict

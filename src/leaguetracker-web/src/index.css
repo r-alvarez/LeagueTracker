@@ -863,6 +863,28 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .rv-badge.mixed { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
 .rv-badge.no { color: var(--lp-loss); border-color: color-mix(in srgb, var(--lp-loss) 55%, var(--border)); }
 
+/* The contest verdict: won-side rows tint green, split amber, lost-side red.
+   The game's result survives on the muted sub-line - context, not headline. */
+.match-row.mr-cwin { background: linear-gradient(90deg, rgba(46, 160, 67, 0.10), rgba(46, 160, 67, 0.035) 45%, transparent); box-shadow: inset 3px 0 var(--chart-green); }
+.match-row.mr-csplit { background: linear-gradient(90deg, rgba(227, 179, 65, 0.08), rgba(227, 179, 65, 0.03) 45%, transparent); box-shadow: inset 3px 0 var(--warn); }
+.match-row.mr-closs { background: linear-gradient(90deg, rgba(240, 85, 106, 0.10), rgba(240, 85, 106, 0.035) 45%, transparent); box-shadow: inset 3px 0 var(--lp-loss); }
+
+.mr-contest { font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
+.mr-contest.dominated, .mr-contest.won { color: var(--chart-green); }
+.mr-contest.split { color: var(--warn); }
+.mr-contest.lost, .mr-contest.runover { color: var(--lp-loss); }
+
+.contest-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 2px 0 12px; }
+.contest-chip {
+  display: inline-flex; padding: 3px 11px; border-radius: 8px;
+  font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+}
+.contest-chip.dominated, .contest-chip.won { color: var(--chart-green); border-color: color-mix(in srgb, var(--chart-green) 55%, var(--border)); }
+.contest-chip.split { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.contest-chip.lost, .contest-chip.runover { color: var(--lp-loss); border-color: color-mix(in srgb, var(--lp-loss) 55%, var(--border)); }
+.contest-sentence { font-size: 13px; }
+
 .review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .review-q {
   background: linear-gradient(135deg, #171d29, #131722 65%);
