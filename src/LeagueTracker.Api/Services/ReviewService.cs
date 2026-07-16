@@ -213,19 +213,25 @@ public sealed class ReviewService(LeagueDbContext db)
             else withTeam++;
         }
 
-        // Enemy epics taken while I was elsewhere: the Baron-while-splitting
-        // pattern. "Paid" = I took a structure around that moment (a real trade).
+        // Enemy epics taken while I was elsewhere AND my team contested it
+        // short-handed (2+ allies there) - the Baron-while-splitting pattern.
+        // Uncontested concessions are team macro calls, not personal discipline,
+        // so they never appear here. "Paid" = I took a structure around that
+        // moment (a real trade). Same-kind events within 90s (grub spawns)
+        // collapse into one moment.
         var byPid = positions.GroupBy(p => p.ParticipantId)
             .ToDictionary(g => g.Key, g => g.OrderBy(p => p.TimeSec).ToList());
         var myPositions = me is not null ? byPid.GetValueOrDefault(me.ParticipantId) ?? [] : [];
         var concededAbsent = new List<ConcededEpic>();
-        foreach (var o in objectives.Where(o => !o.ByMyTeam && EpicKinds.Contains(o.Kind)))
+        foreach (var o in objectives.Where(o => !o.ByMyTeam && EpicKinds.Contains(o.Kind)).OrderBy(o => o.TimeSec))
         {
+            if (concededAbsent.Any(c => c.Kind == o.Kind && o.TimeSec - c.TimeSec <= 90)) continue;
             if (InterpolatedAt(myPositions, o.TimeSec) is not { } p) continue;
             var dist = (int)Math.Sqrt(Math.Pow(p.X - o.X, 2) + Math.Pow(p.Y - o.Y, 2));
             if (dist <= FarUnits) continue;
             var alliesNear = allyPids.Count(pid => InterpolatedAt(byPid.GetValueOrDefault(pid) ?? [], o.TimeSec) is { } ap
                 && Math.Sqrt(Math.Pow(ap.X - o.X, 2) + Math.Pow(ap.Y - o.Y, 2)) <= 2500);
+            if (alliesNear < 2) continue;
             var paid = me is not null && objectives.Any(x => x.ByMyTeam && x.Kind is "TOWER" or "INHIBITOR"
                 && x.KillerParticipantId == me.ParticipantId
                 && Math.Abs(x.TimeSec - o.TimeSec) <= PaidWindowSec);
