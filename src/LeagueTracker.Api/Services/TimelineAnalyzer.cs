@@ -42,6 +42,9 @@ public sealed class TimelineAnalysis
     // Objective presence: friendly epic objectives I was actually near when taken.
     public int FriendlyEpicObjectives { get; init; }
     public int ObjectivesPresentFor { get; init; }
+    // Whole-team gold lead at the 15/20 minute frames (win-condition anchor).
+    public int? TeamGoldDiff15 { get; init; }
+    public int? TeamGoldDiff20 { get; init; }
     /// Kill clusters classified duel / skirmish / teamfight, with outcome,
     /// participation, gold swing and objective conversion.
     public List<TimelineAnalyzer.Fight> Fights { get; init; } = [];
@@ -203,12 +206,20 @@ public static class TimelineAnalyzer
         var pidToTeam = info.Participants.ToDictionary(p => p.ParticipantId, p => p.TeamId);
         var pidToRole = info.Participants.ToDictionary(p => p.ParticipantId, p => RoleLabel(p.TeamPosition));
 
+        var enemyJunglerPid = info.Participants.FirstOrDefault(p =>
+            p.TeamId != me.TeamId && p.TeamPosition == "JUNGLE")?.ParticipantId;
+
         foreach (var death in deaths)
         {
             death.Zone = MapZones.Classify(death.X, death.Y);
             EnrichWithConvergence(death, frames, enemyPids, allyPids);
             EnrichWithObjectiveContext(death, objectives);
             EnrichWithFollowIn(death, kills, frames, me, champByPid, pidToTeam, pidToRole);
+            if (enemyJunglerPid is { } jungler)
+            {
+                death.EnemyJunglerNear = InterpolatedPosition(frames, jungler, death.TimeSec) is { } jp
+                    && Math.Sqrt(Math.Pow(jp.X - death.X, 2) + Math.Pow(jp.Y - death.Y, 2)) <= NearRadius;
+            }
         }
 
         var (enemyHalfPct, avgNearestAlly) = MovementMetrics(frames, me, allyPids);
@@ -289,6 +300,12 @@ public static class TimelineAnalyzer
 
         var fights = DetectFights(kills, frames, objectives, allyPids, enemyPids, me.ParticipantId);
 
+        // Whole-team gold lead at the milestone frames - null when the game
+        // didn't reach the minute, so short games never read as "even".
+        int? TeamGoldAtMinute(int minute) => FrameAtMinute(frames, minute) is not null
+            ? TeamGoldDiffAt(frames, minute * 60, allyPids, me.ParticipantId, enemyPids)
+            : null;
+
         return new TimelineAnalysis
         {
             Deaths = deaths,
@@ -324,6 +341,8 @@ public static class TimelineAnalyzer
             Level16LeadSec = LevelLead(16),
             FriendlyEpicObjectives = friendlyEpics.Count,
             ObjectivesPresentFor = objectivesPresentFor,
+            TeamGoldDiff15 = TeamGoldAtMinute(15),
+            TeamGoldDiff20 = TeamGoldAtMinute(20),
         };
     }
 
