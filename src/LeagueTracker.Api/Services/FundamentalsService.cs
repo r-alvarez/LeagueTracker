@@ -103,8 +103,8 @@ public sealed class FundamentalsService(LeagueDbContext db, ChallengesBenchmarkS
             ]),
         new("jungletrack", "Jungle tracking", "DIAMOND",
             "Knowing where the enemy jungler is without seeing them - and not dying when you're wrong.",
-            "Laning-phase deaths with the enemy jungler converged (interpolated positions) and early wards from your games. No honest Riot challenge maps here, so there is no ladder anchor - your own trend is the evidence.",
-            [],
+            "Laning-phase deaths with the enemy jungler converged (interpolated positions) and early wards from your games. The ladder anchor uses PROXY challenges - no Riot challenge measures tracking directly, so the closest fog-awareness ones stand in (recalling while unseen; securing epics with the enemy jungler near).",
+            [103101, 203406],
             [
                 new("gankDeathsPre14", "Gank deaths", "Laning-phase deaths with the enemy jungler on you", false, 2),
                 new("lanePhaseDeaths", "Deaths before 14:00", "All laning-phase deaths, for context", false, 2),
