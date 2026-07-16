@@ -773,14 +773,20 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
   border-color: color-mix(in srgb, var(--lp-loss) 65%, var(--border));
   box-shadow: 0 0 10px rgba(240, 85, 106, 0.16);
 }
-.fund-box.later { opacity: 0.5; }
-.fund-box.later:hover, .fund-box.later.on { opacity: 1; }
+/* Beyond-goal skills: white outline - not applicable to the climb yet, but on
+   the roadmap, so they stay fully readable. */
+.fund-box.later { border-color: color-mix(in srgb, var(--ink) 55%, var(--border)); }
 
-.fund-goal-word { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; cursor: default; }
+.fund-goal-word {
+  display: inline-flex; align-items: center; padding: 5px 4px 5px 12px;
+  color: var(--muted); font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
 .fund-key { font-weight: 700; }
 .fund-key.ready { color: var(--chart-green); }
 .fund-key.focus { color: var(--warn); }
 .fund-key.urgent { color: var(--lp-loss); }
+.fund-key.later { color: var(--ink); }
 
 /* The reference line is a marker, not a tier color - cyan like the source chart. */
 .fund-rank-line {

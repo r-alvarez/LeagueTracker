@@ -404,7 +404,8 @@ export interface LensTile {
   desc: string
   unit: string
   decimals: number
-  higherIsBetter: boolean
+  /** null = context-dependent: displayed but never scored or judged. */
+  higherIsBetter: boolean | null
   value: number | null
   old: number | null
   series: (number | null)[]

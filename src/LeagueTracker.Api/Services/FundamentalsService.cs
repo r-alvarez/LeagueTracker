@@ -13,7 +13,9 @@ namespace LeagueTracker.Api.Services;
 /// stays a training map rather than an alternative ranking system.
 public sealed class FundamentalsService(LeagueDbContext db, ChallengesBenchmarkService challenges)
 {
-    private sealed record Spec(string Key, string Label, string Desc, bool HigherIsBetter, int Decimals, string Unit = "");
+    /// HigherIsBetter null = context-dependent: shown for awareness, never
+    /// scored and never judged as improvement/regression.
+    private sealed record Spec(string Key, string Label, string Desc, bool? HigherIsBetter, int Decimals, string Unit = "");
 
     private sealed record Area(
         string Key, string Label, string Tier, string Desc, string Measured, long[] ChallengeIds, Spec[] Metrics);
@@ -118,8 +120,8 @@ public sealed class FundamentalsService(LeagueDbContext db, ChallengesBenchmarkS
             [
                 new("visPerMin", "Vision / min", "Vision score per minute", true, 2),
                 new("wardsFirst10", "Early wards", "Wards placed in the first 10 minutes", true, 1),
-                new("firstWardSec", "First ward", "Seconds until your first ward", false, 0, "s"),
-                new("firstControlWardSec", "First control ward", "Seconds until your first control ward", false, 0, "s"),
+                new("firstWardSec", "First ward", "Time until your first ward - the trinket is free, early is safe", false, 0, "m:ss"),
+                new("firstControlWardSec", "First control ward", "When your first control ward goes down - a build decision (75g vs your item spike), not a race", null, 0, "m:ss"),
                 new("controlWards", "Control wards", "Control wards per game", true, 1),
                 new("wards", "Wards placed", "Wards placed per game", true, 1),
             ]),
@@ -221,7 +223,8 @@ public sealed class FundamentalsService(LeagueDbContext db, ChallengesBenchmarkS
         var areas = Areas.Select(a =>
         {
             var pcts = a.Metrics
-                .Select(s => MatchMetricRows.Percentile(rows, recent, s.Key, s.HigherIsBetter))
+                .Where(s => s.HigherIsBetter is not null)
+                .Select(s => MatchMetricRows.Percentile(rows, recent, s.Key, s.HigherIsBetter!.Value))
                 .OfType<double>().ToList();
             var mapped = a.ChallengeIds
                 .Select(id => standingById.GetValueOrDefault(id))
