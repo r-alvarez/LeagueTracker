@@ -10,8 +10,10 @@ services:
     environment:
       # Match dates/CSV timestamps render in this zone; LP ledger stays UTC.
       - TZ=Europe/London
-      # Rank/LP still captured (can't be backfilled), just never shown.
-      - Riot__HideLp=true
+      # Rank/LP display back on (2026-07-16): the process-first review views
+      # exist now, so rank context reads as context, not the verdict. Capture
+      # never stopped while it was hidden.
+      - Riot__HideLp=false
     volumes:
       # Everything persistent lives here: SQLite index, raw game files, LP
       # ledger CSV, and riot-api-key.txt (first line = the key).
@@ -32,7 +34,7 @@ services:
       - TZ=Europe/London
       - Riot__GameName=ImRA
       - Riot__TagLine=5957
-      - Riot__HideLp=true
+      - Riot__HideLp=false
     volumes:
       - ./data-alt:/data
     restart: unless-stopped
