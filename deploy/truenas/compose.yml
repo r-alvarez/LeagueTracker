@@ -16,8 +16,10 @@ services:
     user: "568:568"
     environment:
       - TZ=Europe/London
-      # Rank/LP still captured (can't be backfilled), just never shown.
-      - Riot__HideLp=true
+      # Rank/LP display back on (2026-07-16), matching the local compose: the
+      # process-first review views exist now, so rank reads as context, not
+      # the verdict. Capture never stopped while it was hidden.
+      - Riot__HideLp=false
     volumes:
       - /mnt/MediaPool/apps/leaguetracker/main:/data
     networks: [frontend]
@@ -42,7 +44,7 @@ services:
       - TZ=Europe/London
       - Riot__GameName=ImRA
       - Riot__TagLine=5957
-      - Riot__HideLp=true
+      - Riot__HideLp=false
     volumes:
       - /mnt/MediaPool/apps/leaguetracker/alt:/data
     networks: [frontend]
