@@ -21,6 +21,28 @@ const AREA_LEFT: Record<string, string> = {
 
 const BAND_H = 96
 
+// Climb goals the boxes are judged against (chips, not rows, are the judgment).
+const TARGETS = ['SILVER', 'GOLD', 'PLATINUM', 'EMERALD', 'DIAMOND']
+
+// Challenge levels skip EMERALD and run past DIAMOND; place them on the tier scale.
+const levelIdx = (level: string) => {
+  const i = TIER_ORDER.indexOf(level)
+  return i >= 0 ? i : ['MASTER', 'GRANDMASTER', 'CHALLENGER'].includes(level) ? TIER_ORDER.length : -1
+}
+
+/// ready = chip at/above the goal; focus/urgent = below it (1 / 2+ tiers) on a
+/// row that matters for the goal; later = the row only gates beyond the goal.
+function areaStatus(a: FundamentalArea, target: string): 'ready' | 'focus' | 'urgent' | 'later' | 'none' {
+  const rowI = TIER_ORDER.indexOf(a.tier)
+  const targetI = TIER_ORDER.indexOf(target)
+  if (rowI > targetI) return 'later'
+  if (!a.ladder) return 'none'
+  const chipI = levelIdx(a.ladder.level)
+  if (chipI < 0) return 'none'
+  if (chipI >= targetI) return 'ready'
+  return targetI - chipI >= 2 ? 'urgent' : 'focus'
+}
+
 function TierEmblem({ tier, size = 30 }: { tier: string; size?: number }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} className={`fund-emblem ${tierClass(tier)}`} aria-hidden>
@@ -145,6 +167,11 @@ export default function Fundamentals() {
   const [windowKey, setWindowKey] = useState<(typeof WINDOWS)[number]['key']>('20g')
   const [role, setRole] = useState('')
   const [areaKey, setAreaKey] = useState<string | null>(null)
+  const [target, setTarget] = useState(() => {
+    const saved = localStorage.getItem('fund-target')
+    return saved && TARGETS.includes(saved) ? saved : 'PLATINUM'
+  })
+  useEffect(() => { localStorage.setItem('fund-target', target) }, [target])
 
   useEffect(() => {
     api.status().then((s: Status) => {
@@ -163,13 +190,14 @@ export default function Fundamentals() {
     }).then(setData).catch(() => setData(null))
   }, [windowKey, role])
 
-  // Rows top-down; extend below Gold when the account is still climbing there.
+  // Rows top-down; extend below Gold when the account or the goal sits lower.
   const rows = useMemo(() => {
-    const bottom = rank && TIER_ORDER.indexOf(rank.tier.toUpperCase()) >= 0
-      ? Math.min(TIER_ORDER.indexOf(rank.tier.toUpperCase()), TIER_ORDER.indexOf('GOLD'))
-      : TIER_ORDER.indexOf('GOLD')
+    let bottom = Math.min(TIER_ORDER.indexOf('GOLD'), TIER_ORDER.indexOf(target))
+    if (rank && TIER_ORDER.indexOf(rank.tier.toUpperCase()) >= 0) {
+      bottom = Math.min(bottom, TIER_ORDER.indexOf(rank.tier.toUpperCase()))
+    }
     return TIER_ORDER.slice(bottom).reverse()
-  }, [rank])
+  }, [rank, target])
 
   // The cyan line: tier band + division/LP fraction inside it (IV bottom, I top).
   const rankLineTop = useMemo(() => {
@@ -203,6 +231,12 @@ export default function Fundamentals() {
             <button key={w.key} className={windowKey === w.key ? 'on' : ''} onClick={() => setWindowKey(w.key)}>{w.label}</button>
           ))}
         </div>
+        <div className="seg" title="The rank you're climbing toward - boxes are judged against it">
+          <button disabled className="fund-goal-word">Goal</button>
+          {TARGETS.map(t => (
+            <button key={t} className={target === t ? `on ${tierClass(t)}` : ''} onClick={() => setTarget(t)}>{TIER_LABEL[t]}</button>
+          ))}
+        </div>
         {data && (
           <span className="lens-hstats">
             <span><strong>{data.window}</strong> <span className="mut">GAMES</span></span>
@@ -230,7 +264,7 @@ export default function Fundamentals() {
                   {data.areas.filter(a => a.tier === tier).map(a => (
                     <button
                       key={a.key}
-                      className={`fund-box ${a.key === selectedArea?.key ? 'on' : ''}`}
+                      className={`fund-box ${areaStatus(a, target)} ${a.key === selectedArea?.key ? 'on' : ''}`}
                       style={{ left: AREA_LEFT[a.key] }}
                       onClick={() => setAreaKey(a.key)}
                       title={a.desc}
@@ -251,12 +285,22 @@ export default function Fundamentals() {
                   <span className="fund-rank-label">Rank: {TIER_LABEL[rank.tier.toUpperCase()] ?? rank.tier} {rank.division}</span>
                 </div>
               )}
+              {rows.indexOf(target) >= 0 && (
+                // Reaching the goal tier = entering its band, so the line sits
+                // on the band's bottom edge.
+                <div className="fund-goal-line" style={{ top: (rows.indexOf(target) + 1) * BAND_H }}>
+                  <span className="fund-goal-label">Goal: {TIER_LABEL[target]}</span>
+                </div>
+              )}
             </div>
             <p className="mut sm-text" style={{ margin: '10px 2px 0' }}>
               Boxes sit at the rank tier where each skill typically starts deciding games — they don't move with your
               performance. The number on a box is your last {data.window} games' percentile within your own {data.games}-game
               history; the tier chip is the median of Riot's own Challenge levels mapped to that skill (lifetime, so it
-              partly reflects playtime). {rankLineTop === null && 'Rank line hidden — rank/LP display is off for this instance.'}
+              partly reflects playtime). Colors judge each chip against your <strong>{TIER_LABEL[target]}</strong> goal:{' '}
+              <span className="fund-key ready">ready</span> at/above it, <span className="fund-key focus">train</span> one
+              tier short, <span className="fund-key urgent">priority</span> two or more short; skills gating beyond the
+              goal are dimmed — they can wait. {rankLineTop === null && 'Rank line hidden — rank/LP display is off for this instance.'}
             </p>
           </div>
 

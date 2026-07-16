@@ -762,6 +762,26 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .fund-box-meta:empty { display: none; }
 .fund-score { font-weight: 800; font-size: 12px; font-variant-numeric: tabular-nums; }
 
+/* Goal verdicts: the chip judged against the selected climb goal. "later"
+   rows gate beyond the goal - present but visually parked. */
+.fund-box.ready { border-color: color-mix(in srgb, var(--chart-green) 55%, var(--border)); }
+.fund-box.focus {
+  border-color: color-mix(in srgb, var(--warn) 65%, var(--border));
+  box-shadow: 0 0 10px rgba(227, 179, 65, 0.13);
+}
+.fund-box.urgent {
+  border-color: color-mix(in srgb, var(--lp-loss) 65%, var(--border));
+  box-shadow: 0 0 10px rgba(240, 85, 106, 0.16);
+}
+.fund-box.later { opacity: 0.5; }
+.fund-box.later:hover, .fund-box.later.on { opacity: 1; }
+
+.fund-goal-word { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; cursor: default; }
+.fund-key { font-weight: 700; }
+.fund-key.ready { color: var(--chart-green); }
+.fund-key.focus { color: var(--warn); }
+.fund-key.urgent { color: var(--lp-loss); }
+
 /* The reference line is a marker, not a tier color - cyan like the source chart. */
 .fund-rank-line {
   position: absolute; left: 8px; right: 8px; z-index: 4; pointer-events: none;
@@ -771,6 +791,16 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .fund-rank-label {
   position: absolute; left: 2px; top: -21px;
   font-size: 12px; font-weight: 800; color: var(--tier-plat);
+}
+
+/* The climb goal: dashed amber line on the target band's bottom edge. */
+.fund-goal-line {
+  position: absolute; left: 8px; right: 8px; z-index: 4; pointer-events: none;
+  border-top: 2px dashed var(--warn); opacity: 0.85;
+}
+.fund-goal-label {
+  position: absolute; right: 2px; top: -21px;
+  font-size: 12px; font-weight: 800; color: var(--warn);
 }
 
 .fund-detail { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -799,6 +829,7 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
   .fund-row-line { display: none; }
   .fund-box { position: static; transform: none; flex-direction: row; justify-content: space-between; width: 100%; }
   .fund-rank-line { display: none; }
+  .fund-goal-line { display: none; }
 }
 
 /* ============================================================================
