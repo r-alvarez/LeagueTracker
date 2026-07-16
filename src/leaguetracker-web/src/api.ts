@@ -1,4 +1,4 @@
-import type { AnalyticsSummary, ChallengeBenchmark, ClipInfo, FullGameStatus, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchPage, RenderQueueRow, Stats, StorageInfo, Status } from './types'
+import type { AnalyticsSummary, ChallengeBenchmark, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchPage, RenderQueueRow, Stats, StorageInfo, Status } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const resp = await fetch(url)
@@ -34,6 +34,16 @@ export const api = {
     const r = await fetch(`/api/lens?${params}`)
     if (r.status === 204) return null   // not enough games yet (for this role/window)
     if (!r.ok) throw new Error(`/api/lens -> HTTP ${r.status}`)
+    return r.json()
+  },
+  fundamentals: async (opts: { window?: number; days?: number; role?: string }): Promise<FundamentalsResponse | null> => {
+    const params = new URLSearchParams()
+    if (opts.window) params.set('window', String(opts.window))
+    if (opts.days) params.set('days', String(opts.days))
+    if (opts.role) params.set('role', opts.role)
+    const r = await fetch(`/api/fundamentals?${params}`)
+    if (r.status === 204) return null   // not enough games yet (for this role/window)
+    if (!r.ok) throw new Error(`/api/fundamentals -> HTTP ${r.status}`)
     return r.json()
   },
   lpHistory: (queue: string) => get<LpPoint[]>(`/api/lp/history?queue=${encodeURIComponent(queue)}`),

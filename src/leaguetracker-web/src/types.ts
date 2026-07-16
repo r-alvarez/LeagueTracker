@@ -437,6 +437,31 @@ export interface LensResponse {
   categories: LensCategory[]
 }
 
+export interface FundamentalArea {
+  key: string
+  label: string
+  tier: string
+  desc: string
+  measured: string
+  score: number | null
+  tiles: LensTile[]
+  ladder: {
+    level: string
+    levelRank: number
+    topShare: number | null
+    challenges: ChallengeRow[]
+  } | null
+}
+
+export interface FundamentalsResponse {
+  games: number
+  window: number
+  hasBaseline: boolean
+  winrate: number
+  challengesAsOfUtc: string | null
+  areas: FundamentalArea[]
+}
+
 export interface LiveParticipant {
   championId: number
   teamId: number
