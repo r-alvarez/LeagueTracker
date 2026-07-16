@@ -54,7 +54,9 @@ function Row({ m, reviews }: { m: MatchSummary; reviews: ReviewVerdicts }) {
         {contest ? (
           <>
             <span className={`mr-contest ${contest}`}>{CONTEST_SHORT[contest]}</span>
-            <span className="sub">{result} · <RelTime date={m.gameEndUtc} /></span>
+            <span className="sub">
+              <span className={`mr-sub-result ${m.win ? 'win' : 'loss'}`}>{result}</span> · <RelTime date={m.gameEndUtc} />
+            </span>
           </>
         ) : (
           <>
