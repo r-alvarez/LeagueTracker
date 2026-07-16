@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { CONTEST_LABEL, contestSentence } from '../contest'
 import type { MatchReview, ReviewVerdict } from '../types'
 
 const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
@@ -30,6 +31,12 @@ export default function ReviewCard({ matchId }: { matchId: string }) {
   return (
     <div className="card review-card">
       <h2>The four questions <span className="mut">process, not result</span></h2>
+      <div className="contest-head">
+        <span className={`contest-chip ${review.contest ?? 'na'}`}>
+          {review.contest ? CONTEST_LABEL[review.contest] : 'No verdict'}
+        </span>
+        <span className="contest-sentence">{contestSentence(review)}</span>
+      </div>
       <div className="review-grid">
         <div className="review-q">
           <div className="rv-head">

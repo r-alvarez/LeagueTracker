@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import type { MatchSummary, ReviewVerdicts } from '../types'
+import { CONTEST_SHORT, contestSide } from '../contest'
 import { useChampionIcons } from '../champions'
 import Loadout from '../components/Loadout'
 import ReviewDots from '../components/ReviewDots'
@@ -38,14 +39,29 @@ function Row({ m, reviews }: { m: MatchSummary; reviews: ReviewVerdicts }) {
   const navigate = useNavigate()
   const csPerMin = m.durationMin > 0 ? (m.cs / m.durationMin).toFixed(1) : '—'
   const result = m.isRemake ? 'Remake' : m.win ? 'Victory' : 'Defeat'
-  const rowClass = m.isRemake ? 'mr-remake' : m.win ? 'mr-win' : 'mr-loss'
+  // The contest verdict is the headline; the game's result demotes to the
+  // muted sub-line - visible (never hidden), just no longer the verdict.
+  // Rows without a review (no timeline, or still loading) keep the old look.
+  const contest = m.isRemake ? null : reviews[m.id]?.contest ?? null
+  const rowClass = m.isRemake ? 'mr-remake'
+    : contest ? `mr-${contestSide(contest)}`
+    : m.win ? 'mr-win' : 'mr-loss'
 
   return (
     <div className={`match-row ${rowClass}`} onClick={() => navigate(`/matches/${m.id}`)}
       role="link" tabIndex={0} onKeyDown={e => e.key === 'Enter' && navigate(`/matches/${m.id}`)}>
       <div className="mr-meta">
-        <span className={`mr-result ${m.isRemake ? 'mut' : m.win ? 'win' : 'loss'}`}>{result}</span>
-        <span className="sub"><RelTime date={m.gameEndUtc} /></span>
+        {contest ? (
+          <>
+            <span className={`mr-contest ${contest}`}>{CONTEST_SHORT[contest]}</span>
+            <span className="sub">{result} · <RelTime date={m.gameEndUtc} /></span>
+          </>
+        ) : (
+          <>
+            <span className={`mr-result ${m.isRemake ? 'mut' : m.win ? 'win' : 'loss'}`}>{result}</span>
+            <span className="sub"><RelTime date={m.gameEndUtc} /></span>
+          </>
+        )}
         <span className="sub">{shortQueue(m.queueName)} · {m.durationMin.toFixed(0)}m</span>
         <ReviewDots v={reviews[m.id]} />
       </div>
