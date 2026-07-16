@@ -1,4 +1,4 @@
-import type { AnalyticsSummary, ChallengeBenchmark, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchPage, RenderQueueRow, Stats, StorageInfo, Status } from './types'
+import type { AnalyticsSummary, ChallengeBenchmark, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StorageInfo, Status } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const resp = await fetch(url)
@@ -17,6 +17,13 @@ export const api = {
   matches: (page: number, pageSize: number, ranked?: boolean) =>
     get<MatchPage>(`/api/matches?page=${page}&pageSize=${pageSize}${ranked === undefined ? '' : `&ranked=${ranked}`}`),
   match: (id: string) => get<MatchDetail>(`/api/matches/${id}`),
+  review: async (id: string): Promise<MatchReview | null> => {
+    const r = await fetch(`/api/matches/${id}/review`)
+    if (r.status === 204) return null   // no timeline for this game
+    if (!r.ok) throw new Error(`/api/matches/${id}/review -> HTTP ${r.status}`)
+    return r.json()
+  },
+  reviews: (ids: string[]) => get<ReviewVerdicts>(`/api/reviews?ids=${ids.join(',')}`),
   clips: (id: string) => get<ClipInfo[]>(`/api/matches/${id}/clips`),
   deleteClip: async (id: string, index: number) => { await fetch(`/api/matches/${id}/clips/${index}`, { method: 'DELETE' }) },
   renderQueue: () => get<RenderQueueRow[]>('/api/render/queue'),

@@ -5,6 +5,7 @@ import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Parti
 import { sourceLabel, unitKind, useAbilityLabels, useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
 import { ItemIcon, PerkIcon, UnitGlyph } from '../components/GameIcons'
+import ReviewCard from '../components/ReviewCard'
 import { RelTime, tierClass } from '../components/Stats'
 
 type Tab = 'general' | 'details' | 'runes' | 'timeline'
@@ -635,6 +636,12 @@ export default function MatchDetail() {
           </div>
         )}
       </div>
+
+      {m.hasTimeline && !m.isRemake && (
+        <div style={{ marginBottom: 14 }}>
+          <ReviewCard matchId={m.id} />
+        </div>
+      )}
 
       {fullGame && (fullGame.state !== 'none' || m.hasReplay) && (
         <div className="card" style={{ marginBottom: 14 }}>

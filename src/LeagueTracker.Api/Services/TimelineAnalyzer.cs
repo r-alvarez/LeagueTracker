@@ -581,6 +581,9 @@ public static class TimelineAnalyzer
         TimeSec = TimeSecOf(ev),
         KillerParticipantId = ev.TryGetProperty("killerId", out var k) ? k.GetInt32() : 0,
         VictimParticipantId = ev.GetProperty("victimId").GetInt32(),
+        AssistIds = ev.TryGetProperty("assistingParticipantIds", out var assists)
+            ? string.Join(',', assists.EnumerateArray().Select(a => a.GetInt32()))
+            : "",
         X = ev.TryGetProperty("position", out var p) ? p.GetProperty("x").GetInt32() : 0,
         Y = ev.TryGetProperty("position", out var p2) ? p2.GetProperty("y").GetInt32() : 0,
     };
