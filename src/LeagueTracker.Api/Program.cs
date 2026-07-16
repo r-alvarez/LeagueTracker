@@ -40,6 +40,7 @@ builder.Services.AddScoped<FullGameService>();
 builder.Services.AddScoped<TimelineSeriesService>();
 builder.Services.AddScoped<LensService>();
 builder.Services.AddScoped<FundamentalsService>();
+builder.Services.AddScoped<ReviewService>();
 builder.Services.AddSingleton<RenderLeaseService>();
 builder.Services.AddSingleton<LiveGameState>();
 builder.Services.AddHostedService<MatchPollerService>();
@@ -85,6 +86,7 @@ using (var scope = app.Services.CreateScope())
         "ALTER TABLE Matches ADD COLUMN TeamGoldDiff20 INTEGER NULL",
         "ALTER TABLE Matches ADD COLUMN ContestedEpicsTaken INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE Deaths ADD COLUMN EnemyJunglerNear INTEGER NULL",
+        "ALTER TABLE KillEvents ADD COLUMN AssistIds TEXT NOT NULL DEFAULT ''",
     })
     {
         try { db.Database.ExecuteSqlRaw(alter); } catch { /* column already exists */ }
@@ -529,6 +531,16 @@ app.MapGet("/api/challenges/percentiles", async (ChallengesBenchmarkService svc,
 // by self-percentile and anchored on Riot's own challenge levels where mapped.
 app.MapGet("/api/fundamentals", async (FundamentalsService svc, int window = 20, int? days = null, string? role = null, CancellationToken ct = default) =>
     await svc.GetAsync(window, days, role, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+
+// The three questions, answered per game and blind to the result: out-dueled
+// my lane / fights bought the map / stepped with the enemy accounted for.
+app.MapGet("/api/matches/{id}/review", async (string id, ReviewService svc, CancellationToken ct) =>
+    await svc.GetAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+
+// Verdict triples for a page of matches (the list rows' process chips).
+app.MapGet("/api/reviews", async (string ids, ReviewService svc, CancellationToken ct) =>
+    Results.Ok(await svc.VerdictsAsync(
+        ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(100).ToArray(), ct)));
 
 // The dashboard aggregate: coach-style stats over recent ranked games.
 // lastGames takes precedence over days; neither = whole history.

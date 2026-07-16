@@ -438,6 +438,48 @@ export interface LensResponse {
   categories: LensCategory[]
 }
 
+export type ReviewVerdict = 'yes' | 'mixed' | 'no' | null
+
+export interface ReviewComponent { label: string; delta: number }
+export interface AbsentMoment { timeSec: number; oppInvolvement: number; where: string; myDistance: number | null; paid: boolean }
+export interface ConcededEpic { kind: string; timeSec: number; myDistance: number; alliesNear: number; paid: boolean }
+
+export interface MatchReview {
+  matchId: string
+  laneDuel: {
+    verdict: ReviewVerdict
+    detail: {
+      opponent: string
+      laneGoldDiff10: number | null
+      laneGoldDiff15: number | null
+      lateGold: { min: number; gold: number } | null
+      killsOnOpponent: number
+      deathsToOpponent: number
+      oppKillsWhileDead: number
+      oppKillsWhileAbsent: number
+      absentMoments: AbsentMoment[]
+      components: ReviewComponent[]
+    }
+  } | null
+  fights: {
+    verdict: ReviewVerdict
+    detail: { participated: number; won: number; lost: number; converted: number; conceded: number }
+  }
+  discipline: {
+    verdict: ReviewVerdict
+    detail: {
+      deaths: number
+      ganked: number
+      followIns: number
+      isolated: number
+      withTeam: number
+      concededEpicsAbsent: ConcededEpic[]
+    }
+  }
+}
+
+export type ReviewVerdicts = Record<string, { laneDuel: ReviewVerdict; fights: ReviewVerdict; discipline: ReviewVerdict }>
+
 export interface FundamentalArea {
   key: string
   label: string

@@ -296,6 +296,9 @@ public sealed class KillEvent
     public int TimeSec { get; set; }
     public int KillerParticipantId { get; set; }
     public int VictimParticipantId { get; set; }
+    /// Assisting participant ids, comma-separated - fight involvement without
+    /// the killing blow (the review's "opponent impact" needs it).
+    public string AssistIds { get; set; } = "";
     public int X { get; set; }
     public int Y { get; set; }
 }

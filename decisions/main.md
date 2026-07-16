@@ -260,3 +260,27 @@ and Fundamentals score from one implementation.
 **Known caveat, shown in UI copy**: Riot challenge levels are lifetime-
 cumulative, so they partially reflect playtime, not just skill — acceptable
 for an anchor because Riot computes them, we don't.
+
+## 2026-07-16 — The three questions (process review, result-blind)
+
+**Purpose is mindset, not analytics**: the user judges games by win/loss; the
+review answers three process questions per game and never mentions the result:
+(1) did I out-duel my lane - whole game, not just laning; (2) did my fights buy
+the map; (3) did I account for the enemy before stepping. Computed on the fly
+by ReviewService from stored rows (no new Match columns): kill events (now
+carrying assist ids - new column, reprocess-backfilled), fights, deaths,
+objectives, position samples.
+
+**The absence ledger is the novel part**: for every fight the player skipped
+where the lane opponent got kills/assists, classify where the player was
+(dead / elsewhere / nearby-uninvolved via interpolated positions) and whether
+the absence PAID (a structure the player personally took within the window).
+Same for enemy epics conceded while far away - the Baron-while-splitting
+pattern. Split-pushing is never flagged as inherently wrong; only unpaid
+absences count against the verdict.
+
+**Verdicts are transparent sums of named +/-1 components** (thresholds as
+consts: 300g lane swing, 500g late, 45s respawn window, 4000u "elsewhere",
+60s paid window) - deliberately tunable against real games rather than
+pretending precision. Surfaced as three L/F/D dots per match row and a
+"three questions" card at the top of the match detail, above the scoreboard.

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import type { MatchSummary } from '../types'
+import type { MatchSummary, ReviewVerdicts } from '../types'
 import { useChampionIcons } from '../champions'
 import Loadout from '../components/Loadout'
+import ReviewDots from '../components/ReviewDots'
 import RoleIcon from '../components/RoleIcon'
 import { KdaStat, LpChip, RankChip, RelTime } from '../components/Stats'
 
@@ -33,7 +34,7 @@ function Companion({ name, role }: { name: string; role: string | null }) {
   )
 }
 
-function Row({ m }: { m: MatchSummary }) {
+function Row({ m, reviews }: { m: MatchSummary; reviews: ReviewVerdicts }) {
   const navigate = useNavigate()
   const csPerMin = m.durationMin > 0 ? (m.cs / m.durationMin).toFixed(1) : '—'
   const result = m.isRemake ? 'Remake' : m.win ? 'Victory' : 'Defeat'
@@ -46,6 +47,7 @@ function Row({ m }: { m: MatchSummary }) {
         <span className={`mr-result ${m.isRemake ? 'mut' : m.win ? 'win' : 'loss'}`}>{result}</span>
         <span className="sub"><RelTime date={m.gameEndUtc} /></span>
         <span className="sub">{shortQueue(m.queueName)} · {m.durationMin.toFixed(0)}m</span>
+        <ReviewDots v={reviews[m.id]} />
       </div>
 
       <div className="mr-champ">
@@ -120,11 +122,20 @@ export default function Matches() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [rankedOnly, setRankedOnly] = useState(true)
+  const [reviews, setReviews] = useState<ReviewVerdicts>({})
 
   useEffect(() => {
     const load = () =>
       api.matches(page, PAGE_SIZE, rankedOnly ? true : undefined)
-        .then(p => { setItems(p.items); setTotal(p.total) })
+        .then(p => {
+          setItems(p.items)
+          setTotal(p.total)
+          if (p.items.length > 0) {
+            api.reviews(p.items.map(m => m.id))
+              .then(r => setReviews(prev => ({ ...prev, ...r })))
+              .catch(() => { /* rows just render without dots */ })
+          }
+        })
         .catch(console.error)
     load()
     // Freshly finished games land server-side minutes after the game ends;
@@ -146,7 +157,7 @@ export default function Matches() {
       </div>
 
       <div className="match-rows">
-        {items.map(m => <Row key={m.id} m={m} />)}
+        {items.map(m => <Row key={m.id} m={m} reviews={reviews} />)}
       </div>
       {items.length === 0 && <div className="empty">No games yet - sync your history on the Data page.</div>}
 

@@ -839,6 +839,42 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 }
 
 /* ============================================================================
+   The three questions: per-game process verdicts (lane duel / fight
+   conversion / discipline), deliberately blind to win or loss.
+   ========================================================================== */
+.review-dots { display: inline-flex; gap: 4px; margin-top: 2px; }
+.rv-dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px; border-radius: 50%;
+  font-size: 9.5px; font-weight: 800; color: var(--page);
+  background: var(--panel-2); border: 1px solid var(--border);
+}
+.rv-dot.yes { background: var(--chart-green); border-color: var(--chart-green); }
+.rv-dot.mixed { background: var(--warn); border-color: var(--warn); }
+.rv-dot.no { background: var(--lp-loss); border-color: var(--lp-loss); }
+.rv-dot.na { color: var(--muted); }
+
+.rv-badge {
+  display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 7px;
+  font-size: 12px; font-weight: 800;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+}
+.rv-badge.yes { color: var(--chart-green); border-color: color-mix(in srgb, var(--chart-green) 55%, var(--border)); }
+.rv-badge.mixed { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.rv-badge.no { color: var(--lp-loss); border-color: color-mix(in srgb, var(--lp-loss) 55%, var(--border)); }
+
+.review-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.review-q {
+  background: linear-gradient(135deg, #171d29, #131722 65%);
+  border: 1px solid var(--border); border-radius: 12px; padding: 13px 15px;
+}
+.rv-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.rv-question { font-weight: 750; font-size: 13px; }
+.rv-evidence { margin: 0; padding-left: 17px; font-size: 12.5px; color: var(--ink-2); display: grid; gap: 4px; }
+.rv-evidence strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) { .review-grid { grid-template-columns: 1fr; } }
+
+/* ============================================================================
    Mobile layer. Wide strips (tab bar, segmented controls, tables) scroll
    inside their own box instead of stretching the page; the match rows and
    multi-column grids restack. Keep these rules last - several override
