@@ -341,3 +341,22 @@ honest story: lane smashed, fights bought nothing, that's where the game
 went. Also: the review card now prints the lane verdict math (each ±1
 component and the net, with the ±2 thresholds) so a surprising verdict
 can always be audited at a glance instead of trusted.
+
+**2026-07-16 addendum 4 — the absence ledger starts when laning ends.**
+Motivating game: 27m Viktor vs Lux, 0-2 into -2183g @15 - a lost duel by
+every direct measure - yet the lane verdict floated at "mixed" and the
+contest folded to "won". Cause: a 12:08 roam fight (2 kills while Lux was
+"cross-map") earned +1 twice, as a cash-in and as her "unpaid absence".
+During laning the absent laner is usually just farming - payment the
+ledger cannot see, since it only recognizes structures - and the roam
+fight itself is already credited by the Fights question (the dead-time
+lesson of addendum 3 again, in a different costume). Fix: ledger moments
+before 14:00 are dropped entirely, using the same LaneEndSec boundary
+gank deaths already use; post-laning moments are unchanged, because
+that's the genuine split-push economy the ledger was built for. The game
+re-verdicts to lane no / contest split - "lost the lane, saved the game
+by leaving it", the player's own account of it. Note for future tunes:
+the player's stated rationale ("I was behind most of the game, so it
+shouldn't say won") was scoreboard reasoning and was NOT honored as
+such; the tune stands on the double-count mechanism alone. Verdicts must
+never be bent toward the gold graph - that's the LP gauge in disguise.
