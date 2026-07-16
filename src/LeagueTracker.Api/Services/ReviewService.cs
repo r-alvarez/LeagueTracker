@@ -64,6 +64,23 @@ public sealed class ReviewService(LeagueDbContext db)
             Stewardship = kv.Value.Stewardship?.Verdict,
         });
 
+    /// Verdict strings per match for the CSV export - the same fold the list
+    /// rows use, chunked so an all-history export doesn't materialize every
+    /// position sample in one query.
+    public async Task<Dictionary<string, (string? Contest, string? Lane, string? Fights, string? Discipline, string? Stewardship)>>
+        VerdictStringsAsync(string[] ids, CancellationToken ct)
+    {
+        var result = new Dictionary<string, (string?, string?, string?, string?, string?)>();
+        foreach (var chunk in ids.Chunk(64))
+        {
+            foreach (var (id, r) in await BuildAsync(chunk, ct))
+            {
+                result[id] = (Contest(r), r.Lane?.Verdict, r.Fights.Verdict, r.Discipline.Verdict, r.Stewardship?.Verdict);
+            }
+        }
+        return result;
+    }
+
     /// This many questions won with none lost (or the mirror) is the
     /// difference between winning the contest and dominating it.
     private const int SweepCount = 3;
