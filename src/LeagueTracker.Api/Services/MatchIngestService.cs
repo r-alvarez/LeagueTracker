@@ -169,6 +169,7 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
         match.Level16LeadSec = analysis.Level16LeadSec;
         match.FriendlyEpicObjectives = analysis.FriendlyEpicObjectives;
         match.ObjectivesPresentFor = analysis.ObjectivesPresentFor;
+        match.ContestedEpicsTaken = analysis.ContestedEpicsTaken;
         match.TeamGoldDiff15 = analysis.TeamGoldDiff15;
         match.TeamGoldDiff20 = analysis.TeamGoldDiff20;
         match.DpmEarly = analysis.DpmEarly;

@@ -113,6 +113,9 @@ public sealed class Match
     public int? Level16LeadSec { get; set; }
     public int FriendlyEpicObjectives { get; set; }
     public int ObjectivesPresentFor { get; set; }
+    /// Friendly epics taken with the enemy jungler within 2500 units - secures
+    /// into a contested smite fight (jungle-tracking evidence), not free takes.
+    public int ContestedEpicsTaken { get; set; }
 
     // Whole-team gold lead (mine - theirs) at the 15/20 minute frames - the
     // game-state anchor for win-condition conversion (frame-coarse like the rest).

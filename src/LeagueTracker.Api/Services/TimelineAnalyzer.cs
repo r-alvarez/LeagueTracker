@@ -42,6 +42,8 @@ public sealed class TimelineAnalysis
     // Objective presence: friendly epic objectives I was actually near when taken.
     public int FriendlyEpicObjectives { get; init; }
     public int ObjectivesPresentFor { get; init; }
+    /// Friendly epics taken with the enemy jungler within 2500 units.
+    public int ContestedEpicsTaken { get; init; }
     // Whole-team gold lead at the 15/20 minute frames (win-condition anchor).
     public int? TeamGoldDiff15 { get; init; }
     public int? TeamGoldDiff20 { get; init; }
@@ -260,15 +262,23 @@ public static class TimelineAnalyzer
         int? avgUnspentGold = goldFrames is { Count: > 0 } ? (int)goldFrames.Average() : null;
         int? maxUnspentGold = goldFrames is { Count: > 0 } ? goldFrames.Max() : null;
 
-        // Objective presence: friendly epic objectives I was actually near when taken.
+        // Objective presence: friendly epic objectives I was actually near when
+        // taken - and of those takes, which were contested (enemy jungler right
+        // there), the difference between a smite fight won and a free objective.
         var friendlyEpics = objectives.Where(o => o.ByMyTeam && o.Kind is "DRAGON" or "BARON" or "HERALD" or "GRUBS" or "ATAKHAN").ToList();
         var objectivesPresentFor = 0;
+        var contestedEpicsTaken = 0;
         foreach (var obj in friendlyEpics)
         {
             var pos = InterpolatedPosition(frames, me.ParticipantId, obj.TimeSec);
             if (pos is { } p && Math.Sqrt(Math.Pow(p.X - obj.X, 2) + Math.Pow(p.Y - obj.Y, 2)) <= ObjectiveNearUnits)
             {
                 objectivesPresentFor++;
+            }
+            if (enemyJunglerPid is { } ej && InterpolatedPosition(frames, ej, obj.TimeSec) is { } jp
+                && Math.Sqrt(Math.Pow(jp.X - obj.X, 2) + Math.Pow(jp.Y - obj.Y, 2)) <= ObjectiveNearUnits)
+            {
+                contestedEpicsTaken++;
             }
         }
 
@@ -341,6 +351,7 @@ public static class TimelineAnalyzer
             Level16LeadSec = LevelLead(16),
             FriendlyEpicObjectives = friendlyEpics.Count,
             ObjectivesPresentFor = objectivesPresentFor,
+            ContestedEpicsTaken = contestedEpicsTaken,
             TeamGoldDiff15 = TeamGoldAtMinute(15),
             TeamGoldDiff20 = TeamGoldAtMinute(20),
         };

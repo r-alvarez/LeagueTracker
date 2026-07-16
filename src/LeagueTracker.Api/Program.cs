@@ -83,6 +83,7 @@ using (var scope = app.Services.CreateScope())
         "ALTER TABLE Matches ADD COLUMN FightsJson TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE Matches ADD COLUMN TeamGoldDiff15 INTEGER NULL",
         "ALTER TABLE Matches ADD COLUMN TeamGoldDiff20 INTEGER NULL",
+        "ALTER TABLE Matches ADD COLUMN ContestedEpicsTaken INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE Deaths ADD COLUMN EnemyJunglerNear INTEGER NULL",
     })
     {
