@@ -870,6 +870,10 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .match-row.mr-closs { background: linear-gradient(90deg, rgba(240, 85, 106, 0.10), rgba(240, 85, 106, 0.035) 45%, transparent); box-shadow: inset 3px 0 var(--lp-loss); }
 
 .mr-contest { font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
+/* The demoted result keeps its win/loss color and full bold so it stays
+   readable at sub-line size - context, but legible context. */
+.mr-sub-result { font-weight: 800; }
+.mr-sub-result.win { color: var(--series-1); }
 .mr-contest.dominated, .mr-contest.won { color: var(--chart-green); }
 .mr-contest.split { color: var(--warn); }
 .mr-contest.lost, .mr-contest.runover { color: var(--lp-loss); }
