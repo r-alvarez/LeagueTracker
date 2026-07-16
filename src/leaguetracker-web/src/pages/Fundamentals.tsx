@@ -53,12 +53,17 @@ function TierEmblem({ tier, size = 30 }: { tier: string; size?: number }) {
   )
 }
 
-const fmt = (t: LensTile, v: number | null) =>
-  v === null ? '—' : `${v.toLocaleString(undefined, { maximumFractionDigits: t.decimals })}${t.unit === '%' ? '%' : t.unit ? ` ${t.unit}` : ''}`
+const fmt = (t: LensTile, v: number | null) => {
+  if (v === null) return '—'
+  if (t.unit === 'm:ss') return `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, '0')}`
+  return `${v.toLocaleString(undefined, { maximumFractionDigits: t.decimals })}${t.unit === '%' ? '%' : t.unit ? ` ${t.unit}` : ''}`
+}
 
 function Delta({ t }: { t: LensTile }) {
   if (t.value === null || t.old === null || t.value === t.old) return null
   const up = t.value > t.old
+  // Context-dependent metrics move without being "better" or "worse".
+  if (t.higherIsBetter === null) return <span className="lens-delta mut">{up ? '▲' : '▼'}</span>
   const improved = up === t.higherIsBetter
   return <span className={`lens-delta ${improved ? 'win' : 'loss'}`}>{up ? '▲' : '▼'}</span>
 }
@@ -119,7 +124,8 @@ function AreaDetail({ area, data }: { area: FundamentalArea; data: FundamentalsR
               )}
             </div>
             <p className="mut sm-text" style={{ margin: 0 }}>
-              {active.desc}.{!active.higherIsBetter && ' Lower is better.'}
+              {active.desc}.{active.higherIsBetter === false && ' Lower is better.'}
+              {active.higherIsBetter === null && ' Context-dependent — shown for awareness, not scored.'}
             </p>
           </div>
         )}
@@ -232,7 +238,7 @@ export default function Fundamentals() {
           ))}
         </div>
         <div className="seg" title="The rank you're climbing toward - boxes are judged against it">
-          <button disabled className="fund-goal-word">Goal</button>
+          <span className="fund-goal-word">Goal</span>
           {TARGETS.map(t => (
             <button key={t} className={target === t ? `on ${tierClass(t)}` : ''} onClick={() => setTarget(t)}>{TIER_LABEL[t]}</button>
           ))}
@@ -299,8 +305,9 @@ export default function Fundamentals() {
               history; the tier chip is the median of Riot's own Challenge levels mapped to that skill (lifetime, so it
               partly reflects playtime). Colors judge each chip against your <strong>{TIER_LABEL[target]}</strong> goal:{' '}
               <span className="fund-key ready">ready</span> at/above it, <span className="fund-key focus">train</span> one
-              tier short, <span className="fund-key urgent">priority</span> two or more short; skills gating beyond the
-              goal are dimmed — they can wait. {rankLineTop === null && 'Rank line hidden — rank/LP display is off for this instance.'}
+              tier short, <span className="fund-key urgent">priority</span> two or more short;{' '}
+              <span className="fund-key later">white</span> skills gate beyond the goal — not applicable yet, still worth
+              improving. {rankLineTop === null && 'Rank line hidden — rank/LP display is off for this instance.'}
             </p>
           </div>
 
