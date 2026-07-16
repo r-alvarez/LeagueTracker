@@ -28,6 +28,11 @@ public sealed class ReviewService(LeagueDbContext db)
 
     private static readonly string[] EpicKinds = ["DRAGON", "BARON", "HERALD", "GRUBS", "ATAKHAN"];
 
+    /// Laning ends here: gank deaths stop counting, and the absence ledger
+    /// starts. Before this, the "absent" laner is usually just farming their
+    /// lane - payment the ledger can't see (it only sees structures) - and
+    /// roam fights are already credited by the Fights question.
+    private const int LaneEndSec = 840;
     /// A death this recent still counts as "you were down" for a fight start.
     private const int RespawnWindowSec = 45;
     /// Further than this from the action = you were elsewhere on the map.
@@ -186,7 +191,7 @@ public sealed class ReviewService(LeagueDbContext db)
 
         var theirCashIns = new List<LedgerMoment>();   // they scored, I was absent
         var myCashIns = new List<LedgerMoment>();      // I scored, they were absent
-        foreach (var f in fights)
+        foreach (var f in fights.Where(f => f.StartSec >= LaneEndSec))
         {
             var windowKills = kills.Where(k => k.TimeSec >= f.StartSec && k.TimeSec <= f.EndSec).ToList();
             var midSec = (f.StartSec + f.EndSec) / 2;
@@ -334,7 +339,7 @@ public sealed class ReviewService(LeagueDbContext db)
         var withTeam = 0;
         foreach (var d in deaths)
         {
-            if (d.EnemyJunglerNear == true && d.TimeSec < 840) ganked++;
+            if (d.EnemyJunglerNear == true && d.TimeSec < LaneEndSec) ganked++;
             else if (d.FollowTeammate is not null) followIns++;
             else if (d is { EnemiesNearDeath: >= 2, AlliesNearDeath: 0 }) isolated++;
             else withTeam++;
