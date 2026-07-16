@@ -103,11 +103,12 @@ public sealed class FundamentalsService(LeagueDbContext db, ChallengesBenchmarkS
             ]),
         new("jungletrack", "Jungle tracking", "DIAMOND",
             "Knowing where the enemy jungler is without seeing them - and not dying when you're wrong.",
-            "Laning-phase deaths with the enemy jungler converged (interpolated positions) and early wards from your games. The ladder anchor uses PROXY challenges - no Riot challenge measures tracking directly, so the closest fog-awareness ones stand in (recalling while unseen; securing epics with the enemy jungler near).",
+            "Laning-phase deaths with the enemy jungler converged and epics taken with them right there (both from interpolated positions), plus early wards - all from your games. The ladder anchor uses PROXY challenges - no Riot challenge measures tracking directly, so the closest fog-awareness ones stand in (recalling while unseen; securing epics with the enemy jungler near).",
             [103101, 203406],
             [
                 new("gankDeathsPre14", "Gank deaths", "Laning-phase deaths with the enemy jungler on you", false, 2),
                 new("lanePhaseDeaths", "Deaths before 14:00", "All laning-phase deaths, for context", false, 2),
+                new("contestedSecures", "Contested secures", "Epics your team took with the enemy jungler right there", true, 2),
                 new("wardsFirst10", "Early wards", "Wards placed in the first 10 minutes", true, 1),
             ]),
         new("warding", "Warding & laning", "DIAMOND",
@@ -177,6 +178,7 @@ public sealed class FundamentalsService(LeagueDbContext db, ChallengesBenchmarkS
             {
                 row["gankDeathsPre14"] = agg?.GankDeaths ?? 0;
                 row["lanePhaseDeaths"] = agg?.LaneDeaths ?? 0;
+                row["contestedSecures"] = m.ContestedEpicsTaken;
             }
             if (missingPings.TryGetValue(m.Id, out var pings)) row["missingPings"] = pings;
             // Conditional keys: only games that WERE ahead/behind carry the metric,
