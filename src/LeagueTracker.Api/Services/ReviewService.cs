@@ -217,8 +217,12 @@ public sealed class ReviewService(LeagueDbContext db)
             }
         }
 
-        var theirCashKills = theirCashIns.Sum(x => x.Kills);
-        var myCashKills = myCashIns.Sum(x => x.Kills);
+        // Kills cashed in while the other laner was DEAD are teamfight
+        // outcomes - the Fights and Discipline questions already own those.
+        // The duel comparison only counts kills earned while the other was
+        // absent by choice (elsewhere or nearby-uninvolved), both ways.
+        var theirCashKills = theirCashIns.Where(x => x.Where != "dead").Sum(x => x.Kills);
+        var myCashKills = myCashIns.Where(x => x.Where != "dead").Sum(x => x.Kills);
         var myUnpaidAbsences = theirCashIns.Count(x => x.Where == "elsewhere" && !x.Paid);
         var theirUnpaidAbsences = myCashIns.Count(x => x.Where == "elsewhere" && !x.Paid);
 

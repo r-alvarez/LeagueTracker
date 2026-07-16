@@ -322,3 +322,22 @@ opens with the full verdict chip plus a one-sentence summary composed from
 the decisive questions ("You out-dueled your lane, but your fights bought
 nothing — that's the game") — the post-game "one honest sentence" rep,
 automated.
+
+**2026-07-16 addendum 3 — first real-game tune: dead-time cash-ins leave
+the duel ledger.** Motivating game: 43m Viktor vs Syndra, kill exchange
+6-1, +727g @15, +1754g @30 — and the lane duel still came out "mixed"
+(net +1), folding the contest to "split". Audit showed the two negative
+components were counting the same failures the other questions already
+judge: the opponent's "cash-ins" at 35:19/42:14 happened while the player
+was DEAD in late teamfights (Fights had already said no, Discipline had
+already counted the deaths), and the 18:41/18:47 moments hit both the
+cash-in comparison and the unpaid-absence count at once. Fix: kills
+cashed in while the other laner was dead are excluded from the duel
+cash-in comparison, both ways (dying to a gank/fight is not losing the
+1v1; the ledger list still shows the moments). Unpaid absences unchanged
+- being cross-map for nothing is still the split-push audit. The game
+re-verdicts to lane yes / contest won on a Defeat, which matches the
+honest story: lane smashed, fights bought nothing, that's where the game
+went. Also: the review card now prints the lane verdict math (each ±1
+component and the net, with the ±2 thresholds) so a surprising verdict
+can always be audited at a glance instead of trusted.
