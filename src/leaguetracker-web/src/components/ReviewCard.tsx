@@ -23,10 +23,13 @@ export default function ReviewCard({ matchId }: { matchId: string }) {
   const lane = review.laneDuel
   const fights = review.fights
   const disc = review.discipline
+  const stew = review.stewardship
+
+  const whereWord = (w: string) => w === 'dead' ? 'dead' : w === 'elsewhere' ? 'cross-map' : 'right there, uninvolved'
 
   return (
     <div className="card review-card">
-      <h2>The three questions <span className="mut">process, not result</span></h2>
+      <h2>The four questions <span className="mut">process, not result</span></h2>
       <div className="review-grid">
         <div className="review-q">
           <div className="rv-head">
@@ -47,18 +50,52 @@ export default function ReviewCard({ matchId }: { matchId: string }) {
                 <li>Gold vs lane @{lane.detail.lateGold.min}: <strong className={lane.detail.lateGold.gold >= 0 ? 'win' : 'loss'}>
                   {lane.detail.lateGold.gold > 0 ? '+' : ''}{lane.detail.lateGold.gold}g</strong></li>
               )}
-              {lane.detail.oppKillsWhileDead > 0 && (
-                <li className="loss">They cashed in {lane.detail.oppKillsWhileDead} kill{lane.detail.oppKillsWhileDead > 1 ? 's' : ''} while you were dead</li>
+              {(lane.detail.myCashKills > 0 || lane.detail.theirCashKills > 0) && (
+                <li>Cash-ins while the other was away:{' '}
+                  <strong className={lane.detail.myCashKills >= lane.detail.theirCashKills ? 'win' : 'loss'}>
+                    you {lane.detail.myCashKills} · them {lane.detail.theirCashKills}</strong></li>
               )}
-              {lane.detail.absentMoments.filter(a => a.where === 'elsewhere').map((a, i) => (
-                <li key={i} className={a.paid ? '' : 'loss'}>
-                  {mmss(a.timeSec)} — they got {a.oppInvolvement} in a fight you skipped;{' '}
-                  {a.paid ? 'your split took a structure (paid)' : 'your absence bought nothing'}
+              {lane.detail.theirCashIns.map((a, i) => (
+                <li key={`t${i}`} className={a.where === 'elsewhere' && !a.paid ? 'loss' : ''}>
+                  {mmss(a.timeSec)} — they got {a.kills} while you were {whereWord(a.where)}
+                  {a.where === 'elsewhere' && (a.paid ? '; your split took a structure (paid)' : '; your absence bought nothing')}
+                </li>
+              ))}
+              {lane.detail.myCashIns.map((a, i) => (
+                <li key={`m${i}`} className="win">
+                  {mmss(a.timeSec)} — you got {a.kills} while they were {whereWord(a.where)}
+                  {a.where === 'elsewhere' && a.paid ? ' (their split paid)' : ''}
                 </li>
               ))}
             </ul>
           )}
           {!lane && <p className="mut sm-text">No same-role opponent in this game.</p>}
+        </div>
+
+        <div className="review-q">
+          <div className="rv-head">
+            <span className="rv-question">Did I keep my lead / recover my deficit?</span>
+            <Badge v={stew?.verdict ?? null} />
+          </div>
+          {stew ? (
+            <ul className="rv-evidence">
+              <li>
+                Started {stew.detail.state} vs lane:{' '}
+                <strong className={stew.detail.startGold >= 0 ? 'win' : 'loss'}>
+                  {stew.detail.startGold > 0 ? '+' : ''}{stew.detail.startGold}g</strong> @{stew.detail.startMin}
+                {' → '}
+                <strong className={stew.detail.endGold >= 0 ? 'win' : 'loss'}>
+                  {stew.detail.endGold > 0 ? '+' : ''}{stew.detail.endGold}g</strong> @{stew.detail.endMin}
+                {' — '}<strong>{stew.detail.summary}</strong>
+              </li>
+              {stew.detail.teamGold15 !== null && stew.detail.teamGold20 !== null && (
+                <li className="mut">
+                  Team gold: {stew.detail.teamGold15 > 0 ? '+' : ''}{stew.detail.teamGold15}g @15
+                  {' → '}{stew.detail.teamGold20 > 0 ? '+' : ''}{stew.detail.teamGold20}g @20
+                </li>
+              )}
+            </ul>
+          ) : <p className="mut sm-text">Game too short (or no lane opponent) to judge the trajectory.</p>}
         </div>
 
         <div className="review-q">

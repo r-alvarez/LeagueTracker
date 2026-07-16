@@ -19,7 +19,10 @@ public sealed class ReviewService(LeagueDbContext db)
         int Allies, int Enemies, int AllyKills, int EnemyKills, int GoldSwing, bool ConvertedObjective);
 
     private sealed record Component(string Label, int Delta);
-    private sealed record AbsentMoment(int TimeSec, int OppInvolvement, string Where, int? MyDistance, bool Paid);
+    /// One consequential absence: someone cashed in a fight while the other
+    /// laner was dead / elsewhere / nearby-uninvolved. Where and Paid describe
+    /// the ABSENT player (paid = they took a structure around that window).
+    private sealed record LedgerMoment(int TimeSec, int Kills, string Where, int? Distance, bool Paid);
     private sealed record ConcededEpic(string Kind, int TimeSec, int MyDistance, int AlliesNear, bool Paid);
     private sealed record Verdicted(string? Verdict, object Detail);
 
@@ -38,22 +41,30 @@ public sealed class ReviewService(LeagueDbContext db)
     {
         var reviews = await BuildAsync([matchId], ct);
         return reviews.TryGetValue(matchId, out var r)
-            ? new { MatchId = matchId, LaneDuel = Payload(r.Lane), Fights = Payload(r.Fights), Discipline = Payload(r.Discipline) }
+            ? new
+            {
+                MatchId = matchId,
+                LaneDuel = Payload(r.Lane),
+                Fights = Payload(r.Fights),
+                Discipline = Payload(r.Discipline),
+                Stewardship = Payload(r.Stewardship),
+            }
             : null;
     }
 
-    /// Light verdict triple per match for the list rows.
+    /// Light verdict tuple per match for the list rows.
     public async Task<object> VerdictsAsync(string[] ids, CancellationToken ct) =>
         (await BuildAsync(ids, ct)).ToDictionary(kv => kv.Key, kv => new
         {
             LaneDuel = kv.Value.Lane?.Verdict,
             Fights = kv.Value.Fights.Verdict,
             Discipline = kv.Value.Discipline.Verdict,
+            Stewardship = kv.Value.Stewardship?.Verdict,
         });
 
     private static object? Payload(Verdicted? v) => v is null ? null : new { v.Verdict, v.Detail };
 
-    private sealed record Review(Verdicted? Lane, Verdicted Fights, Verdicted Discipline);
+    private sealed record Review(Verdicted? Lane, Verdicted Fights, Verdicted Discipline, Verdicted? Stewardship);
 
     private async Task<Dictionary<string, Review>> BuildAsync(string[] ids, CancellationToken ct)
     {
@@ -87,7 +98,8 @@ public sealed class ReviewService(LeagueDbContext db)
             result[m.Id] = new Review(
                 LaneDuel(m, me, opp, matchDeaths, matchKills, matchObjectives, fights, allyPids, matchPositions),
                 FightsVerdict(fights),
-                Discipline(matchDeaths, matchObjectives, matchPositions, allyPids, me));
+                Discipline(matchDeaths, matchObjectives, matchPositions, allyPids, me),
+                Stewardship(m));
         }
         return result;
     }
@@ -100,42 +112,75 @@ public sealed class ReviewService(LeagueDbContext db)
     {
         if (me is null || opp is null) return null;
         var myPositions = positions.Where(p => p.ParticipantId == me.ParticipantId).OrderBy(p => p.TimeSec).ToList();
+        var oppPositions = positions.Where(p => p.ParticipantId == opp.ParticipantId).OrderBy(p => p.TimeSec).ToList();
+        var enemyPids = new HashSet<int>(positions.Select(p => p.ParticipantId)
+            .Where(pid => !allyPids.Contains(pid) && pid != me.ParticipantId));
+        var oppDeathSecs = kills.Where(k => k.VictimParticipantId == opp.ParticipantId).Select(k => k.TimeSec).ToList();
+        var myDeathSecs = deaths.Select(d => d.TimeSec).ToList();
 
         var killsOnOpp = kills.Count(k => k.KillerParticipantId == me.ParticipantId && k.VictimParticipantId == opp.ParticipantId);
         var deathsToOpp = kills.Count(k => k.KillerParticipantId == opp.ParticipantId && k.VictimParticipantId == me.ParticipantId);
 
-        // The opponent's impact in fights I skipped: kills/assists on my
-        // teammates, split by where I was - dead, elsewhere (paid or not), or
-        // right there and uninvolved.
-        var absentMoments = new List<AbsentMoment>();
-        var oppKillsWhileDead = 0;
-        var oppKillsWhileAbsent = 0;
-        var absencePaid = 0;
-        var absenceUnpaid = 0;
-        foreach (var f in fights.Where(f => !f.Participated))
+        // The two-sided absence ledger: for every fight one laner skipped while
+        // the other cashed in, record where the absent one was and whether the
+        // absence paid (they took a structure around it). Both of you get the
+        // same audit - a split-push only counts against whoever earned nothing.
+        bool Involved(KillEvent k, int pid, HashSet<int> victims) =>
+            victims.Contains(k.VictimParticipantId) && (k.KillerParticipantId == pid || AssistedBy(k, pid));
+        bool TookStructure(int pid, bool myTeam, int startSec, int endSec) =>
+            objectives.Any(o => o.ByMyTeam == myTeam && o.Kind is "TOWER" or "INHIBITOR"
+                && o.KillerParticipantId == pid && o.TimeSec >= startSec - 30 && o.TimeSec <= endSec + PaidWindowSec);
+        LedgerMoment? Moment(FightDto f, List<KillEvent> windowKills, int cashKills,
+            List<int> absenteeDeaths, List<PositionSample> absenteePositions, int absenteePid, bool absenteeOnMyTeam)
         {
-            var windowKills = kills.Where(k => k.TimeSec >= f.StartSec && k.TimeSec <= f.EndSec).ToList();
-            var oppInvolved = windowKills.Count(k => allyPids.Contains(k.VictimParticipantId)
-                && (k.KillerParticipantId == opp.ParticipantId || AssistedBy(k, opp.ParticipantId)));
-            if (oppInvolved == 0 || windowKills.Count == 0) continue;
-
-            var wasDead = deaths.Any(d => d.TimeSec <= f.StartSec && f.StartSec - d.TimeSec <= RespawnWindowSec);
+            if (cashKills == 0 || windowKills.Count == 0) return null;
+            var wasDead = absenteeDeaths.Any(t => t <= f.StartSec && f.StartSec - t <= RespawnWindowSec);
             var cx = windowKills.Average(k => k.X);
             var cy = windowKills.Average(k => k.Y);
-            var myPos = InterpolatedAt(myPositions, (f.StartSec + f.EndSec) / 2);
-            var dist = myPos is { } p ? (int)Math.Sqrt(Math.Pow(p.X - cx, 2) + Math.Pow(p.Y - cy, 2)) : (int?)null;
+            var pos = InterpolatedAt(absenteePositions, (f.StartSec + f.EndSec) / 2);
+            var dist = pos is { } p ? (int)Math.Sqrt(Math.Pow(p.X - cx, 2) + Math.Pow(p.Y - cy, 2)) : (int?)null;
             var where = wasDead ? "dead" : dist is > FarUnits ? "elsewhere" : "nearby";
-            // A structure I personally took around the fight justifies being away.
-            var paid = objectives.Any(o => o.ByMyTeam && o.Kind is "TOWER" or "INHIBITOR"
-                && o.KillerParticipantId == me.ParticipantId
-                && o.TimeSec >= f.StartSec - 30 && o.TimeSec <= f.EndSec + PaidWindowSec);
-
-            oppKillsWhileAbsent += oppInvolved;
-            if (wasDead) oppKillsWhileDead += oppInvolved;
-            else if (where == "elsewhere") { if (paid) absencePaid++; else absenceUnpaid++; }
-
-            absentMoments.Add(new AbsentMoment(f.StartSec, oppInvolved, where, dist, paid));
+            return new LedgerMoment(f.StartSec, cashKills, where, dist,
+                TookStructure(absenteePid, absenteeOnMyTeam, f.StartSec, f.EndSec));
         }
+
+        var theirCashIns = new List<LedgerMoment>();   // they scored, I was absent
+        var myCashIns = new List<LedgerMoment>();      // I scored, they were absent
+        foreach (var f in fights)
+        {
+            var windowKills = kills.Where(k => k.TimeSec >= f.StartSec && k.TimeSec <= f.EndSec).ToList();
+            var midSec = (f.StartSec + f.EndSec) / 2;
+
+            if (!f.Participated)
+            {
+                var oppCash = windowKills.Count(k => Involved(k, opp.ParticipantId, allyPids));
+                if (Moment(f, windowKills, oppCash, myDeathSecs, myPositions, me.ParticipantId, true) is { } theirs)
+                {
+                    theirCashIns.Add(theirs);
+                }
+            }
+            else
+            {
+                // The opponent "participated" if they touched a kill or stood in
+                // the fight - the same headcount idea the analyzer uses for me.
+                var oppThere = windowKills.Any(k => k.KillerParticipantId == opp.ParticipantId
+                        || k.VictimParticipantId == opp.ParticipantId || AssistedBy(k, opp.ParticipantId))
+                    || (windowKills.Count > 0 && InterpolatedAt(oppPositions, midSec) is { } op
+                        && Math.Sqrt(Math.Pow(op.X - windowKills.Average(k => k.X), 2)
+                            + Math.Pow(op.Y - windowKills.Average(k => k.Y), 2)) <= 2500);
+                if (oppThere) continue;
+                var myCash = windowKills.Count(k => Involved(k, me.ParticipantId, enemyPids));
+                if (Moment(f, windowKills, myCash, oppDeathSecs, oppPositions, opp.ParticipantId, false) is { } mine)
+                {
+                    myCashIns.Add(mine);
+                }
+            }
+        }
+
+        var theirCashKills = theirCashIns.Sum(x => x.Kills);
+        var myCashKills = myCashIns.Sum(x => x.Kills);
+        var myUnpaidAbsences = theirCashIns.Count(x => x.Where == "elsewhere" && !x.Paid);
+        var theirUnpaidAbsences = myCashIns.Count(x => x.Where == "elsewhere" && !x.Paid);
 
         var checkpoints = m.LaneDiffsJson is { Length: > 0 }
             ? JsonSerializer.Deserialize<List<TimelineAnalyzer.LaneDiffPoint>>(m.LaneDiffsJson, Json) ?? []
@@ -151,9 +196,8 @@ public sealed class ReviewService(LeagueDbContext db)
         Add($"gold vs lane @{late?.Min}",
             late is not null ? (late.Gold >= LateGoldSwing ? 1 : late.Gold <= -LateGoldSwing ? -1 : 0) : 0);
         Add("kill exchange with laner", Math.Sign(killsOnOpp - deathsToOpp));
-        Add("they cashed in while you were dead", oppKillsWhileDead >= 2 ? -1 : 0);
-        Add("unpaid absences from their fights", absenceUnpaid >= 2 ? -1 : 0);
-        Add("your absences took structures", absencePaid >= 2 ? 1 : 0);
+        Add("cash-ins while the other was away", Math.Sign(myCashKills - theirCashKills));
+        Add("unpaid absences, theirs vs yours", Math.Sign(theirUnpaidAbsences - myUnpaidAbsences));
         var score = components.Sum(c => c.Delta);
 
         return new Verdicted(score >= 2 ? "yes" : score <= -2 ? "no" : "mixed", new
@@ -163,9 +207,10 @@ public sealed class ReviewService(LeagueDbContext db)
             LateGold = late is not null ? new { late.Min, late.Gold } : null,
             KillsOnOpponent = killsOnOpp,
             DeathsToOpponent = deathsToOpp,
-            OppKillsWhileDead = oppKillsWhileDead,
-            OppKillsWhileAbsent = oppKillsWhileAbsent,
-            AbsentMoments = absentMoments,
+            TheirCashKills = theirCashKills,
+            MyCashKills = myCashKills,
+            TheirCashIns = theirCashIns,
+            MyCashIns = myCashIns,
             Components = components,
         });
     }
@@ -192,6 +237,44 @@ public sealed class ReviewService(LeagueDbContext db)
             Lost = lost,
             Converted = converted,
             Conceded = conceded,
+        });
+    }
+
+    // --- Q4: did I keep my lead / recover my deficit? --------------------------------
+
+    private static Verdicted? Stewardship(Match m)
+    {
+        var checkpoints = m.LaneDiffsJson is { Length: > 0 }
+            ? JsonSerializer.Deserialize<List<TimelineAnalyzer.LaneDiffPoint>>(m.LaneDiffsJson, Json) ?? []
+            : [];
+        var start = checkpoints.FirstOrDefault(c => c.Min == 10);
+        var end = checkpoints.Where(c => c.Min is 20 or 25 or 30).OrderByDescending(c => c.Min).FirstOrDefault();
+        if (start is null || end is null) return null;
+
+        var state = start.Gold >= LaneGoldSwing ? "ahead" : start.Gold <= -LaneGoldSwing ? "behind" : "even";
+        var (verdict, summary) = state switch
+        {
+            "ahead" => end.Gold >= start.Gold + LaneGoldSwing ? ("yes", "lead grew")
+                : end.Gold >= LaneGoldSwing ? ("yes", "lead held")
+                : end.Gold <= -LaneGoldSwing ? ("no", "lead flipped")
+                : ("mixed", "lead drifted to even"),
+            "behind" => end.Gold >= -LaneGoldSwing ? ("yes", "deficit recovered")
+                : end.Gold >= start.Gold + LaneGoldSwing ? ("mixed", "deficit reduced")
+                : end.Gold <= start.Gold - LaneGoldSwing ? ("no", "deficit grew")
+                : ("mixed", "deficit held"),
+            _ => end.Gold >= LaneGoldSwing ? ("yes", "pulled ahead")
+                : end.Gold <= -LaneGoldSwing ? ("no", "fell behind")
+                : ("mixed", "stayed even"),
+        };
+
+        return new Verdicted(verdict, new
+        {
+            StartMin = start.Min, StartGold = start.Gold,
+            EndMin = end.Min, EndGold = end.Gold,
+            State = state,
+            Summary = summary,
+            TeamGold15 = m.TeamGoldDiff15,
+            TeamGold20 = m.TeamGoldDiff20,
         });
     }
 
