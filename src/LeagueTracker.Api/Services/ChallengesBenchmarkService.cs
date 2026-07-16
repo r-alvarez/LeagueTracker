@@ -5,6 +5,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LeagueTracker.Api.Services;
 
+/// One challenge the player holds a level on, with its ladder context.
+public sealed record ChallengeStanding(
+    long Id, string Name, string Description, string Level, int LevelRank,
+    double? Percentile, double? Value, double? LevelShare, string? NextLevel, double? NextLevelShare);
+
 /// The player's challenge standings against the whole ladder (Challenges-V1) -
 /// the one benchmark our own wins-vs-losses analysis can't provide. Player data
 /// is refreshed on a TTL; the challenge config (id -> name) is near-static and
@@ -16,7 +21,14 @@ public sealed class ChallengesBenchmarkService(
     private static readonly string[] LevelOrder =
         ["NONE", "IRON", "BRONZE", "SILVER", "GOLD", "PLATINUM", "DIAMOND", "MASTER", "GRANDMASTER", "CHALLENGER"];
 
-    public async Task<object?> GetAsync(CancellationToken ct)
+    public async Task<object?> GetAsync(CancellationToken ct) =>
+        await GetStandingsAsync(ct) is { } standings
+            ? new { standings.AsOfUtc, Challenges = standings.Rows }
+            : null;
+
+    /// The typed rows behind the percentiles endpoint - reused by features that
+    /// anchor their own skill areas on Riot's ladder levels (Fundamentals).
+    public async Task<(string? AsOfUtc, List<ChallengeStanding> Rows)?> GetStandingsAsync(CancellationToken ct)
     {
         var puuid = await player.GetPuuidAsync(ct);
         var playerRaw = await CachedAsync("challenges:playerdata", TimeSpan.FromHours(12),
@@ -32,7 +44,7 @@ public sealed class ChallengesBenchmarkService(
         var levelShares = sharesRaw is null ? [] : ParseLevelShares(sharesRaw);
 
         var names = ParseConfigNames(configRaw);
-        var rows = new List<object>();
+        var rows = new List<ChallengeStanding>();
         using var doc = JsonDocument.Parse(playerRaw);
         if (!doc.RootElement.TryGetProperty("challenges", out var challenges)) return null;
 
@@ -44,27 +56,16 @@ public sealed class ChallengesBenchmarkService(
             if (!names.TryGetValue(id, out var meta)) continue;   // capstone/category roots have no leaf name
 
             var (levelShare, nextLevel, nextLevelShare) = LadderContext(levelShares, id, level);
-            rows.Add(new
-            {
-                Id = id,
-                meta.Name,
-                meta.Description,
-                Level = level,
-                LevelRank = Array.IndexOf(LevelOrder, level),
-                Percentile = c.TryGetProperty("percentile", out var pc) ? Math.Round(pc.GetDouble(), 4) : (double?)null,
-                Value = c.TryGetProperty("value", out var vv) ? vv.GetDouble() : (double?)null,
-                LevelShare = levelShare,
-                NextLevel = nextLevel,
-                NextLevelShare = nextLevelShare,
-            });
+            rows.Add(new ChallengeStanding(
+                id, meta.Name, meta.Description, level, Array.IndexOf(LevelOrder, level),
+                c.TryGetProperty("percentile", out var pc) ? Math.Round(pc.GetDouble(), 4) : null,
+                c.TryGetProperty("value", out var vv) ? vv.GetDouble() : null,
+                levelShare, nextLevel, nextLevelShare));
         }
 
-        return new
-        {
-            AsOfUtc = (await db.KeyValues.FindAsync(["challenges:playerdata"], ct))?.Value is { } j
-                && JsonDocument.Parse(j).RootElement.TryGetProperty("fetchedAt", out var f) ? f.GetString() : null,
-            Challenges = rows,
-        };
+        var asOfUtc = (await db.KeyValues.FindAsync(["challenges:playerdata"], ct))?.Value is { } j
+            && JsonDocument.Parse(j).RootElement.TryGetProperty("fetchedAt", out var f) ? f.GetString() : null;
+        return (asOfUtc, rows);
     }
 
     private async Task<string?> CachedAsync(string key, TimeSpan ttl, Func<Task<string>> fetch, CancellationToken ct)

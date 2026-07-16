@@ -114,6 +114,11 @@ public sealed class Match
     public int FriendlyEpicObjectives { get; set; }
     public int ObjectivesPresentFor { get; set; }
 
+    // Whole-team gold lead (mine - theirs) at the 15/20 minute frames - the
+    // game-state anchor for win-condition conversion (frame-coarse like the rest).
+    public int? TeamGoldDiff15 { get; set; }
+    public int? TeamGoldDiff20 { get; set; }
+
     /// Lane-diff checkpoints vs the same-role enemy at 10/15/20/25 as JSON
     /// ([{min, gold, xp, cs, level, myCs, myLevel}]).
     public string LaneDiffsJson { get; set; } = "";
@@ -245,6 +250,11 @@ public sealed class Death
     public bool? FollowPureLoss { get; set; }
     /// Team gold lead (mine - theirs) at the frame before the death.
     public int? FollowTeamGoldDiff { get; set; }
+
+    /// The enemy JUNGLER was within 2000 units when I died (interpolated) - in
+    /// the laning phase this is the gank-death / jungle-tracking signal.
+    /// Null = no enemy jungler position (odd modes, missing frames).
+    public bool? EnemyJunglerNear { get; set; }
 
     public List<DeathDamage> DamageInstances { get; set; } = [];
 }

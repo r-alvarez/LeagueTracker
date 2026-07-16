@@ -225,3 +225,38 @@ stored games. We deliberately do NOT fake a "vs Gold" cohort baseline (no
 population data); Riot's Challenges percentiles remain the external anchor
 and are cross-linked in the UI copy. dpm's NEW vs OLD compare is the model
 for the tile detail (recent window vs everything before it).
+
+## 2026-07-16 — Fundamentals ladder (rank-tier skill map)
+
+**The "no composite scores" rule is refined, not repealed.** The 2026-07-05
+decision rejected a single weighted rating; that stands. What the Fundamentals
+feature adds is PER-SKILL levels, and the Riot-policy line was re-checked
+before building: the prohibition is "products cannot create alternatives for
+official skill ranking systems... MMR or ELO calculators" (developer.riotgames.com/policies/general).
+Per-skill-area assessment in a personal post-game coaching tool is the
+explicitly-encouraged use case, so long as (a) no overall "your real rank is X"
+number is ever derived, and (b) tier labels are anchored in Riot's own data.
+Both are structural here: areas never aggregate, and the only tier chip an
+area shows is the MEDIAN of its mapped Riot Challenge levels (Riot's own
+Iron→Challenger grading), never a home-grown estimate.
+
+**Curriculum rows are fixed, evidence is ours**: each of the eight skills sits
+at the tier where coaching curricula say it starts gating games (Gold: macro,
+information gathering; Plat: matchup understanding, win-condition; Emerald:
+trading, teamfighting; Diamond: jungle tracking, warding) — the boxes never
+move with performance. Per-area evidence = Lens-style self-percentile over the
+player's own games + the challenge anchor. Jungle tracking has NO honest
+challenge mapping and therefore shows no ladder chip at all — a deliberate gap
+rather than a stretched proxy.
+
+**New timeline derivations** (reprocess-backfillable like everything else):
+Death.EnemyJunglerNear (enemy jungler interpolated within 2000u at my death;
+pre-14:00 deaths with it = gank deaths, the jungle-tracking signal) and
+Match.TeamGoldDiff15/20 (whole-team gold at the milestone frames; win-condition
+conversion = win rate conditioned on being 1k+ ahead/behind at 15). Metric-row
+computation was extracted from LensService into MatchMetricRows so the Lens
+and Fundamentals score from one implementation.
+
+**Known caveat, shown in UI copy**: Riot challenge levels are lifetime-
+cumulative, so they partially reflect playtime, not just skill — acceptable
+for an anchor because Riot computes them, we don't.

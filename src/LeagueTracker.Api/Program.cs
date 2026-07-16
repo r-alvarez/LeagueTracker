@@ -39,6 +39,7 @@ builder.Services.AddScoped<ClipService>();
 builder.Services.AddScoped<FullGameService>();
 builder.Services.AddScoped<TimelineSeriesService>();
 builder.Services.AddScoped<LensService>();
+builder.Services.AddScoped<FundamentalsService>();
 builder.Services.AddSingleton<RenderLeaseService>();
 builder.Services.AddSingleton<LiveGameState>();
 builder.Services.AddHostedService<MatchPollerService>();
@@ -80,6 +81,9 @@ using (var scope = app.Services.CreateScope())
         "ALTER TABLE Matches ADD COLUMN FriendlyEpicObjectives INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE Matches ADD COLUMN ObjectivesPresentFor INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE Matches ADD COLUMN FightsJson TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE Matches ADD COLUMN TeamGoldDiff15 INTEGER NULL",
+        "ALTER TABLE Matches ADD COLUMN TeamGoldDiff20 INTEGER NULL",
+        "ALTER TABLE Deaths ADD COLUMN EnemyJunglerNear INTEGER NULL",
     })
     {
         try { db.Database.ExecuteSqlRaw(alter); } catch { /* column already exists */ }
@@ -519,6 +523,11 @@ app.MapGet("/api/lens", async (LensService lens, int window = 20, int? days = nu
 // external benchmark the wins-vs-losses analysis can't provide.
 app.MapGet("/api/challenges/percentiles", async (ChallengesBenchmarkService svc, CancellationToken ct) =>
     await svc.GetAsync(ct) is { } result ? Results.Ok(result) : Results.NoContent());
+
+// The Fundamentals ladder: curriculum skills pinned to rank tiers, each scored
+// by self-percentile and anchored on Riot's own challenge levels where mapped.
+app.MapGet("/api/fundamentals", async (FundamentalsService svc, int window = 20, int? days = null, string? role = null, CancellationToken ct = default) =>
+    await svc.GetAsync(window, days, role, ct) is { } result ? Results.Ok(result) : Results.NoContent());
 
 // The dashboard aggregate: coach-style stats over recent ranked games.
 // lastGames takes precedence over days; neither = whole history.

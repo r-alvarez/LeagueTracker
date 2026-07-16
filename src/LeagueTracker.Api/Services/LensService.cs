@@ -1,4 +1,3 @@
-using System.Text.Json;
 using LeagueTracker.Api.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,10 +9,6 @@ namespace LeagueTracker.Api.Services;
 /// stays the external ladder anchor.
 public sealed class LensService(LeagueDbContext db)
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-
-    private sealed record FightDto(string Kind, string Result, bool Participated, int GoldSwing, bool ConvertedObjective);
-
     private sealed record Spec(string Key, string Label, string Desc, string Category, string? Sub, bool HigherIsBetter, int Decimals, string Unit = "");
 
     private static readonly Spec[] Specs =
@@ -110,7 +105,7 @@ public sealed class LensService(LeagueDbContext db)
                 .ToListAsync(ct))
             .ToDictionary(x => x.MatchId);
 
-        var rows = matches.Select(m => ComputeRow(m,
+        var rows = matches.Select(m => MatchMetricRows.ComputeRow(m,
             deathAgg.TryGetValue(m.Id, out var da) ? da.Collapses : 0,
             deathAgg.TryGetValue(m.Id, out var db2) ? db2.AfterObjective : 0)).ToList();
 
@@ -133,28 +128,11 @@ public sealed class LensService(LeagueDbContext db)
         static string? TopChampion(List<Match> set) => set
             .GroupBy(m => m.Champion).OrderByDescending(g => g.Count()).FirstOrDefault()?.Key;
 
-        static double? Mean(List<Dictionary<string, double>> set, string key)
-        {
-            var vals = set.Where(r => r.ContainsKey(key)).Select(r => r[key]).ToList();
-            return vals is { Count: > 0 } ? vals.Average() : null;
-        }
-
-        double? Percentile(string key, bool higherIsBetter)
-        {
-            var recentMean = Mean(recent, key);
-            if (recentMean is not { } target) return null;
-            var all = rows.Where(r => r.ContainsKey(key)).Select(r => r[key]).ToList();
-            if (all.Count < 5) return null;
-            var below = all.Count(v => v < target) + all.Count(v => v == target) * 0.5;
-            var pct = below / all.Count;
-            return Math.Round(100 * (higherIsBetter ? pct : 1 - pct));
-        }
-
         object Tile(Spec s) => new
         {
             s.Key, s.Label, s.Desc, s.Unit, s.Decimals, s.HigherIsBetter,
-            Value = Mean(recent, s.Key) is { } v ? Math.Round(v, s.Decimals) : (double?)null,
-            Old = hasBaseline && Mean(baseline, s.Key) is { } o ? Math.Round(o, s.Decimals) : (double?)null,
+            Value = MatchMetricRows.Mean(recent, s.Key) is { } v ? Math.Round(v, s.Decimals) : (double?)null,
+            Old = hasBaseline && MatchMetricRows.Mean(baseline, s.Key) is { } o ? Math.Round(o, s.Decimals) : (double?)null,
             // Per-game values across the window, oldest first - feeds the tile
             // sparkline and the trend chart, which is the detail's real payload.
             Series = recent.AsEnumerable().Reverse()
@@ -164,7 +142,7 @@ public sealed class LensService(LeagueDbContext db)
 
         double? ScoreOf(IEnumerable<Spec> specs)
         {
-            var pcts = specs.Select(s => Percentile(s.Key, s.HigherIsBetter)).OfType<double>().ToList();
+            var pcts = specs.Select(s => MatchMetricRows.Percentile(rows, recent, s.Key, s.HigherIsBetter)).OfType<double>().ToList();
             return pcts is { Count: > 0 } ? Math.Round(pcts.Average()) : null;
         }
 
@@ -203,64 +181,5 @@ public sealed class LensService(LeagueDbContext db)
             TopChampionOld = hasBaseline ? TopChampion(baselineMatches) : null,
             Categories = categories,
         };
-    }
-
-    private Dictionary<string, double> ComputeRow(Match m, int collapses, int deathsAfterObjective)
-    {
-        var minutes = Math.Max(1, m.DurationSec / 60.0);
-        var values = new Dictionary<string, double>
-        {
-            ["dpm"] = m.DamageToChampions / minutes,
-            ["soloKills"] = m.SoloKills,
-            ["multiKills"] = m.TripleKills + m.QuadraKills + m.PentaKills,
-            ["deaths"] = m.Deaths,
-            ["followIns"] = m.FollowInDeaths,
-            ["collapses"] = collapses,
-            ["deathsAfterObj"] = deathsAfterObjective,
-            ["timeDeadPct"] = 100.0 * m.TotalTimeSpentDead / Math.Max(1, m.DurationSec),
-            ["longestAlive"] = m.LongestTimeSpentLiving / 60.0,
-            ["visPerMin"] = m.VisionScore / minutes,
-            ["wards"] = m.WardsPlaced,
-            ["controlWards"] = m.ControlWards,
-            ["wardsFirst10"] = m.WardsFirst10,
-            ["wardsKilled"] = m.WardsKilled,
-        };
-
-        void Opt(string key, double? v) { if (v is { } x && !double.IsNaN(x)) values[key] = x; }
-        Opt("cs10", m.CsAt10);
-        Opt("kp", m.KillParticipation is { } kpv ? kpv * 100 : null);
-        Opt("dpmEarly", m.DpmEarly);
-        Opt("dpmMid", m.DpmMid);
-        Opt("dpmLate", m.DpmLate);
-        Opt("dmgTaken", m.DamageTakenPerMin);
-        Opt("ssHit", m.SkillshotsHit);
-        Opt("ssDodged", m.SkillshotsDodged);
-        Opt("g10", m.LaneGoldDiff10);
-        Opt("xp10", m.LaneXpDiff10);
-        Opt("g15", m.LaneGoldDiff15);
-        Opt("firstTo2", m.FirstToLevel2 is { } f2 ? (f2 ? 100 : 0) : null);
-        Opt("lvl6Lead", m.Level6LeadSec);
-        Opt("objPresence", m.FriendlyEpicObjectives > 0 ? 100.0 * m.ObjectivesPresentFor / m.FriendlyEpicObjectives : null);
-
-        if (m.FightsJson is { Length: > 0 })
-        {
-            try
-            {
-                var fights = JsonSerializer.Deserialize<List<FightDto>>(m.FightsJson, Json) ?? [];
-                foreach (var (kind, key) in new[] { ("duel", "duel"), ("skirmish", "skirmish"), ("teamfight", "teamfight") })
-                {
-                    var mine = fights.Where(f => f.Participated && f.Kind == kind).ToList();
-                    values[$"{key}Count"] = mine.Count;
-                    var decisive = mine.Count(f => f.Result is "won" or "lost");
-                    if (decisive > 0) values[$"{key}Winrate"] = 100.0 * mine.Count(f => f.Result == "won") / decisive;
-                    values[$"{key}Gold"] = mine.Sum(f => f.GoldSwing);
-                }
-                var won = fights.Where(f => f.Participated && f.Result == "won").ToList();
-                if (won is { Count: > 0 }) values["fightConversion"] = 100.0 * won.Count(f => f.ConvertedObjective) / won.Count;
-            }
-            catch { /* old rows without fights just skip these metrics */ }
-        }
-
-        return values;
     }
 }
