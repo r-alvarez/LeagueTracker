@@ -27,6 +27,7 @@ export default function ReviewCard({ matchId }: { matchId: string }) {
   const stew = review.stewardship
 
   const whereWord = (w: string) => w === 'dead' ? 'dead' : w === 'elsewhere' ? 'cross-map' : 'right there, uninvolved'
+  const laneNet = lane ? lane.detail.components.reduce((s, c) => s + c.delta, 0) : 0
 
   return (
     <div className="card review-card">
@@ -74,6 +75,12 @@ export default function ReviewCard({ matchId }: { matchId: string }) {
                   {a.where === 'elsewhere' && a.paid ? ' (their split paid)' : ''}
                 </li>
               ))}
+              {lane.detail.components.length > 0 && (
+                <li className="mut">
+                  Verdict math: {lane.detail.components.map(c => `${c.label} ${c.delta > 0 ? '+1' : '−1'}`).join(' · ')}
+                  {' '}→ net {laneNet > 0 ? '+' : ''}{laneNet} (yes at +2, no at −2)
+                </li>
+              )}
             </ul>
           )}
           {!lane && <p className="mut sm-text">No same-role opponent in this game.</p>}
