@@ -441,7 +441,8 @@ export interface LensResponse {
 export type ReviewVerdict = 'yes' | 'mixed' | 'no' | null
 
 export interface ReviewComponent { label: string; delta: number }
-export interface AbsentMoment { timeSec: number; oppInvolvement: number; where: string; myDistance: number | null; paid: boolean }
+/** One consequential absence; where/paid describe the ABSENT laner. */
+export interface LedgerMoment { timeSec: number; kills: number; where: string; distance: number | null; paid: boolean }
 export interface ConcededEpic { kind: string; timeSec: number; myDistance: number; alliesNear: number; paid: boolean }
 
 export interface MatchReview {
@@ -455,9 +456,10 @@ export interface MatchReview {
       lateGold: { min: number; gold: number } | null
       killsOnOpponent: number
       deathsToOpponent: number
-      oppKillsWhileDead: number
-      oppKillsWhileAbsent: number
-      absentMoments: AbsentMoment[]
+      theirCashKills: number
+      myCashKills: number
+      theirCashIns: LedgerMoment[]
+      myCashIns: LedgerMoment[]
       components: ReviewComponent[]
     }
   } | null
@@ -476,9 +478,27 @@ export interface MatchReview {
       concededEpicsAbsent: ConcededEpic[]
     }
   }
+  stewardship: {
+    verdict: ReviewVerdict
+    detail: {
+      startMin: number
+      startGold: number
+      endMin: number
+      endGold: number
+      state: string
+      summary: string
+      teamGold15: number | null
+      teamGold20: number | null
+    }
+  } | null
 }
 
-export type ReviewVerdicts = Record<string, { laneDuel: ReviewVerdict; fights: ReviewVerdict; discipline: ReviewVerdict }>
+export type ReviewVerdicts = Record<string, {
+  laneDuel: ReviewVerdict
+  fights: ReviewVerdict
+  discipline: ReviewVerdict
+  stewardship: ReviewVerdict
+}>
 
 export interface FundamentalArea {
   key: string

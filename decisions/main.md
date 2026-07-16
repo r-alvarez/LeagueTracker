@@ -284,3 +284,13 @@ consts: 300g lane swing, 500g late, 45s respawn window, 4000u "elsewhere",
 60s paid window) - deliberately tunable against real games rather than
 pretending precision. Surfaced as three L/F/D dots per match row and a
 "three questions" card at the top of the match detail, above the scoreboard.
+
+**2026-07-16 addendum — four questions, symmetric ledger.** The lane-duel
+audit was one-sided (only their gains from my absences); it now runs the same
+ledger both ways - my cash-ins while the opponent was dead/away count for me,
+their unpaid absences count against them - so two split-pushers judge equally.
+Opponent fight-participation is inferred from kill involvement or proximity to
+the kill centroid (mirroring the analyzer headcount). Fourth question added:
+lead stewardship - lane gold @10 vs the last checkpoint at 20/25/30, verdict
+by state transition (grew/held/flipped, recovered/reduced/grew), team gold
+15->20 shown as context. Dots are L/F/D/S.
