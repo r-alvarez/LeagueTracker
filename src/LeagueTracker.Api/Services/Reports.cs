@@ -9,9 +9,12 @@ namespace LeagueTracker.Api.Services;
 /// everything-bundle zip. Shapes stay compatible with the PowerShell tooling.
 public static class Reports
 {
-    public static async Task<string> MatchesCsvAsync(LeagueDbContext db, bool hideLp, CancellationToken ct)
+    public static async Task<string> MatchesCsvAsync(LeagueDbContext db, ReviewService reviews, bool hideLp, CancellationToken ct)
     {
         var matches = await db.Matches.AsNoTracking().OrderByDescending(m => m.GameEndUtc).ToListAsync(ct);
+        // The contest fold and the four question verdicts, recomputed the same
+        // way the Matches rows get them; empty when the game has no timeline.
+        var verdicts = await reviews.VerdictStringsAsync(matches.Select(m => m.Id).ToArray(), ct);
         var i = System.Globalization.CultureInfo.InvariantCulture;
         return Csv(
             ["MatchId", "Date", "Ranked", "Remake", "Queue", "QueueId", "GameMode", "DurationMin", "Champion", "Position", "Win",
@@ -24,10 +27,12 @@ public static class Reports
              "TripleKills", "QuadraKills", "PentaKills", "TotalTimeSpentDeadSec", "LongestTimeSpentLivingSec", "TotalTimeCcDealtSec", "FollowInDeaths",
              "AvgUnspentGold", "MaxUnspentGold", "FirstWardSec", "FirstControlWardSec", "WardsFirst10",
              "Level6LeadSec", "Level11LeadSec", "Level16LeadSec", "FriendlyEpicObjectives", "ObjectivesPresentFor",
-             "AvgAllyRank", "AvgEnemyRank", "RankGapLP", "AllyRanksIn", "EnemyRanksIn", "LPChange"],
+             "AvgAllyRank", "AvgEnemyRank", "RankGapLP", "AllyRanksIn", "EnemyRanksIn", "LPChange",
+             "ContestVerdict", "LaneDuelVerdict", "FightsVerdict", "DisciplineVerdict", "StewardshipVerdict"],
             matches.Select(m =>
             {
                 var durMin = Math.Max(1.0, m.DurationSec / 60.0);
+                var v = verdicts.GetValueOrDefault(m.Id);
                 return new[]
                 {
                     m.Id, m.GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), m.IsRanked.ToString(), (m.DurationSec < 300).ToString(),
@@ -56,6 +61,7 @@ public static class Reports
                     !hideLp && m is { AvgAllyRankValue: { } a, AvgEnemyRankValue: { } e } ? Math.Round(e - a).ToString() : "",
                     hideLp ? "" : $"{m.AllyRanksKnown}/5", hideLp ? "" : $"{m.EnemyRanksKnown}/5",
                     hideLp ? "" : m.LpChange?.ToString() ?? "",
+                    v.Contest ?? "", v.Lane ?? "", v.Fights ?? "", v.Discipline ?? "", v.Stewardship ?? "",
                 };
             }));
     }

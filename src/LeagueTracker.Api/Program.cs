@@ -659,8 +659,8 @@ app.MapGet("/api/jobs/status", (JobStatusService jobs) => Results.Ok(jobs.Snapsh
 
 // --- Exports (PowerShell-tooling-compatible CSV shapes + an everything-bundle) --
 
-app.MapGet("/api/export/matches.csv", async (LeagueDbContext db, CancellationToken ct) =>
-    CsvFile("matches-summary.csv", await Reports.MatchesCsvAsync(db, hideLp, ct)));
+app.MapGet("/api/export/matches.csv", async (LeagueDbContext db, ReviewService reviews, CancellationToken ct) =>
+    CsvFile("matches-summary.csv", await Reports.MatchesCsvAsync(db, reviews, hideLp, ct)));
 
 app.MapGet("/api/export/deaths.csv", async (LeagueDbContext db, CancellationToken ct) =>
     CsvFile("deaths.csv", await Reports.DeathsCsvAsync(db, ct)));
@@ -682,7 +682,7 @@ app.MapGet("/api/export/objectives.csv", async (LeagueDbContext db, Cancellation
 
 // Everything in one download: every CSV the screens are built from, plus the
 // dashboard aggregate over all games as machine-readable JSON.
-app.MapGet("/api/export/all.zip", async (LeagueDbContext db, LpService lp, TrackedPlayerService player, CancellationToken ct) =>
+app.MapGet("/api/export/all.zip", async (LeagueDbContext db, ReviewService reviews, LpService lp, TrackedPlayerService player, CancellationToken ct) =>
 {
     var summary = new
     {
@@ -719,7 +719,7 @@ app.MapGet("/api/export/all.zip", async (LeagueDbContext db, LpService lp, Track
             await entry.WriteAsync(Encoding.UTF8.GetBytes(content), ct);
         }
         var jsonOpts = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
-        await AddAsync("matches-summary.csv", await Reports.MatchesCsvAsync(db, hideLp, ct));
+        await AddAsync("matches-summary.csv", await Reports.MatchesCsvAsync(db, reviews, hideLp, ct));
         await AddAsync("challenges.csv", await Reports.ChallengesCsvAsync(db, ct));
         await AddAsync("lane-checkpoints.csv", await Reports.LaneCheckpointsCsvAsync(db, ct));
         await AddAsync("ranks.csv", await Reports.RanksCsvAsync(db, hideLp, ct));
