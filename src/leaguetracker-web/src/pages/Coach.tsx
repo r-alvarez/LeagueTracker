@@ -146,6 +146,8 @@ const WINDOWS = [
   { key: '40g', label: '40', window: 40 },
   { key: '50g', label: '50', window: 50 },
   { key: '100g', label: '100', window: 100 },
+  // The API clamps the window to the stored game count, so this means "all".
+  { key: 'all', label: 'All', window: 100000 },
 ] as const
 
 export default function Coach() {
