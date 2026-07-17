@@ -165,6 +165,18 @@ table.data a { text-decoration: none; color: var(--ink); }
 table.data a:hover { text-decoration: underline; }
 .table-scroll { overflow-x: auto; }
 
+/* Tall tables (champion performance) scroll in place like the item race;
+   the header stays pinned above the scrolling rows. */
+.table-scroll.tall { max-height: 520px; overflow-y: auto; scrollbar-width: thin; }
+.table-scroll.tall table.data th { position: sticky; top: 0; background: var(--surface); z-index: 2; }
+
+/* Sortable headers: the whole cell is the click target, the active column
+   keeps its arrow; the reserved arrow slot stops the label shifting. */
+table.data th.sortable { cursor: pointer; user-select: none; transition: color 100ms; }
+table.data th.sortable:hover { color: var(--ink-2); }
+table.data th.sortable.sorted { color: var(--accent); }
+table.data th .sort-arrow { display: inline-block; width: 12px; text-align: center; }
+
 /* Result-tinted rows: the wash carries the outcome at a glance, the stripe
    anchors it; hover still reads on top of both. */
 tr.row-win td { background: rgba(63, 185, 80, 0.055); }
@@ -265,7 +277,9 @@ table.sb td { padding: 8px 10px; }
    (capped at 38px), so the vs divider and gold delta land on the same x in
    every row and the icons aren't postage stamps on a wide card. */
 .sub-h { font-size: 12px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 18px 0 8px; }
-.item-race { display: flex; flex-direction: column; gap: 6px; }
+/* Long games scroll in place (~9 rows visible) instead of stretching the
+   card; the portaled tooltips are immune to the clipping. */
+.item-race { display: flex; flex-direction: column; gap: 6px; max-height: 560px; overflow-y: auto; scrollbar-width: thin; padding-right: 4px; }
 .item-race-row {
   display: grid; grid-template-columns: 40px minmax(0, 1fr) auto minmax(0, 1fr) 56px;
   align-items: center; gap: 12px;
@@ -540,17 +554,17 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
   .mr-minis .mini-stat:nth-child(n+4), .mr-links { display: none; }
 }
 
-/* In-game-style hover cards for items and runes. */
-.rich-tip { position: relative; display: inline-flex; }
+/* In-game-style hover cards for items and runes. The card is portaled to
+   <body> and fixed-positioned by RichTip, so it never clips inside scrollers
+   or inherits a hovered row's transform. */
+.rich-tip { display: inline-flex; }
 .rich-tip-card {
-  display: none; position: absolute; z-index: 30; bottom: calc(100% + 8px); left: 50%;
-  transform: translateX(-50%); width: max-content; max-width: 280px;
+  display: flex; position: fixed; z-index: 60; width: max-content; max-width: 280px;
   background: #0b0e13; border: 1px solid var(--baseline); border-radius: 10px;
   padding: 10px 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
   flex-direction: column; gap: 4px; font-size: 12px; line-height: 1.45;
   pointer-events: none; white-space: normal;
 }
-.rich-tip:hover .rich-tip-card { display: flex; }
 .tip-title { font-weight: 700; font-size: 13px; color: var(--ink); }
 .tip-gold { color: var(--warn); font-weight: 700; font-size: 12px; }
 .tip-stat { color: var(--tier-diamond); font-weight: 600; white-space: pre-line; }

@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useLoadoutIcons, type UnitKind } from '../champions'
 
 /// Glyphs for non-champion damage sources (turrets, minions, jungle monsters)
@@ -25,14 +26,34 @@ export function UnitGlyph({ kind, size = 28 }: { kind: UnitKind; size?: number }
   )
 }
 
-/// In-game-style hover card: trigger wraps the icon, the card floats above.
-/// Pure CSS positioning - no portal - so keep triggers out of clipped scrollers.
+/// In-game-style hover card. The card portals to <body> with fixed
+/// positioning, so triggers survive clipped scrollers (the item race) and
+/// transformed ancestors (hovered match rows) alike. It flips below the
+/// trigger when the viewport ceiling is too close, and clamps horizontally.
 export function RichTip({ children, tip }: { children: ReactNode; tip: ReactNode | null }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [pos, setPos] = useState<{ x: number; y: number; below: boolean } | null>(null)
   if (tip === null) return <>{children}</>
+
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect()
+    if (!r) return
+    const below = r.top < 240
+    const x = Math.min(Math.max(r.left + r.width / 2, 148), window.innerWidth - 148)
+    setPos({ x, y: below ? r.bottom + 8 : r.top - 8, below })
+  }
+  const hide = () => setPos(null)
+
   return (
-    <span className="rich-tip">
+    <span className="rich-tip" ref={ref} onMouseEnter={show} onMouseLeave={hide} onWheel={hide}>
       {children}
-      <span className="rich-tip-card" role="tooltip">{tip}</span>
+      {pos && createPortal(
+        <span className="rich-tip-card" role="tooltip"
+          style={{ left: pos.x, top: pos.y, transform: `translate(-50%, ${pos.below ? '0' : '-100%'})` }}>
+          {tip}
+        </span>,
+        document.body,
+      )}
     </span>
   )
 }

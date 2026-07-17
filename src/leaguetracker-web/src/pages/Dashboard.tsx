@@ -31,24 +31,45 @@ const signed = (v: number | null | undefined) => (v === null || v === undefined 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 const kdaCls = (v: number) => (v >= 5 ? 'kda-5' : v >= 4 ? 'kda-4' : v >= 3 ? 'kda-3' : v < 1 ? 'kda-low' : '')
 
+type SortKey = 'key' | 'games' | 'winRate' | 'kda' | 'lpTotal' | 'kp' | 'csPerMin' | 'laneGoldAt10' | 'deathsPerGame'
+
 function SplitTable({ title, rows, champIcons, compact, hideLp }: { title: string; rows: SplitRow[]; champIcons?: boolean; compact?: boolean; hideLp?: boolean }) {
   const [open, setOpen] = useState<string | null>(null)
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'games', dir: -1 })
+
+  // Click a header to sort by it; same header again flips the direction.
+  // Rows without a value (LP unknown, no lane opponent) always sink to the end.
+  const sorted = useMemo(() => [...rows].sort((a, b) => {
+    if (sort.key === 'key') return sort.dir * a.key.localeCompare(b.key)
+    const av = a[sort.key], bv = b[sort.key]
+    if (av === null) return bv === null ? 0 : 1
+    if (bv === null) return -1
+    return sort.dir * (av - bv)
+  }), [rows, sort])
+
+  const Th = ({ k, label, num }: { k: SortKey; label: string; num?: boolean }) => (
+    <th className={`sortable ${num ? 'num' : ''} ${sort.key === k ? 'sorted' : ''}`}
+      onClick={() => setSort(s => (s.key === k ? { key: k, dir: -s.dir as 1 | -1 } : { key: k, dir: k === 'key' ? 1 : -1 }))}>
+      {label}<span className="sort-arrow">{sort.key === k ? (sort.dir === -1 ? '▾' : '▴') : ''}</span>
+    </th>
+  )
+
   return (
     <div className="card">
       <h2>{title}{champIcons && <span className="mut" style={{ fontWeight: 400 }}> — click a row for matchups</span>}</h2>
       {rows.length === 0 ? <div className="empty">No games in this window.</div> : (
-        <div className="table-scroll">
+        <div className="table-scroll tall">
           <table className="data">
             <thead>
               <tr>
-                <th>{champIcons ? 'Champion' : 'Role'}</th><th className="num">Games</th><th>WR</th>
-                <th className="num">KDA</th>
-                {!compact && <>{!hideLp && <th className="num">LP</th>}<th className="num">KP</th><th className="num">CS/m</th><th className="num">G@10</th></>}
-                <th className="num">Deaths</th>
+                <Th k="key" label={champIcons ? 'Champion' : 'Role'} /><Th k="games" label="Games" num /><Th k="winRate" label="WR" />
+                <Th k="kda" label="KDA" num />
+                {!compact && <>{!hideLp && <Th k="lpTotal" label="LP" num />}<Th k="kp" label="KP" num /><Th k="csPerMin" label="CS/m" num /><Th k="laneGoldAt10" label="G@10" num /></>}
+                <Th k="deathsPerGame" label="Deaths" num />
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
+              {sorted.map(r => (
                 <Fragment key={r.key}>
                   <tr onClick={() => r.detail && setOpen(open === r.key ? null : r.key)}
                     style={r.detail ? { cursor: 'pointer' } : undefined}>
