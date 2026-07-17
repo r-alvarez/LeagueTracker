@@ -208,7 +208,12 @@ export default function Coach() {
         ))}
       </div>
 
-      {data === undefined && <div className="empty">Crunching your games…</div>}
+      {data === undefined && (
+        <div className="skeleton-stack">
+          <div className="shimmer" style={{ height: 44 }} />
+          <div className="shimmer" style={{ height: 380 }} />
+        </div>
+      )}
       {data === null && <div className="empty">Not enough ranked games {role ? `as ${ROLE_FILTERS.find(r => r.key === role)?.label}` : ''} for coaching stats (need 8+).</div>}
 
       {data && tab === 'overview' && (
