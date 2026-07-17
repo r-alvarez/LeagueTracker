@@ -242,9 +242,9 @@ export default function Dashboard() {
           {stats.observations.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
               <h2>Key observations</h2>
-              <ul style={{ margin: '4px 0', paddingLeft: 18 }}>
-                {stats.observations.map(obs => <li key={obs} style={{ margin: '4px 0' }}>{obs}</li>)}
-              </ul>
+              <div className="obs-grid">
+                {stats.observations.map(obs => <div key={obs} className="obs-item">{obs}</div>)}
+              </div>
             </div>
           )}
 

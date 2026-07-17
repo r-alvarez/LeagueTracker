@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import type { ChallengeBenchmark, ChallengeRow } from '../types'
+import { tierClass } from './Stats'
 
 // Iron → Challenger, mapped to the LP rank colours so a level reads at a glance.
 const LEVEL_COLOR: Record<string, string> = {
@@ -12,6 +13,9 @@ const LEVEL_COLOR: Record<string, string> = {
 // Shares are 0–1 fractions of the playerbase at-or-above a level; readable as "top X%".
 const pct = (share: number) => (share < 0.01 ? '<1%' : `${Math.round(share * 100)}%`)
 
+/// Fixed columns (name | level chip | bar | value) so every bar starts at the
+/// same x regardless of how long the challenge name is - names ellipsize, the
+/// full context lives in the tooltip.
 function Row({ c }: { c: ChallengeRow }) {
   // Riot's percentile is 0–1 with higher = better standing; render as "top X%".
   const topPct = c.percentile !== null ? Math.max(1, Math.round((1 - c.percentile) * 100)) : null
@@ -20,21 +24,16 @@ function Row({ c }: { c: ChallengeRow }) {
     c.nextLevel !== null && c.nextLevelShare !== null ? `next: ${c.nextLevel} = top ${pct(c.nextLevelShare)}` : null,
   ].filter(Boolean).join(' · ')
   return (
-    <div className="profile-row" title={context ? `${c.description}\n${context}` : c.description}>
-      <span className="profile-label">
-        {c.name}
-        <span className="cat-chip" style={{ color: LEVEL_COLOR[c.level] ?? 'var(--muted)' }}>
-          {c.level}
-          {c.levelShare !== null && <span className="mut sm-text"> · top {pct(c.levelShare)}</span>}
-        </span>
-      </span>
-      <span className="profile-bar">
+    <div className="lad-row" title={context ? `${c.name}\n${c.description}\n${context}` : `${c.name}\n${c.description}`}>
+      <span className="lad-name">{c.name}</span>
+      <span className={`rank-chip lad-chip ${tierClass(c.level)}`}>{c.level}</span>
+      <span className="lad-bar">
         <span className="fill" style={{
-          left: 0, width: `${c.percentile !== null ? Math.round(c.percentile * 100) : 0}%`,
+          width: `${c.percentile !== null ? Math.round(c.percentile * 100) : 0}%`,
           background: LEVEL_COLOR[c.level] ?? 'var(--muted)',
         }} />
       </span>
-      <span className="profile-vals mut">{topPct !== null ? `top ${topPct}%` : '—'}</span>
+      <span className="lad-val mut">{topPct !== null ? `top ${topPct}%` : '—'}</span>
     </div>
   )
 }
