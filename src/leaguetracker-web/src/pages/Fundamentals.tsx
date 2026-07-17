@@ -252,7 +252,12 @@ export default function Fundamentals() {
         )}
       </div>
 
-      {data === undefined && <div className="empty">Placing your fundamentals on the ladder…</div>}
+      {data === undefined && (
+        <div className="skeleton-stack">
+          <div className="shimmer" style={{ height: 420 }} />
+          <div className="shimmer" style={{ height: 220 }} />
+        </div>
+      )}
       {data === null && <div className="empty">Not enough ranked games {role ? `as ${ROLE_FILTERS.find(r => r.key === role)?.label}` : ''} for the fundamentals ladder (need 8+).</div>}
 
       {data && (
