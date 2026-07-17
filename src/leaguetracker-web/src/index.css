@@ -290,6 +290,9 @@ table.sb td { padding: 8px 10px; }
 .item-race-row .slots { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 .item-race-row .slots .rich-tip { display: flex; min-width: 0; }
 .item-race-row .slot { width: 100%; height: auto; max-width: 38px; aspect-ratio: 1 / 1; border-radius: 6px; }
+/* Unfilled slots keep their grid cell (columns stay aligned) but draw no box -
+   a row of empty frames reads as bulk, not rhythm, at this size. */
+.item-race-row .slot:empty { background: transparent; border-color: transparent; }
 .slot.dim { opacity: 0.75; }
 
 /* Build order: uniform minute tiles on a grid - the sequence reads
