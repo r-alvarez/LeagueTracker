@@ -1,17 +1,36 @@
-/* League Coach dark theme, carried over. Chart marks use --series-1/--lp-loss,
-   validated (CVD + contrast) against the panel surface with the dataviz checks;
+/* Slate-blue dark theme, v2: layered translucent surfaces and a 4-tier text
+   hierarchy (SamoSaaS-inspired structure, our own hue). Chart marks keep the
+   validated --series-1..5/--lp-loss palette (CVD + contrast, dataviz checks);
    the lighter --accent is UI chrome only, never a chart mark. */
 :root {
-  --page: #0e1116;
-  --surface: #161b22;
-  --panel-2: #1c2230;
-  --ink: #e6edf3;
-  --ink-2: #aeb9c7;
-  --muted: #8b97a7;
-  --grid: #232a38;
-  --baseline: #2a3140;
-  --border: #2a3140;
+  /* Surfaces, darkest to lightest. --surface/--panel-2 keep their historical
+     names - every component references them - but cards are now translucent
+     gradients layered over the page glow rather than flat fills. */
+  --page: #0b0e15;
+  --surface: #141926;
+  --panel-2: #1b2233;
+  --surface-card: linear-gradient(180deg, rgba(24, 30, 46, 0.72) 0%, rgba(17, 22, 34, 0.66) 100%);
+  --surface-inset: linear-gradient(135deg, #171d2c, #121722 65%);
+  --overlay-hover: rgba(148, 170, 210, 0.07);
+  --overlay-track: rgba(120, 140, 180, 0.14);
+
+  /* Text hierarchy: primary / secondary / muted / faint. */
+  --ink: #edf1f8;
+  --ink-2: #b4bfd1;
+  --muted: #8792a5;
+  --ink-4: #5d6678;
+
+  --grid: #222a3b;
+  --baseline: #2a3245;
+  --border: rgba(148, 166, 205, 0.14);
+  --border-strong: rgba(160, 180, 220, 0.24);
+
+  /* One accent, one signature gradient (both ends are validated chart hues,
+     but the gradient itself is chrome - bar fills and brand, never a mark). */
   --accent: #4f9cf9;
+  --accent-soft: rgba(79, 156, 249, 0.12);
+  --grad: linear-gradient(90deg, #3d8ef3, #a371f7);
+
   --series-1: #3d8ef3;
   --chart-green: #2ea043;
   --lp-gain: #3d8ef3;
@@ -19,6 +38,10 @@
   --delta-good: #3fb950;
   --delta-bad: #f0556a;
   --warn: #e3b341;
+
+  --radius-card: 14px;
+  --radius-pill: 999px;
+  --shadow-pop: 0 14px 40px -10px rgba(0, 0, 0, 0.65), 0 2px 10px rgba(0, 0, 0, 0.4);
   color-scheme: dark;
 }
 
@@ -27,61 +50,102 @@
 body {
   margin: 0;
   color: var(--ink);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 14px;
   line-height: 1.45;
-  /* A faint blue glow at the top gives the flat dark page some depth without
-     competing with the data. */
+  -webkit-font-smoothing: antialiased;
+  /* Two faint radial glows (cool left, warm right) give the dark page depth
+     without competing with the data. */
   background:
-    radial-gradient(90rem 22rem at 50% -8rem, rgba(79, 156, 249, 0.07), transparent 70%),
+    radial-gradient(75rem 26rem at 12% -8rem, rgba(61, 142, 243, 0.08), transparent 62%),
+    radial-gradient(60rem 22rem at 95% -6rem, rgba(163, 113, 247, 0.05), transparent 60%),
     var(--page);
   background-attachment: fixed;
   min-height: 100vh;
 }
 
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* Loading shimmer: same footprint as the content it stands in for. */
+.shimmer { position: relative; overflow: hidden; background: var(--panel-2); border-radius: 10px; }
+.shimmer::after {
+  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
+  animation: shimmer-slide 1.5s infinite;
+}
+@keyframes shimmer-slide { to { transform: translateX(100%); } }
+
 a { color: inherit; }
 
 .shell { max-width: 1460px; margin: 0 auto; padding: 0 24px 48px; }
 
-.topbar { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding: 18px 0 4px; }
-.topbar h1 { font-size: 21px; font-weight: 700; margin: 0; }
-.topbar .player { color: var(--accent); font-weight: 600; }
-.topbar .sub { color: var(--muted); font-size: 13px; }
-
-nav.tabs { display: flex; gap: 4px; margin: 10px 0 22px; border-bottom: 1px solid var(--border); }
-nav.tabs a {
-  color: var(--muted); text-decoration: none; padding: 9px 14px; font-weight: 600;
-  border-bottom: 2px solid transparent;
+.topbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 18px 0 4px; }
+.topbar h1 {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 19px; font-weight: 750; letter-spacing: -0.02em; margin: 0;
 }
-nav.tabs a:hover { color: var(--ink); }
-nav.tabs a.active { color: var(--ink); border-bottom-color: var(--accent); }
+/* The brand mark: the one place the signature gradient shows at full strength. */
+.topbar h1::before {
+  content: 'LT'; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 8px;
+  background: var(--grad); color: #fff; font-size: 12.5px; font-weight: 800; letter-spacing: 0;
+}
+.topbar .player {
+  color: var(--accent); font-weight: 650; font-size: 13px;
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: var(--radius-pill); padding: 3px 11px;
+}
+.topbar .sub { color: var(--muted); font-size: 12.5px; }
+
+nav.tabs { display: flex; gap: 4px; margin: 12px 0 22px; }
+nav.tabs a {
+  color: var(--muted); text-decoration: none; padding: 7px 14px; font-weight: 600; font-size: 13.5px;
+  border-radius: var(--radius-pill); border: 1px solid transparent;
+  transition: background 120ms, color 120ms;
+}
+nav.tabs a:hover { color: var(--ink); background: var(--overlay-hover); }
+nav.tabs a.active {
+  color: var(--ink); background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
 
 .card {
-  background: var(--surface);
+  background: var(--surface-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   padding: 18px 20px;
   transition: border-color 0.15s ease;
 }
-.card:hover { border-color: color-mix(in srgb, var(--muted) 40%, var(--border)); }
-.card h2 { font-size: 15px; font-weight: 650; margin: 0 0 14px; }
+.card:hover { border-color: var(--border-strong); }
+.card h2 { font-size: 13.5px; font-weight: 650; letter-spacing: 0.01em; color: var(--ink); margin: 0 0 14px; }
+.card h2 .mut { font-weight: 450; }
 
 .grid { display: grid; gap: 16px; }
 .tiles { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .two-col { grid-template-columns: 3fr 2fr; }
 @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
 
-.tile .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
-.tile .value { font-size: 24px; font-weight: 700; margin-top: 3px; }
-.tile .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+/* Stat tile: eyebrow label, hero-weight number (proportional figures at
+   display size), muted context line - baseline rhythm from the dataviz spec. */
+.tile .label { color: var(--muted); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+.tile .value { font-size: 27px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.15; margin-top: 5px; }
+.tile .sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
 
 .filters { display: flex; gap: 8px; align-items: center; margin: 0 0 14px; flex-wrap: wrap; }
-.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel-2); }
-.seg button {
-  border: 0; background: transparent; color: var(--muted);
-  padding: 5px 14px; font: inherit; font-weight: 600; cursor: pointer;
+.seg {
+  display: inline-flex; gap: 2px; padding: 3px;
+  border: 1px solid var(--border); border-radius: 10px; background: rgba(13, 17, 26, 0.55);
 }
-.seg button.on { background: var(--surface); color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
+.seg button {
+  border: 0; background: transparent; color: var(--muted); border-radius: 7px;
+  padding: 4px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+.seg button:hover { color: var(--ink); background: var(--overlay-hover); }
+.seg button.on { background: var(--panel-2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--border-strong); }
 
 table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.data th {
@@ -245,9 +309,15 @@ tr.drill table.data td, tr.drill table.data th { background: transparent; }
 .profile-row:last-child { border-bottom: 0; }
 .profile-label { display: flex; align-items: center; gap: 8px; }
 .cat-chip { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; }
-.profile-bar { position: relative; height: 14px; }
-.profile-bar .axis { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--baseline); }
-.profile-bar .fill { position: absolute; top: 2px; height: 10px; border-radius: 3px; }
+/* Diverging separation bar: thin pill fills over a soft full-width track,
+   the center axis marking "no separation". */
+.profile-bar { position: relative; height: 12px; }
+.profile-bar::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 3px; height: 6px;
+  background: var(--overlay-track); border-radius: var(--radius-pill);
+}
+.profile-bar .axis { position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px; background: var(--baseline); }
+.profile-bar .fill { position: absolute; top: 3px; height: 6px; border-radius: var(--radius-pill); transition: width 400ms ease; }
 .profile-bar .fill.good { background: var(--chart-green); }
 .profile-bar .fill.bad { background: var(--lp-loss); }
 .profile-vals { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
@@ -296,16 +366,19 @@ tr.drill table.data td, tr.drill table.data th { background: transparent; }
 
 button.action {
   border: 1px solid var(--border); background: var(--panel-2); color: var(--ink);
-  border-radius: 8px; padding: 7px 14px; font: inherit; font-weight: 700; cursor: pointer;
+  border-radius: 9px; padding: 6px 14px; font: inherit; font-weight: 650; cursor: pointer;
+  transition: background 120ms, border-color 120ms, color 120ms;
 }
-button.action:hover { border-color: var(--muted); }
+button.action:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); background: var(--accent-soft); }
 button.action:disabled { opacity: 0.5; cursor: default; }
+button.action:disabled:hover { border-color: var(--border); background: var(--panel-2); }
 button.action.primary, a.action.primary { background: var(--accent); color: #06203f; border-color: var(--accent); }
 a.action {
   display: inline-block; border: 1px solid var(--border); background: var(--panel-2); color: var(--ink);
-  border-radius: 8px; padding: 7px 14px; font-weight: 700; text-decoration: none;
+  border-radius: 9px; padding: 6px 14px; font-weight: 650; text-decoration: none;
+  transition: background 120ms, border-color 120ms;
 }
-a.action:hover { border-color: var(--muted); }
+a.action:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); background: var(--accent-soft); }
 
 input.text {
   border: 1px solid var(--border); background: var(--panel-2); color: var(--ink);
