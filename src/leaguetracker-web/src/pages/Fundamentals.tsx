@@ -11,15 +11,18 @@ const TIER_LABEL: Record<string, string> = {
   IRON: 'Iron', BRONZE: 'Bronze', SILVER: 'Silver', GOLD: 'Gold',
   PLATINUM: 'Platinum', EMERALD: 'Emerald', DIAMOND: 'Diamond',
 }
-// Horizontal placement of each skill box on its row, echoing the source chart.
-const AREA_LEFT: Record<string, string> = {
-  macro: '6%', info: '62%',
-  matchup: '28%', wincon: '54%',
-  trading: '14%', teamfight: '66%',
-  jungletrack: '22%', warding: '46%',
+// Horizontal placement of each skill box as a fraction of the LANE (the area
+// right of the 120px tier-label gutter), echoing the source chart's stagger.
+const AREA_LEFT: Record<string, number> = {
+  macro: 0.04, info: 0.62,
+  matchup: 0.28, wincon: 0.54,
+  trading: 0.12, teamfight: 0.68,
+  jungletrack: 0.22, warding: 0.48,
 }
+/** left offset aligned to the same gutter the row/rank/goal lines use. */
+const laneLeft = (key: string) => `calc(120px + ${AREA_LEFT[key]} * (100% - 128px))`
 
-const BAND_H = 96
+const BAND_H = 116
 
 // Climb goals the boxes are judged against (chips, not rows, are the judgment).
 const TARGETS = ['SILVER', 'GOLD', 'PLATINUM', 'EMERALD', 'DIAMOND']
@@ -276,7 +279,7 @@ export default function Fundamentals() {
                     <button
                       key={a.key}
                       className={`fund-box ${areaStatus(a, target)} ${a.key === selectedArea?.key ? 'on' : ''}`}
-                      style={{ left: AREA_LEFT[a.key] }}
+                      style={{ left: laneLeft(a.key) }}
                       onClick={() => setAreaKey(a.key)}
                       title={a.desc}
                     >
