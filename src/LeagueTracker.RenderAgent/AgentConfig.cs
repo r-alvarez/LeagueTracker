@@ -22,6 +22,12 @@ public sealed class AgentConfig
     /// reliably (and politely) when nobody is using the PC.
     public int IdleSeconds { get; set; } = 120;
 
+    /// Cloudflare Access service token (Zero Trust > Access > Service Auth) -
+    /// lets the agent through the Access wall the trackers sit behind. Blank =
+    /// no Access in front (dev against localhost).
+    public string CfAccessClientId { get; set; } = "";
+    public string CfAccessClientSecret { get; set; } = "";
+
     /// appsettings.json next to the exe, then LT_* environment variables on top.
     public static AgentConfig Load()
     {
@@ -42,6 +48,8 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_LEAGUE_PATH") is { Length: > 0 } league) config.LeaguePath = league;
         if (Environment.GetEnvironmentVariable("LT_FFMPEG_PATH") is { Length: > 0 } ffmpeg) config.FfmpegPath = ffmpeg;
         if (Environment.GetEnvironmentVariable("LT_MAX_WINDOWS") is { Length: > 0 } max && int.TryParse(max, out var m)) config.MaxWindowsPerJob = m;
+        if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_ID") is { Length: > 0 } cfId) config.CfAccessClientId = cfId;
+        if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_SECRET") is { Length: > 0 } cfSecret) config.CfAccessClientSecret = cfSecret;
 
         if (config.AgentName is not { Length: > 0 }) config.AgentName = Environment.MachineName;
         return config;

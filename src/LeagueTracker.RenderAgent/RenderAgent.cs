@@ -8,7 +8,8 @@ public sealed class RenderAgent(AgentConfig config)
     private const string GameProcessName = "League of Legends";
 
     private readonly List<TrackerClient> _trackers =
-        [.. config.ServerUrls.Select(url => new TrackerClient(url, config.AgentName))];
+        [.. config.ServerUrls.Select(url => new TrackerClient(url, config))];
+    private readonly HashSet<string> _reportedClaimFailures = [];
     private readonly string _workDir = Path.Combine(Path.GetTempPath(), "leaguetracker-agent");
 
     private string _gameDir = "";
@@ -145,10 +146,22 @@ public sealed class RenderAgent(AgentConfig config)
             try
             {
                 job = await tracker.ClaimNextAsync(ct);
+                _reportedClaimFailures.Remove(tracker.ServerUrl);
             }
-            catch
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                continue;   // tracker down; try the next one
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Down or misbehaving tracker - try the next one, but say so:
+                // a swallowed claim failure looks exactly like an empty queue.
+                // Warned once per outage, or every poll would repeat it.
+                if (_reportedClaimFailures.Add(tracker.ServerUrl))
+                {
+                    Log.Warn($"Claiming from {tracker.ServerUrl} failed: {ex.Message} (not repeated until it recovers)");
+                }
+                continue;
             }
             if (job is not null) return await ProcessJobAsync(tracker, job, ct);
         }
