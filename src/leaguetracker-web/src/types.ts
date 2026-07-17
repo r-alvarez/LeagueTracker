@@ -41,6 +41,7 @@ export interface MatchSummary {
   queueName: string
   isRanked: boolean
   gameMode: string
+  patch: string
   date: string
   gameEndUtc: string
   durationMin: number
@@ -90,6 +91,22 @@ export interface MatchSummary {
 export interface MatchPage {
   total: number
   items: MatchSummary[]
+}
+
+export interface ChampionFacet { name: string; count: number }
+
+export interface MatchFacets {
+  champions: ChampionFacet[]
+  opponents: ChampionFacet[]
+  patches: string[]
+}
+
+export interface MatchFilters {
+  queue?: string
+  role?: string
+  champion?: string
+  opponent?: string
+  patch?: string
 }
 
 export interface Participant {
