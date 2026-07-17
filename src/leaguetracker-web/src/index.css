@@ -148,15 +148,19 @@ nav.tabs a.active {
 .seg button:hover { color: var(--ink); background: var(--overlay-hover); }
 .seg button.on { background: var(--panel-2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--border-strong); }
 
+/* Tables speak the match-row vocabulary: eyebrow headers like .mini-stat .k,
+   translucent separators that sit on the layered cards, quiet hover wash. */
 table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.data th {
-  text-align: left; font-weight: 600; font-size: 12px; color: var(--muted);
-  padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap;
-  position: sticky; top: 0; background: var(--surface); z-index: 2;
+  text-align: left; font-weight: 700; font-size: 10.5px; color: var(--ink-4);
+  text-transform: uppercase; letter-spacing: 0.07em;
+  padding: 6px 12px 8px; border-bottom: 1px solid var(--border); white-space: nowrap;
 }
-table.data td { padding: 10px 12px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+table.data td { padding: 9px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.data tbody tr:last-child td { border-bottom: 0; }
 table.data td.num, table.data th.num { text-align: right; font-variant-numeric: tabular-nums; }
-table.data tbody tr:hover td { background: var(--panel-2); }
+table.data td.num { font-weight: 600; }
+table.data tbody tr:hover td { background: var(--overlay-hover); }
 table.data a { text-decoration: none; color: var(--ink); }
 table.data a:hover { text-decoration: underline; }
 .table-scroll { overflow-x: auto; }
@@ -190,7 +194,7 @@ table.data tbody tr.row-loss:hover td { background: rgba(240, 85, 106, 0.11); }
   background: var(--panel-2); border: 1px solid var(--border); white-space: nowrap;
 }
 .obj-chip.zero { opacity: 0.45; }
-table.sb td { border-bottom-color: var(--grid); padding: 8px 10px; }
+table.sb td { padding: 8px 10px; }
 .sb-player { display: inline-flex; align-items: center; gap: 10px; }
 .sb-name { display: inline-flex; flex-direction: column; line-height: 1.25; }
 .sb-name > span:first-child { font-weight: 600; }
@@ -244,21 +248,24 @@ table.sb td { border-bottom-color: var(--grid); padding: 8px 10px; }
 .vs-jgl { display: inline-flex; align-items: center; gap: 2px; }
 .vs-jgl .role-icon { opacity: 0.6; }
 
-/* Laning item race: my inventory vs the lane opponent's per checkpoint */
+/* Laning item race: my inventory vs the lane opponent's per checkpoint.
+   Both sides render a fixed 7-slot rail (6 items + trinket), so the vs divider
+   and the gold delta land on the same x in every row. */
 .sub-h { font-size: 12px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 18px 0 8px; }
 .item-race { display: flex; flex-direction: column; gap: 6px; }
 .item-race-row {
-  display: flex; align-items: center; gap: 10px;
-  background: var(--panel-2); border: 1px solid var(--grid); border-radius: 8px; padding: 6px 10px;
+  display: flex; align-items: center; gap: 12px;
+  background: var(--surface-inset); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
 }
-.item-race-min { width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+.item-race-min { width: 34px; text-align: right; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.item-race-gold { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
 .slot.dim { opacity: 0.75; }
 
 /* Build order: each minute is a pill, arrows carry the sequence. */
 .build-order { gap: 6px; align-items: center; }
 .build-group {
   flex-direction: row; align-items: center; gap: 8px;
-  background: var(--panel-2); border: 1px solid var(--grid); border-radius: 8px; padding: 6px 10px;
+  background: var(--surface-inset); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
 }
 .build-group .mut.sm-text { white-space: nowrap; }
 .build-group + .build-group::before { content: none; }
@@ -270,10 +277,12 @@ table.sb td { border-bottom-color: var(--grid); padding: 8px 10px; }
 .obj-chip.win { color: var(--delta-good); border-color: rgba(63, 185, 80, 0.35); }
 .obj-chip.loss { color: var(--lp-loss); border-color: rgba(240, 85, 106, 0.35); }
 
-/* Runes tab */
-.rune-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+/* Runes tab: a team is always five, so five equal columns own the full card
+   width - no orphan track on the right. Narrow screens fall back to wrapping. */
+.rune-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 1150px) { .rune-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); } }
 .rune-page {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface-inset); border: 1px solid var(--border); border-radius: 12px;
   padding: 14px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
 }
 .rune-champ { display: flex; align-items: center; gap: 8px; }
@@ -591,7 +600,7 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .mr-meta { min-width: 0; }
 .mr-meta .sub { overflow: hidden; text-overflow: ellipsis; }
 .mr-duel { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; }
-.mr-duel .vs-badge { font-size: 10px; font-weight: 800; color: var(--muted); text-transform: uppercase; }
+.vs-badge { font-size: 10px; font-weight: 800; color: var(--muted); text-transform: uppercase; }
 .mr-portrait.sm img, .mr-portrait.sm .champ-mono { width: 34px; height: 34px; border-radius: 8px; opacity: 0.9; }
 
 /* dpm-style compact loadout inside rows: the two summoner spells stack in a

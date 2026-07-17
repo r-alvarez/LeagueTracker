@@ -335,17 +335,19 @@ function DetailsTab({ detail }: { detail: Detail }) {
               </div>
               <div className="sub-h">Item race</div>
               <div className="item-race">
+                {/* An inventory is at most 6 items + trinket; padding both sides
+                    to a fixed 7 slots keeps every row's rails aligned. */}
                 {l.checkpoints.map(c => (
                   <div key={c.min} className="item-race-row">
                     <span className={`sm-text item-race-min ${c.gold >= 0 ? 'win' : 'loss'}`}>{c.min}:00</span>
                     <span className="slots">
-                      {c.myItems.map((id, i) => <ItemIcon key={i} id={id} />)}
+                      {Array.from({ length: 7 }, (_, i) => <ItemIcon key={i} id={c.myItems[i] ?? 0} />)}
                     </span>
-                    <span className="mut sm-text">vs</span>
+                    <span className="vs-badge">vs</span>
                     <span className="slots">
-                      {c.oppItems.map((id, i) => <ItemIcon key={i} id={id} dim />)}
+                      {Array.from({ length: 7 }, (_, i) => <ItemIcon key={i} id={c.oppItems[i] ?? 0} dim />)}
                     </span>
-                    <span className={`sm-text ${c.gold >= 0 ? 'win' : 'loss'}`} style={{ marginLeft: 'auto' }}>{signed(c.gold)}g</span>
+                    <span className={`sm-text item-race-gold ${c.gold >= 0 ? 'win' : 'loss'}`}>{signed(c.gold)}g</span>
                   </div>
                 ))}
               </div>
@@ -525,7 +527,11 @@ export default function MatchDetail() {
   const { id } = useParams()
   const [detail, setDetail] = useState<Detail | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<Tab>('general')
+  // ?tab=runes deep-links a specific tab (bookmarks, shared links).
+  const [tab, setTab] = useState<Tab>(() => {
+    const t = new URLSearchParams(window.location.search).get('tab')
+    return t === 'details' || t === 'runes' || t === 'timeline' ? t : 'general'
+  })
   const [clips, setClips] = useState<ClipInfo[]>([])
   const [fullGame, setFullGame] = useState<FullGameStatus | null>(null)
   const [recapAt, setRecapAt] = useState<number | null>(null)
