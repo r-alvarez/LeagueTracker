@@ -148,11 +148,28 @@ app.MapGet("/api/live", (LiveGameState live) =>
 
 // --- Matches --------------------------------------------------------------------
 
-app.MapGet("/api/matches", async (LeagueDbContext db, ReplayArchiveService replays, int page = 1, int pageSize = 20, bool? ranked = null, string? champion = null, CancellationToken ct = default) =>
+app.MapGet("/api/matches", async (LeagueDbContext db, ReplayArchiveService replays, int page = 1, int pageSize = 20, bool? ranked = null,
+    string? champion = null, string? opponent = null, string? role = null, string? queue = null, string? patch = null, CancellationToken ct = default) =>
 {
     var query = db.Matches.AsNoTracking();
     if (ranked is not null) query = query.Where(m => m.IsRanked == ranked);
-    if (champion is not null) query = query.Where(m => m.Champion == champion);
+    if (champion is { Length: > 0 }) query = query.Where(m => m.Champion == champion);
+    if (opponent is { Length: > 0 }) query = query.Where(m => m.OpponentChampion == opponent);
+    if (role is { Length: > 0 })
+    {
+        var normalized = role.ToUpperInvariant();
+        query = query.Where(m => m.Position == normalized);
+    }
+    query = queue?.ToLowerInvariant() switch
+    {
+        "solo" => query.Where(m => m.QueueId == 420),
+        "flex" => query.Where(m => m.QueueId == 440),
+        "normal" => query.Where(m => m.QueueId == 400 || m.QueueId == 430 || m.QueueId == 490),
+        "aram" => query.Where(m => m.QueueId == 450),
+        _ => query,
+    };
+    // Patches are major.minor; GameVersion carries the full build number.
+    if (patch is { Length: > 0 }) query = query.Where(m => m.GameVersion.StartsWith(patch + "."));
 
     var total = await query.CountAsync(ct);
     var items = await query
@@ -195,6 +212,29 @@ app.MapGet("/api/matches", async (LeagueDbContext db, ReplayArchiveService repla
                 companionRole: role,
                 hideLp: hideLp);
         }),
+    });
+});
+
+// Filter options for the match list: every champion/opponent with game counts,
+// plus the patches - so the pickers only ever offer values that exist.
+app.MapGet("/api/matches/facets", async (LeagueDbContext db, CancellationToken ct) =>
+{
+    var champions = await db.Matches.AsNoTracking()
+        .GroupBy(m => m.Champion)
+        .Select(g => new { Name = g.Key, Count = g.Count() })
+        .OrderByDescending(x => x.Count).ThenBy(x => x.Name)
+        .ToListAsync(ct);
+    var opponents = await db.Matches.AsNoTracking()
+        .Where(m => m.OpponentChampion != null && m.OpponentChampion != "")
+        .GroupBy(m => m.OpponentChampion!)
+        .Select(g => new { Name = g.Key, Count = g.Count() })
+        .OrderByDescending(x => x.Count).ThenBy(x => x.Name)
+        .ToListAsync(ct);
+    return Results.Ok(new
+    {
+        Champions = champions,
+        Opponents = opponents,
+        Patches = await Reports.PatchesAsync(db, ct),
     });
 });
 
@@ -746,6 +786,7 @@ static object MatchListItem(Match m, string? items = null, int? summoner1Id = nu
     EnemyCompanion = enemyCompanion,
     CompanionRole = companionRole,
     m.Id, m.QueueId, m.QueueName, m.IsRanked, m.GameMode,
+    Patch = string.Join('.', m.GameVersion.Split('.').Take(2)),
     Date = m.GameCreationUtc, m.GameEndUtc,
     DurationMin = Math.Round(m.DurationSec / 60, 1),
     m.Champion, m.Position, m.Win, m.Kills, m.Deaths, m.Assists,

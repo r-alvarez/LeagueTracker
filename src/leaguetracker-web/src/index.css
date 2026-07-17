@@ -901,6 +901,64 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 @media (max-width: 900px) { .review-grid { grid-template-columns: 1fr; } }
 
 /* ============================================================================
+   Match-list filters (dpm-style) and day/session group headers.
+   ========================================================================== */
+.patch-select {
+  background: var(--panel-2); color: var(--ink); border: 1px solid var(--border);
+  border-radius: 8px; padding: 5px 10px; font: inherit; font-weight: 600; cursor: pointer;
+}
+.patch-select:focus { outline: none; border-color: var(--accent); }
+
+.cp-duo { display: inline-flex; align-items: center; gap: 6px; }
+.champ-picker { position: relative; display: inline-flex; align-items: center; }
+.cp-face {
+  width: 32px; height: 32px; border-radius: 8px; overflow: hidden; padding: 0;
+  background: var(--panel-2); border: 1px dashed var(--border); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; color: var(--muted);
+}
+.cp-face.set { border-style: solid; border-color: var(--accent); }
+.cp-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-q { font-size: 13px; font-weight: 700; }
+.cp-q.sm { font-size: 11px; width: 22px; text-align: center; }
+.cp-clear {
+  position: absolute; top: -6px; right: -6px; width: 15px; height: 15px; padding: 0;
+  border-radius: 50%; background: var(--lp-loss); color: var(--page); border: 0;
+  font-size: 11px; font-weight: 800; line-height: 1; cursor: pointer; z-index: 2;
+}
+.cp-drop {
+  position: absolute; top: 38px; left: 0; z-index: 30; width: 210px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); padding: 8px;
+}
+.cp-drop input {
+  width: 100%; box-sizing: border-box; margin-bottom: 6px;
+  background: var(--panel-2); color: var(--ink); border: 1px solid var(--border);
+  border-radius: 7px; padding: 6px 9px; font: inherit;
+}
+.cp-drop input:focus { outline: none; border-color: var(--accent); }
+.cp-list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; }
+.cp-list button {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  background: transparent; border: 0; color: var(--ink); font: inherit; font-weight: 600;
+  padding: 5px 6px; border-radius: 7px; cursor: pointer;
+}
+.cp-list button:hover { background: var(--panel-2); }
+.cp-list img { width: 24px; height: 24px; border-radius: 6px; }
+.cp-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-none { display: block; padding: 6px; }
+
+.day-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 4px 2px 2px; margin-top: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.day-head:first-child { margin-top: 0; }
+.dh-label { font-weight: 750; font-size: 13.5px; letter-spacing: 0.02em; }
+.dh-chips { display: inline-flex; gap: 6px; }
+.dh-chips .obj-chip.win { color: var(--chart-green); }
+.dh-chips .obj-chip.loss { color: var(--lp-loss); }
+
+/* ============================================================================
    Mobile layer. Wide strips (tab bar, segmented controls, tables) scroll
    inside their own box instead of stretching the page; the match rows and
    multi-column grids restack. Keep these rules last - several override

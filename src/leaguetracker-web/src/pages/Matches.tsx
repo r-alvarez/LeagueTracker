@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import type { MatchSummary, ReviewVerdicts } from '../types'
+import type { MatchFacets, MatchSummary, ReviewVerdicts } from '../types'
 import { CONTEST_SHORT, contestSide } from '../contest'
 import { useChampionIcons } from '../champions'
+import ChampPicker from '../components/ChampPicker'
 import Loadout from '../components/Loadout'
 import ReviewDots from '../components/ReviewDots'
 import RoleIcon from '../components/RoleIcon'
@@ -64,7 +65,7 @@ function Row({ m, reviews }: { m: MatchSummary; reviews: ReviewVerdicts }) {
             <span className="sub"><RelTime date={m.gameEndUtc} /></span>
           </>
         )}
-        <span className="sub">{shortQueue(m.queueName)} · {m.durationMin.toFixed(0)}m</span>
+        <span className="sub">{shortQueue(m.queueName)} · {m.durationMin.toFixed(0)}m · {m.patch}</span>
         <ReviewDots v={reviews[m.id]} />
       </div>
 
@@ -135,16 +136,82 @@ function Row({ m, reviews }: { m: MatchSummary; reviews: ReviewVerdicts }) {
   )
 }
 
+// "Ranked" = solo+flex (the old default); the rest are queue families.
+const QUEUES = [
+  { key: 'ranked', label: 'Ranked' },
+  { key: '', label: 'All' },
+  { key: 'solo', label: 'Solo' },
+  { key: 'flex', label: 'Flex' },
+  { key: 'normal', label: 'Normal' },
+  { key: 'aram', label: 'ARAM' },
+] as const
+
+const ROLE_FILTERS: Array<{ key: string; label: string }> = [
+  { key: '', label: 'All roles' }, { key: 'TOP', label: 'Top' }, { key: 'JUNGLE', label: 'Jungle' },
+  { key: 'MIDDLE', label: 'Mid' }, { key: 'BOTTOM', label: 'Bot' }, { key: 'UTILITY', label: 'Support' },
+]
+
+type Grouping = 'day' | 'session' | 'none'
+/** Games this far apart stop being one session. */
+const SESSION_GAP_MS = 3 * 3600_000
+
+const dayLabel = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })
+const hm = (iso: string) =>
+  new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+
+/// Splits a newest-first page of matches into rendered groups. A page boundary
+/// can cut a day/session in half - the header still labels what's visible.
+function groupMatches(items: MatchSummary[], grouping: Grouping): { label: string | null; items: MatchSummary[] }[] {
+  if (grouping === 'none' || items.length === 0) return [{ label: null, items }]
+  const groups: { label: string | null; items: MatchSummary[] }[] = []
+  for (const m of items) {
+    const last = groups[groups.length - 1]
+    const oldestInLast = last?.items[last.items.length - 1]
+    const startNew = !oldestInLast
+      || (grouping === 'day'
+        ? dayLabel(m.gameEndUtc) !== dayLabel(oldestInLast.gameEndUtc)
+        : new Date(oldestInLast.gameEndUtc).getTime() - new Date(m.gameEndUtc).getTime() > SESSION_GAP_MS)
+    if (startNew) groups.push({ label: null, items: [m] })
+    else last.items.push(m)
+  }
+  for (const g of groups) {
+    const newest = g.items[0]
+    const oldest = g.items[g.items.length - 1]
+    g.label = grouping === 'day'
+      ? dayLabel(newest.gameEndUtc)
+      : `${dayLabel(newest.gameEndUtc)} · ${hm(oldest.gameEndUtc)}–${hm(newest.gameEndUtc)}`
+  }
+  return groups
+}
+
+interface Filters { queue: string; role: string; champion: string; opponent: string; patch: string }
+const DEFAULT_FILTERS: Filters = { queue: 'ranked', role: '', champion: '', opponent: '', patch: '' }
+
 export default function Matches() {
   const [items, setItems] = useState<MatchSummary[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [rankedOnly, setRankedOnly] = useState(true)
+  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
+  const [grouping, setGrouping] = useState<Grouping>('day')
+  const [facets, setFacets] = useState<MatchFacets | null>(null)
   const [reviews, setReviews] = useState<ReviewVerdicts>({})
+
+  const set = (patch: Partial<Filters>) => { setFilters(f => ({ ...f, ...patch })); setPage(1) }
+
+  useEffect(() => {
+    api.matchFacets().then(setFacets).catch(() => setFacets(null))
+  }, [])
 
   useEffect(() => {
     const load = () =>
-      api.matches(page, PAGE_SIZE, rankedOnly ? true : undefined)
+      api.matches(page, PAGE_SIZE, {
+        ...(filters.queue === 'ranked' ? { ranked: 'true' } : { queue: filters.queue }),
+        role: filters.role,
+        champion: filters.champion,
+        opponent: filters.opponent,
+        patch: filters.patch,
+      })
         .then(p => {
           setItems(p.items)
           setTotal(p.total)
@@ -160,24 +227,77 @@ export default function Matches() {
     // refetch quietly so they appear without a manual reload.
     const id = setInterval(load, 30_000)
     return () => clearInterval(id)
-  }, [page, rankedOnly])
+  }, [page, filters])
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const groups = groupMatches(items, grouping)
+  const isFiltered = JSON.stringify(filters) !== JSON.stringify(DEFAULT_FILTERS)
 
   return (
     <div className="card">
       <div className="filters">
         <div className="seg">
-          <button className={rankedOnly ? 'on' : ''} onClick={() => { setRankedOnly(true); setPage(1) }}>Ranked</button>
-          <button className={!rankedOnly ? 'on' : ''} onClick={() => { setRankedOnly(false); setPage(1) }}>All queues</button>
+          {ROLE_FILTERS.map(r => (
+            <button key={r.key} className={filters.role === r.key ? 'on' : ''} title={r.label}
+              onClick={() => set({ role: r.key })}>
+              {r.key ? <RoleIcon role={r.key} size={14} /> : '✳'}
+            </button>
+          ))}
         </div>
+        <div className="seg">
+          {QUEUES.map(q => (
+            <button key={q.key} className={filters.queue === q.key ? 'on' : ''} onClick={() => set({ queue: q.key })}>
+              {q.label}
+            </button>
+          ))}
+        </div>
+        <select className="patch-select" value={filters.patch} onChange={e => set({ patch: e.target.value })}>
+          <option value="">All patches</option>
+          {(facets?.patches ?? []).slice().reverse().map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <span className="cp-duo">
+          <ChampPicker placeholder="Your champion" value={filters.champion}
+            options={facets?.champions ?? []} onChange={champion => set({ champion })} />
+          <span className="vs-badge">vs</span>
+          <ChampPicker placeholder="Opponent" value={filters.opponent}
+            options={facets?.opponents ?? []} onChange={opponent => set({ opponent })} />
+        </span>
+        <div className="seg">
+          {(['day', 'session', 'none'] as const).map(g => (
+            <button key={g} className={grouping === g ? 'on' : ''} onClick={() => setGrouping(g)}>
+              {g === 'day' ? 'Day' : g === 'session' ? 'Session' : 'None'}
+            </button>
+          ))}
+        </div>
+        {isFiltered && <button className="action" onClick={() => { setFilters(DEFAULT_FILTERS); setPage(1) }}>Reset</button>}
         <span className="mut">{total} games</span>
       </div>
 
       <div className="match-rows">
-        {items.map(m => <Row key={m.id} m={m} reviews={reviews} />)}
+        {groups.map((g, gi) => {
+          const wins = g.items.filter(m => !m.isRemake && m.win).length
+          const losses = g.items.filter(m => !m.isRemake && !m.win).length
+          return (
+            <Fragment key={g.label ?? gi}>
+              {g.label && (
+                <div className="day-head">
+                  <span className="dh-label">{g.label}</span>
+                  <span className="dh-chips">
+                    <span className={`obj-chip win ${wins === 0 ? 'zero' : ''}`}>{wins} win{wins === 1 ? '' : 's'}</span>
+                    <span className={`obj-chip loss ${losses === 0 ? 'zero' : ''}`}>{losses} loss{losses === 1 ? '' : 'es'}</span>
+                  </span>
+                </div>
+              )}
+              {g.items.map(m => <Row key={m.id} m={m} reviews={reviews} />)}
+            </Fragment>
+          )
+        })}
       </div>
-      {items.length === 0 && <div className="empty">No games yet - sync your history on the Data page.</div>}
+      {items.length === 0 && (
+        <div className="empty">
+          {isFiltered ? 'No games match these filters.' : 'No games yet - sync your history on the Data page.'}
+        </div>
+      )}
 
       <div className="pager">
         <button className="action" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Previous</button>

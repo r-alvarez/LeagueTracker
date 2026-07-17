@@ -1,4 +1,4 @@
-import type { AnalyticsSummary, ChallengeBenchmark, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StorageInfo, Status } from './types'
+import type { AnalyticsSummary, ChallengeBenchmark, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StorageInfo, Status } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const resp = await fetch(url)
@@ -14,8 +14,12 @@ async function post<T>(url: string): Promise<T> {
 
 export const api = {
   status: () => get<Status>('/api/status'),
-  matches: (page: number, pageSize: number, ranked?: boolean) =>
-    get<MatchPage>(`/api/matches?page=${page}&pageSize=${pageSize}${ranked === undefined ? '' : `&ranked=${ranked}`}`),
+  matches: (page: number, pageSize: number, filters: MatchFilters = {}) => {
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
+    for (const [key, value] of Object.entries(filters)) if (value) params.set(key, value)
+    return get<MatchPage>(`/api/matches?${params}`)
+  },
+  matchFacets: () => get<MatchFacets>('/api/matches/facets'),
   match: (id: string) => get<MatchDetail>(`/api/matches/${id}`),
   review: async (id: string): Promise<MatchReview | null> => {
     const r = await fetch(`/api/matches/${id}/review`)
