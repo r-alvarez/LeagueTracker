@@ -468,8 +468,11 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
 .match-rows { display: flex; flex-direction: column; gap: 8px; }
 .match-row {
   display: grid;
-  grid-template-columns: 92px 205px 130px minmax(160px, 220px) 1fr 130px 86px 34px;
-  gap: 14px; align-items: center;
+  /* meta | matchup (the one flexible column) | kda | loadout | minis | rank | lp | link.
+     Every stat track is fixed so values line up down the page; only the
+     matchup names flex, and they ellipsize instead of pushing neighbors. */
+  grid-template-columns: 132px minmax(190px, 1fr) 118px 126px 320px 168px 76px 22px;
+  gap: 12px; align-items: center;
   border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px;
   cursor: pointer; text-decoration: none; color: inherit;
   transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
@@ -497,8 +500,8 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
 .mr-vs .opp .champ-img, .mr-vs .opp .champ-mono { width: 18px; height: 18px; border-radius: 4px; }
 
 /* Fixed-width stat columns so numbers line up across rows instead of rag. */
-.mr-minis { display: flex; gap: 14px; align-items: center; }
-.mini-stat { display: inline-flex; flex-direction: column; line-height: 1.3; min-width: 58px; }
+.mr-minis { display: grid; grid-template-columns: 76px 46px 50px 46px 62px; gap: 10px; align-items: center; }
+.mini-stat { display: inline-flex; flex-direction: column; line-height: 1.3; min-width: 0; }
 .mini-stat .v { font-weight: 700; font-size: 13.5px; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mini-stat .k { color: var(--ink-4); font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; }
 
@@ -507,9 +510,12 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
 .mr-links a { text-decoration: none; }
 .mr-links a:hover { color: var(--ink); }
 
-@media (max-width: 1100px) {
-  .match-row { grid-template-columns: 82px 190px 120px 1fr 86px; }
-  .mr-minis, .mr-links { display: none; }
+/* Mid widths: shed the two least-critical minis and the replay link so the
+   fixed tracks still fit; the full card restack takes over below 1100px. */
+@media (max-width: 1320px) {
+  .match-row { grid-template-columns: 120px minmax(160px, 1fr) 120px 126px 194px 156px 72px; gap: 10px; }
+  .mr-minis { grid-template-columns: 76px 46px 50px; }
+  .mr-minis .mini-stat:nth-child(n+4), .mr-links { display: none; }
 }
 
 /* In-game-style hover cards for items and runes. */
@@ -587,10 +593,15 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .mr-duel { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; }
 .mr-duel .vs-badge { font-size: 10px; font-weight: 800; color: var(--muted); text-transform: uppercase; }
 .mr-portrait.sm img, .mr-portrait.sm .champ-mono { width: 34px; height: 34px; border-radius: 8px; opacity: 0.9; }
-.match-row { grid-template-columns: 104px 235px 130px minmax(160px, 220px) 1fr 175px 86px 34px; }
-@media (max-width: 1100px) {
-  .match-row { grid-template-columns: 96px 215px 120px 1fr 86px; }
-}
+
+/* dpm-style compact loadout inside rows: the two summoner spells stack in a
+   column and the seven item slots wrap into a 4x2 block - half the width of
+   one long strip, so items never crowd the stat columns. */
+.match-row .loadout { gap: 6px; }
+.match-row .loadout .slots { display: grid; grid-template-columns: repeat(4, 22px); gap: 3px; }
+.match-row .loadout .slots:first-child:not(:only-child) { grid-template-columns: 22px; }
+.match-row .slot { width: 22px; height: 22px; border-radius: 5px; }
+.match-row > .lp-chip { text-align: center; }
 
 /* Matchup duo: the role companion rides the portrait's top-right corner
    (level badge keeps bottom-right). */
@@ -1086,8 +1097,7 @@ nav.tabs a { white-space: nowrap; flex: 0 0 auto; }
 .table-scroll { max-width: 100%; }
 
 /* Match rows: below the full-row breakpoint, restack each row into a compact
-   card - matchup + KDA + LP up top, then the meta line, loadout, ranks.
-   (.mr-minis / .mr-links stay hidden from the earlier 1100px rule.) */
+   card - matchup + KDA + LP up top, then the meta line, loadout, ranks. */
 @media (max-width: 1100px) {
   .match-row {
     grid-template-columns: minmax(0, 1fr) auto auto;
@@ -1098,6 +1108,7 @@ nav.tabs a { white-space: nowrap; flex: 0 0 auto; }
       "rank    rank    rank";
     gap: 8px 12px;
   }
+  .mr-minis, .mr-links { display: none; }
   .match-row .mr-champ { grid-area: champ; }
   .match-row .kda-block { grid-area: kda; }
   .match-row .lp-chip, .match-row > .mut.sm-text { grid-area: lp; align-self: start; justify-self: end; }
