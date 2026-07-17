@@ -442,10 +442,12 @@ function DetailsTab({ detail }: { detail: Detail }) {
           <h2>Skill order</h2>
           {detail.skillOrder.length === 0 ? <div className="empty">No timeline for this game.</div> : (
             <div className="skill-grid">
+              {/* Always 18 columns (the level cap) - unspent levels stay as
+                  quiet cells so the frame is identical in every game. */}
               {skillNames.map((name, slotIdx) => (
                 <div key={name} className="skill-row">
                   <span className={`skill-key ${name === 'R' ? 'ult' : ''}`}>{name}</span>
-                  {detail.skillOrder.map((slot, i) => (
+                  {Array.from({ length: 18 }, (_, i) => detail.skillOrder[i] ?? 0).map((slot, i) => (
                     <span key={i} className={`skill-cell ${slot === slotIdx + 1 ? (name === 'R' ? 'taken ult' : 'taken') : ''}`}>
                       {slot === slotIdx + 1 ? i + 1 : ''}
                     </span>
@@ -469,7 +471,7 @@ function DetailsTab({ detail }: { detail: Detail }) {
             ))}
           </div>
           {(me.skillshotsHit !== null || me.skillshotsDodged !== null) && (
-            <div className="obj-chips" style={{ marginTop: 12 }}>
+            <div className="obj-chips cast-chips" style={{ marginTop: 12 }}>
               <span className="obj-chip">{me.skillshotsHit ?? 0} <span className="mut">skillshots hit</span></span>
               <span className="obj-chip">{me.skillshotsDodged ?? 0} <span className="mut">dodged</span></span>
               {(() => {
@@ -484,7 +486,7 @@ function DetailsTab({ detail }: { detail: Detail }) {
           )}
           <div style={{ marginTop: 12 }}>
             {pings.length === 0 ? <span className="mut">No pings recorded.</span> : (
-              <span className="obj-chips">
+              <span className="obj-chips cast-chips">
                 {pings.sort((a, b) => b[1] - a[1]).map(([k, v]) => (
                   <span key={k} className="obj-chip">{v} <span className="mut">{k}</span></span>
                 ))}

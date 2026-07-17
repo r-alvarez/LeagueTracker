@@ -223,22 +223,33 @@ table.sb td { padding: 8px 10px; }
 }
 .slot.sold, .slot.undo { border-color: var(--lp-loss); }
 .slot.undo { opacity: 0.4; }
-.skill-grid { display: flex; flex-direction: column; gap: 4px; overflow-x: auto; }
-.skill-row { display: flex; gap: 3px; align-items: center; }
+/* Skill order: always 18 fluid columns (the level cap), so the grid owns the
+   card's full width and every game renders the same frame. */
+.skill-grid { display: flex; flex-direction: column; gap: 4px; }
+.skill-row { display: grid; grid-template-columns: 26px repeat(18, minmax(0, 1fr)); gap: 3px; align-items: center; }
 .skill-key {
-  width: 22px; height: 22px; border-radius: 5px; background: var(--panel-2); border: 1px solid var(--border);
-  display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; margin-right: 4px; flex: 0 0 auto;
+  width: 26px; height: 26px; border-radius: 5px; background: var(--panel-2); border: 1px solid var(--border);
+  display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex: 0 0 auto;
 }
 .skill-key.ult { color: var(--warn); }
 .skill-cell {
-  width: 22px; height: 22px; border-radius: 5px; background: var(--panel-2); border: 1px solid var(--border);
-  display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex: 0 0 auto; opacity: 0.45;
+  width: 100%; max-width: 34px; aspect-ratio: 1 / 1; border-radius: 5px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; opacity: 0.45;
 }
 .skill-cell.taken { opacity: 1; background: var(--series-1); color: #06203f; border-color: var(--series-1); }
 .skill-cell.taken.ult { background: var(--warn); border-color: var(--warn); }
-.cast-row { display: flex; gap: 16px; flex-wrap: wrap; }
-.cast { display: inline-flex; align-items: center; gap: 6px; }
-.cast strong { font-size: 15px; }
+
+/* Casts: exactly 4 abilities + 2 summoner spells = six equal centered tiles
+   on one row; the chip rows below center under them. */
+.cast-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.cast {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 6px;
+  background: var(--surface-inset); border: 1px solid var(--border); border-radius: 8px;
+}
+.cast strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.cast .slot { width: 26px; height: 26px; border-radius: 5px; }
+.cast-chips { display: flex; justify-content: center; }
 
 /* Role position glyphs + the compact enemy laner/jungler pair */
 .role-icon { vertical-align: middle; opacity: 0.85; flex: 0 0 auto; }
@@ -249,31 +260,33 @@ table.sb td { padding: 8px 10px; }
 .vs-jgl .role-icon { opacity: 0.6; }
 
 /* Laning item race: my inventory vs the lane opponent's per checkpoint.
-   Both sides render a fixed 7-slot rail (6 items + trinket), so the vs divider
-   and the gold delta land on the same x in every row. */
+   Both sides render a fixed 7-slot rail (6 items + trinket) on a fluid grid:
+   the rails split the row's full width and the icons scale up to fill it
+   (capped at 38px), so the vs divider and gold delta land on the same x in
+   every row and the icons aren't postage stamps on a wide card. */
 .sub-h { font-size: 12px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 18px 0 8px; }
 .item-race { display: flex; flex-direction: column; gap: 6px; }
 .item-race-row {
-  display: flex; align-items: center; gap: 12px;
+  display: grid; grid-template-columns: 40px minmax(0, 1fr) auto minmax(0, 1fr) 56px;
+  align-items: center; gap: 12px;
   background: var(--surface-inset); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
 }
-.item-race-min { width: 34px; text-align: right; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
-.item-race-gold { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+.item-race-min { text-align: right; font-variant-numeric: tabular-nums; }
+.item-race-gold { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.item-race-row .slots { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.item-race-row .slots .rich-tip { display: flex; min-width: 0; }
+.item-race-row .slot { width: 100%; height: auto; max-width: 38px; aspect-ratio: 1 / 1; border-radius: 6px; }
 .slot.dim { opacity: 0.75; }
 
-/* Build order: each minute is a pill, arrows carry the sequence. */
-.build-order { gap: 6px; align-items: center; }
+/* Build order: uniform minute tiles on a grid - the sequence reads
+   left-to-right, top-to-bottom, and the tiles split the card's full width. */
+.build-order { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; align-items: stretch; }
 .build-group {
-  flex-direction: row; align-items: center; gap: 8px;
+  display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px;
   background: var(--surface-inset); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
 }
+.build-group .slots { flex-wrap: wrap; }
 .build-group .mut.sm-text { white-space: nowrap; }
-.build-group + .build-group::before { content: none; }
-.build-order .build-group:not(:first-child) { position: relative; margin-left: 14px; }
-.build-order .build-group:not(:first-child)::after {
-  content: '›'; position: absolute; left: -13px; top: 50%; transform: translateY(-54%);
-  color: var(--muted); font-size: 15px; font-weight: 700;
-}
 .obj-chip.win { color: var(--delta-good); border-color: rgba(63, 185, 80, 0.35); }
 .obj-chip.loss { color: var(--lp-loss); border-color: rgba(240, 85, 106, 0.35); }
 
@@ -1157,8 +1170,8 @@ nav.tabs a { white-space: nowrap; flex: 0 0 auto; }
   .recap-row { grid-template-columns: 28px minmax(0, 1fr); row-gap: 6px; }
   .recap-row > :last-child { grid-column: 1 / -1; }
 
-  /* Item race checkpoints hold two 7-slot strips; let them wrap. */
-  .item-race-row { flex-wrap: wrap; }
+  /* Item race: the fluid rails already shrink; just tighten the chrome. */
+  .item-race-row { grid-template-columns: 34px minmax(0, 1fr) auto minmax(0, 1fr) 48px; gap: 8px; }
 
   .ph { padding: 14px 16px; gap: 14px; }
   .ph-avatar img, .ph-avatar .champ-mono { width: 52px; height: 52px; }
