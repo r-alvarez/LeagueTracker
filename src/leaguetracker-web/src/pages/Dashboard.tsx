@@ -286,40 +286,38 @@ export default function Dashboard() {
           </div>
 
           {stats.followIn.totalDeaths > 0 && (
-            <details className="card" style={{ marginBottom: 16 }}>
-              <summary style={{ cursor: 'pointer', fontWeight: 650 }}>
-                Death context — following teammates in ({stats.followIn.followIns} of {stats.followIn.totalDeaths} deaths, {pct(stats.followIn.rate)})
-              </summary>
-              <div className="grid tiles" style={{ marginTop: 12 }}>
-                <div className="tile">
+            <div className="card kpi-card" style={{ marginBottom: 16 }}>
+              <h2>Death context <span className="mut" style={{ fontWeight: 400 }}>— following teammates in</span></h2>
+              <div className="kpi-band" style={{ gridTemplateColumns: 'repeat(5, minmax(0, 1fr))' }}>
+                <div className="kpi">
                   <div className="label">Follow-in deaths</div>
                   <div className="value">{stats.followIn.followIns}</div>
-                  <div className="sub">{pct(stats.followIn.rate)} of all deaths</div>
+                  <div className="sub">{pct(stats.followIn.rate)} of {stats.followIn.totalDeaths} deaths</div>
                 </div>
-                <div className="tile">
+                <div className="kpi">
                   <div className="label">Got nothing back</div>
                   <div className="value">{stats.followIn.pureLoss}</div>
-                  <div className="sub">no enemy fell from the trigger to 10s after</div>
+                  <div className="sub">no enemy fell, trigger → 10s after</div>
                 </div>
-                <div className="tile">
+                <div className="kpi">
                   <div className="label">2+ allies already down</div>
                   <div className="value">{stats.followIn.twoPlusDown}</div>
                   <div className="sub">walked into an already-lost fight</div>
                 </div>
-                <div className="tile">
+                <div className="kpi">
                   <div className="label">Team gold state</div>
                   <div className="value">{stats.followIn.goldState.behind}↓ {stats.followIn.goldState.even}= {stats.followIn.goldState.ahead}↑</div>
                   <div className="sub">behind / even / ahead (±1500)</div>
                 </div>
-                <div className="tile">
+                <div className="kpi">
                   <div className="label">Followed in after</div>
-                  <div className="value" style={{ fontSize: 16 }}>
+                  <div className="value" style={{ fontSize: 17 }}>
                     {stats.followIn.byRole.slice(0, 3).map(r => `${r.key} ${r.count}`).join(' · ') || '—'}
                   </div>
                   <div className="sub">teammate role</div>
                 </div>
               </div>
-            </details>
+            </div>
           )}
 
           <div className="grid two-col" style={{ marginBottom: 16 }}>
@@ -448,7 +446,7 @@ export default function Dashboard() {
               <LpLineChart points={lpPoints} />
             </div>
             <div className="card">
-              <h2>LP per game — {queue}</h2>
+              <h2>LP per day — {queue} <span className="mut" style={{ fontWeight: 400 }}>— hover a day for its games</span></h2>
               <LpPerGameBars games={queueGames} />
             </div>
           </div>
