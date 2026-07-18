@@ -138,10 +138,21 @@ export default function ReviewCard({ matchId }: { matchId: string }) {
               {disc.detail.deaths > 0 && (
                 <> — {disc.detail.ganked > 0 && <span className="loss">{disc.detail.ganked} ganked · </span>}
                   {disc.detail.followIns > 0 && <span className="loss">{disc.detail.followIns} follow-in · </span>}
+                  {disc.detail.followInsTraded > 0 && <span>{disc.detail.followInsTraded} follow-in, traded · </span>}
                   {disc.detail.isolated > 0 && <span className="loss">{disc.detail.isolated} caught alone · </span>}
                   {disc.detail.withTeam} with the team</>
               )}
             </li>
+            {disc.detail.fightsStepped > 0 && (
+              <li className="mut">
+                Stepped into <strong>{disc.detail.fightsStepped}</strong> fights —{' '}
+                {disc.detail.flagged === 0
+                  ? 'every step accounted'
+                  : `${disc.detail.flagged} flagged${disc.detail.flagged === 1 && disc.verdict === 'yes'
+                      ? '; one lapse across that many steps is still the habit'
+                      : ''}`}
+              </li>
+            )}
             {disc.detail.concededEpicsAbsent.map((c, i) => (
               <li key={i} className={c.paid ? '' : 'loss'}>
                 {mmss(c.timeSec)} — enemy {c.kind.toLowerCase()} while you were {(c.myDistance / 1000).toFixed(1)}k units away
