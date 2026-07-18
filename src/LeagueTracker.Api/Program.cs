@@ -41,6 +41,14 @@ builder.Services.AddScoped<TimelineSeriesService>();
 builder.Services.AddScoped<LensService>();
 builder.Services.AddScoped<FundamentalsService>();
 builder.Services.AddScoped<ReviewService>();
+// dpm.lol answers 403 to default HTTP clients; browser-like headers get JSON.
+builder.Services.AddHttpClient<DpmLpBackfillService>(c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(30);
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
+    c.DefaultRequestHeaders.Add("Origin", "https://dpm.lol");
+    c.DefaultRequestHeaders.Add("Referer", "https://dpm.lol/");
+});
 builder.Services.AddSingleton<RenderLeaseService>();
 builder.Services.AddSingleton<LiveGameState>();
 builder.Services.AddHostedService<MatchPollerService>();
@@ -635,6 +643,25 @@ app.MapGet("/api/lp/history", async (LeagueDbContext db, string? queue, Cancella
         s.TimestampUtc, s.Queue, s.Tier, s.Division, s.Lp, s.Wins, s.Losses, s.RankValue,
         Label = $"{s.Tier} {s.Division} {s.Lp} LP",
     }));
+});
+
+// Maintenance endpoint, no UI (like /api/ranks/backfill): ONE-TIME import of
+// LP history from dpm.lol for the months before this tracker existed - Riot's
+// API serves only current LP, never history, so the past has to come from a
+// tracker that was already watching. Day-level resolution (their histogram is
+// one closing rank per day). Idempotent; invoke via curl once per instance.
+// The result persists in the db and the lp-history.csv mirror, so it survives
+// rebuilds - everything after stays live-captured from Riot as before.
+app.MapPost("/api/lp/backfill", async (DpmLpBackfillService dpm, CancellationToken ct) =>
+{
+    try
+    {
+        return Results.Ok(await dpm.BackfillAsync(ct));
+    }
+    catch (HttpRequestException ex)
+    {
+        return Results.Problem($"dpm.lol unreachable: {ex.Message}", statusCode: 502);
+    }
 });
 
 app.MapGet("/api/lp/per-game", async (LeagueDbContext db, CancellationToken ct) =>

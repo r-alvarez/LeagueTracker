@@ -454,3 +454,28 @@ weakest goal-relevant skill — the training map the page was meant to be.
 Challenges stay only as the detail card's labeled lifetime-context strip.
 The footnote now states the box numbers are self-relative and never
 comparable between accounts.
+
+**LP history back-fill: one-time import from dpm.lol, maintenance endpoint
+only.** Riot's API serves current LP and never history, so the months before
+this tracker existed can only come from a tracker that was already watching.
+dpm.lol's rank-history widget serves one closing tier/division/LP per active
+day back to 2026-05-17; POST /api/lp/backfill (no UI, same pattern as
+/api/ranks/backfill) imports those days strictly before our earliest real
+snapshot, mirrors them to lp-history.csv, and is idempotent. Imported rows
+carry Wins=0/Losses=0 deliberately: per-game attribution requires the
+win+loss counter to move by exactly one across a bracket, so back-filled
+rows can extend the chart but can never mint a per-game LP delta. Per-game
+LP does not exist anywhere in dpm's API (lp field null account-wide,
+verified on two accounts) - day-level resolution is the honest ceiling.
+
+**Missing per-game LP is shown, not hidden.** The LP-per-game chart used to
+filter unattributed games out entirely; a capture gap read as a gap in play.
+They now hold their slot as a small neutral stub ("? LP" tooltip) with a
+coverage footnote, and the champion/role tables print the coverage fraction
+("-30 · 11/18g") - a partial LP sum over a biased subsample (Ahri: known
+games 5W-6L, unknown 4W-3L) otherwise reads as a verdict it isn't.
+
+**KDA color is a monotone single-hue ramp.** The old green->blue->amber
+steps ranked a 10 KDA below a 3 to anyone reading amber as a warning
+(which is what amber means everywhere else in this app). Better KDA is now
+simply brighter green.

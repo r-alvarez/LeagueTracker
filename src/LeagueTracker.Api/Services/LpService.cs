@@ -43,7 +43,7 @@ public sealed class LpService(LeagueDbContext db, RiotApiClient riot, DataPaths 
     /// LP is the one thing not derivable from raw match files - mirror every
     /// snapshot to a CSV (same shape as the PowerShell ledger) so a db rebuild
     /// plus import restores the full history.
-    private void MirrorToCsv(IEnumerable<LpSnapshot> rows)
+    public void MirrorToCsv(IEnumerable<LpSnapshot> rows)
     {
         Directory.CreateDirectory(paths.DataDir);
         var writeHeader = !File.Exists(paths.LpLedgerCsv);

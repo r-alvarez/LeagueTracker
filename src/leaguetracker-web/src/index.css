@@ -533,10 +533,13 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
 .kda-sep { color: var(--muted); font-weight: 400; }
 .kda-deaths { color: var(--lp-loss); }
 .kda-ratio { font-size: 12px; color: var(--ink-2); font-weight: 600; }
+/* Monotone single-hue ramp: better KDA = brighter green, so magnitude reads at
+   a glance. (The old green->blue->amber steps ranked a 10 KDA below a 3 to
+   anyone reading amber as a warning.) */
 .kda-ratio.kda-3 { color: var(--chart-green); }
-.kda-ratio.kda-4 { color: var(--series-1); }
-.kda-ratio.kda-5 { color: var(--warn); }
-.kda-ratio.kda-perfect { color: var(--warn); }
+.kda-ratio.kda-4 { color: #3fb950; }
+.kda-ratio.kda-5 { color: #56d364; font-weight: 700; }
+.kda-ratio.kda-perfect { color: #56d364; font-weight: 700; }
 .kda-ratio.kda-low { color: var(--lp-loss); }
 
 .lp-chip {
