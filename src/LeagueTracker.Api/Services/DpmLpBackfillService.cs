@@ -2,6 +2,7 @@ using System.Text.Json;
 using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Riot;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace LeagueTracker.Api.Services;
 
@@ -22,13 +23,21 @@ namespace LeagueTracker.Api.Services;
 ///    (verified: the match-history lp field is null account-wide), so this is
 ///    a daily-resolution back-fill by design, not a limitation to fix here.
 public sealed class DpmLpBackfillService(
-    HttpClient http, LeagueDbContext db, LpService lp, TrackedPlayerService player, ILogger<DpmLpBackfillService> logger)
+    HttpClient http, LeagueDbContext db, LpService lp, IOptions<RiotOptions> options, ILogger<DpmLpBackfillService> logger)
 {
     private const string SoloQueue = "Solo/Duo";
 
     public async Task<object> BackfillAsync(CancellationToken ct)
     {
-        var puuid = await player.GetPuuidAsync(ct);
+        // Riot puuids are encrypted per API key, so ours means nothing to
+        // dpm.lol (theirs 500s on it) - resolve THEIR puuid via their search.
+        var riot = options.Value;
+        var searchRaw = await http.GetStringAsync(
+            $"https://dpm.lol/v1/players/search?gameName={Uri.EscapeDataString(riot.GameName)}&tagLine={Uri.EscapeDataString(riot.TagLine)}", ct);
+        using var searchDoc = JsonDocument.Parse(searchRaw);
+        if (!searchDoc.RootElement.TryGetProperty("puuid", out var puuidEl) || puuidEl.GetString() is not { Length: > 0 } puuid)
+            return new { Imported = 0, Message = $"dpm.lol doesn't know {riot.GameName}#{riot.TagLine} - nothing to import." };
+
         var raw = await http.GetStringAsync($"https://dpm.lol/v1/players/{puuid}/widgets/rank-history", ct);
 
         using var doc = JsonDocument.Parse(raw);
