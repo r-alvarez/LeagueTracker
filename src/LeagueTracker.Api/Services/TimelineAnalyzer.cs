@@ -69,6 +69,16 @@ public static class TimelineAnalyzer
     private const int FollowWindowSec = 15;
     private const int FollowNearUnits = 2500;
     private const int FollowTradeAfterSec = 10;
+    /// Already this close to the falling teammate (or the fight spot) at the
+    /// last frame before they fell = we stepped in together, and dying second
+    /// in a shared fight is a fight outcome, not a follow-in.
+    private const int FollowTogetherUnits = 2500;
+    /// A friendly objective this close to my death counts as payment for it -
+    /// the grub secured mid-collapse, the turret we died completing.
+    private const int FollowObjectiveUnits = 3500;
+    /// Objective payment window opens this long before the trigger death (the
+    /// take often lands seconds before the collapse punishes it).
+    private const int FollowObjectiveBeforeSec = 30;
 
     private const int ObjectiveNearUnits = 2500;
 
@@ -216,7 +226,7 @@ public static class TimelineAnalyzer
             death.Zone = MapZones.Classify(death.X, death.Y);
             EnrichWithConvergence(death, frames, enemyPids, allyPids);
             EnrichWithObjectiveContext(death, objectives);
-            EnrichWithFollowIn(death, kills, frames, me, champByPid, pidToTeam, pidToRole);
+            EnrichWithFollowIn(death, kills, frames, objectives, me, champByPid, pidToTeam, pidToRole);
             if (enemyJunglerPid is { } jungler)
             {
                 death.EnemyJunglerNear = InterpolatedPosition(frames, jungler, death.TimeSec) is { } jp
@@ -364,9 +374,10 @@ public static class TimelineAnalyzer
     };
 
     /// Did I walk in right after a teammate fell? Trigger = the most recent ally
-    /// death inside the window; it counts when I died near THEIR death spot.
+    /// death inside the window; it counts when I died near THEIR death spot -
+    /// but only if I wasn't already standing with them when they fell.
     private static void EnrichWithFollowIn(
-        Death death, List<KillEvent> kills, List<Frame> frames, MatchParticipantDto me,
+        Death death, List<KillEvent> kills, List<Frame> frames, List<ObjectiveEvent> objectives, MatchParticipantDto me,
         Dictionary<int, string> champByPid, Dictionary<int, int> pidToTeam, Dictionary<int, string> pidToRole)
     {
         var alliesBefore = kills
@@ -381,8 +392,29 @@ public static class TimelineAnalyzer
         var distance = (int)Math.Round(Math.Sqrt(Math.Pow(death.X - trigger.X, 2) + Math.Pow(death.Y - trigger.Y, 2)));
         if (distance > FollowNearUnits) return;
 
+        // Not a follow-in if we stepped in together: at the last raw frame
+        // before the teammate fell I was already beside them (or at the spot
+        // that became the fight). Judged on the raw frame, not interpolation -
+        // interpolating across my own death smears me toward the fight and
+        // would hide real walk-ins.
+        var frameAtTrigger = frames.LastOrDefault(f => f.TimeSec <= trigger.TimeSec);
+        if (frameAtTrigger is not null && frameAtTrigger.Positions.TryGetValue(me.ParticipantId, out var myPos))
+        {
+            var withTeammate = frameAtTrigger.Positions.TryGetValue(trigger.VictimParticipantId, out var matePos)
+                && Math.Sqrt(Math.Pow(myPos.X - matePos.X, 2) + Math.Pow(myPos.Y - matePos.Y, 2)) <= FollowTogetherUnits;
+            var atTheFight = Math.Sqrt(Math.Pow(myPos.X - trigger.X, 2) + Math.Pow(myPos.Y - trigger.Y, 2)) <= FollowTogetherUnits;
+            if (withTeammate || atTheFight) return;
+        }
+
+        // Payment is kills OR objectives: an enemy fell in the window, or my
+        // team banked an epic/structure at the fight (the take itself may land
+        // seconds before the trigger - the collapse punishes it afterwards).
         var traded = kills.Any(k => pidToTeam.GetValueOrDefault(k.VictimParticipantId) != me.TeamId
-            && k.TimeSec >= trigger.TimeSec && k.TimeSec <= death.TimeSec + FollowTradeAfterSec);
+                && k.TimeSec >= trigger.TimeSec && k.TimeSec <= death.TimeSec + FollowTradeAfterSec)
+            || objectives.Any(o => o.ByMyTeam
+                && o.TimeSec >= trigger.TimeSec - FollowObjectiveBeforeSec
+                && o.TimeSec <= death.TimeSec + FollowTradeAfterSec
+                && Math.Sqrt(Math.Pow(o.X - death.X, 2) + Math.Pow(o.Y - death.Y, 2)) <= FollowObjectiveUnits);
 
         death.FollowTeammate = champByPid.GetValueOrDefault(trigger.VictimParticipantId, "?");
         death.FollowTeammateRole = pidToRole.GetValueOrDefault(trigger.VictimParticipantId, "?");

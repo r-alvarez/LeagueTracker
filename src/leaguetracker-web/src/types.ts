@@ -494,8 +494,11 @@ export interface MatchReview {
       deaths: number
       ganked: number
       followIns: number
+      followInsTraded: number
       isolated: number
       withTeam: number
+      flagged: number
+      fightsStepped: number
       concededEpicsAbsent: ConcededEpic[]
     }
   }

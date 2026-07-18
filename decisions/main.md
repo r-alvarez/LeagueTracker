@@ -360,3 +360,51 @@ the player's stated rationale ("I was behind most of the game, so it
 shouldn't say won") was scoreboard reasoning and was NOT honored as
 such; the tune stands on the double-count mechanism alone. Verdicts must
 never be bent toward the gold graph - that's the LP gauge in disguise.
+
+**2026-07-18 — follow-ins need a "was I already there?" check, and the
+two count-based questions get denominators.** Motivating games: 29m Garen
+vs Gwen (EUW1_7922058605) and 37m Ahri (EUW1_7921448852), both 2-death
+wins with heavy fight participation, both stuck at Discipline "mixed".
+Audit of the first: the flagged "follow-in" was the grubs collapse - the
+trigger teammate (Amumu) fell 3 seconds before and 161 units away. They
+were standing together taking grubs; whoever dies second in a shared
+fight was being tagged as if they walked into a grave they watched open.
+And the grub secured seconds before the death was invisible to the trade
+check, which only counted enemy kills. Three fixes in the analyzer and
+verdict fold:
+
+1. Not a follow-in if, at the last raw frame before the teammate fell, I
+was already within 2500 units of them (or of the spot that became the
+fight). Raw frame, not interpolation - interpolating across my own death
+smears me toward the fight and would hide real walk-ins. Dying second in
+a shared fight belongs to the Fights question, not Discipline.
+
+2. Payment now includes objectives: a friendly epic/structure within
+3500 units of my death, taken from 30s before the trigger to 10s after
+me, flips FollowPureLoss to false (the grub banked mid-collapse, the
+turret we died completing). Traded follow-ins leave the Discipline
+"bad" count and show as their own line; pure losses stay fully punished.
+
+3. Denominators. Discipline's yes-bar was literal perfection: one
+flagged death in any game killed it, while the 22 fights stepped into
+correctly were invisible. The question is phrased as a habit and now
+scores like one: one flagged death with no unpaid concessions stays
+"yes" when the game had 12+ fights stepped into. The no-thresholds are
+untouched. Same disease in Fights: converted*2 >= won demands 10
+conversions of 20 won fights, but conversion opportunity does not scale
+linearly with wins - added a volume path (won >= 3x lost, 5+ converted,
+0 conceded -> yes). Card now prints the denominator ("stepped into N
+fights") so the evidence FOR the habit is visible, not just the lapses.
+
+Verified against the last 15 ranked games (live data, old vs new fold):
+Q2 flips exactly two mixed->yes (the 20-4/9conv Ahri and a 16-2/5conv
+Viktor - both the volume pattern); every "no" stays "no". Q3 flips three
+mixed->yes (both motivating games plus a 14-fight loss with one pure
+follow-in) and one no->mixed (a traded follow-in leaving the bad count);
+the run-over games all keep their verdicts. Analyzer retag verified by
+synthetic timeline through the real Analyze: co-death not tagged,
+walk-in still tagged pure-loss, walk-in with epic banked tagged traded.
+Note: the player's account of both games was checked against the data
+before tuning (3s/161u co-location confirmed) - the tune stands on the
+mislabel, not on the plea. Existing rows keep old tags until a
+/api/analytics/reprocess; the verdict fold changes apply immediately.

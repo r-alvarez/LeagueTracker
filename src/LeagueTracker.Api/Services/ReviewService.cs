@@ -41,6 +41,16 @@ public sealed class ReviewService(LeagueDbContext db)
     private const int PaidWindowSec = 60;
     private const int LaneGoldSwing = 300;
     private const int LateGoldSwing = 500;
+    /// Q3 stops demanding perfection once the game gave you this many fights
+    /// to step into: one flagged death across a fight-heavy game is still the
+    /// habit of accounting, not the absence of it.
+    private const int ExposureFights = 12;
+    /// Q2's volume path: a fight record at least this lopsided (won vs lost),
+    /// with this many objectives banked and none conceded, bought the map even
+    /// when the conversion ratio lags the win count - conversion opportunity
+    /// doesn't scale linearly with wins.
+    private const int VolumeWinFactor = 3;
+    private const int VolumeConvertedFloor = 5;
 
     public async Task<object?> GetAsync(string matchId, CancellationToken ct)
     {
@@ -143,7 +153,7 @@ public sealed class ReviewService(LeagueDbContext db)
             result[m.Id] = new Review(
                 LaneDuel(m, me, opp, matchDeaths, matchKills, matchObjectives, fights, allyPids, matchPositions),
                 FightsVerdict(fights),
-                Discipline(matchDeaths, matchObjectives, matchPositions, allyPids, me),
+                Discipline(matchDeaths, matchObjectives, matchPositions, allyPids, me, fights),
                 Stewardship(m));
         }
         return result;
@@ -276,6 +286,7 @@ public sealed class ReviewService(LeagueDbContext db)
 
         string? verdict = won + lost == 0 ? null
             : won > lost && converted * 2 >= won ? "yes"
+            : won >= lost * VolumeWinFactor && won > lost && converted >= VolumeConvertedFloor && conceded == 0 ? "yes"
             : lost > won || conceded > converted ? "no"
             : "mixed";
 
@@ -331,15 +342,21 @@ public sealed class ReviewService(LeagueDbContext db)
 
     private static Verdicted Discipline(
         List<Death> deaths, List<ObjectiveEvent> objectives,
-        List<PositionSample> positions, HashSet<int> allyPids, MatchParticipant? me)
+        List<PositionSample> positions, HashSet<int> allyPids, MatchParticipant? me, List<FightDto> fights)
     {
+        // A follow-in that paid (an enemy fell, or an objective was banked at
+        // the fight) is a trade, not a stepping error - only pure losses count
+        // against the verdict. Null FollowPureLoss (pre-column rows) stays
+        // harsh until a reprocess fills it.
         var ganked = 0;
         var followIns = 0;
+        var followInsTraded = 0;
         var isolated = 0;
         var withTeam = 0;
         foreach (var d in deaths)
         {
             if (d.EnemyJunglerNear == true && d.TimeSec < LaneEndSec) ganked++;
+            else if (d.FollowTeammate is not null && d.FollowPureLoss == false) followInsTraded++;
             else if (d.FollowTeammate is not null) followIns++;
             else if (d is { EnemiesNearDeath: >= 2, AlliesNearDeath: 0 }) isolated++;
             else withTeam++;
@@ -370,10 +387,16 @@ public sealed class ReviewService(LeagueDbContext db)
             concededAbsent.Add(new ConcededEpic(o.Kind, o.TimeSec, dist, alliesNear, paid));
         }
 
+        // The question is a habit, so the verdict needs a denominator: every
+        // fight stepped into is evidence FOR accounting, not just noise around
+        // the flagged deaths. One lapse across a fight-heavy game keeps the
+        // yes; the no thresholds stay exactly as harsh as before.
         var bad = ganked + followIns + isolated;
+        var fightsStepped = fights.Count(f => f.Participated);
         var unpaidConcessions = concededAbsent.Count(c => !c.Paid);
         var verdict = bad == 0 && unpaidConcessions == 0 ? "yes"
             : bad >= 3 || unpaidConcessions >= 2 || (bad >= 2 && unpaidConcessions >= 1) ? "no"
+            : bad == 1 && unpaidConcessions == 0 && fightsStepped >= ExposureFights ? "yes"
             : "mixed";
 
         return new Verdicted(verdict, new
@@ -381,8 +404,11 @@ public sealed class ReviewService(LeagueDbContext db)
             Deaths = deaths.Count,
             Ganked = ganked,
             FollowIns = followIns,
+            FollowInsTraded = followInsTraded,
             Isolated = isolated,
             WithTeam = withTeam,
+            Flagged = bad,
+            FightsStepped = fightsStepped,
             ConcededEpicsAbsent = concededAbsent,
         });
     }
