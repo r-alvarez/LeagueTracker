@@ -3,8 +3,8 @@
 # ports. The render agent on the gaming PC reaches the tracker through the
 # same hostnames (split-horizon DNS points them at the NAS on the LAN).
 #
-# GitOps note: Portainer CE polling appears to redeploy only when THIS file
-# changes, not on every repo commit (probe: 2026-07-18).
+# GitOps: Portainer CE polls this repo (2m) and redeploys on any new commit -
+# pushing to main IS the deploy; no manual "pull and redeploy" needed.
 
 x-lt-build: &lt-build
   context: ../..
