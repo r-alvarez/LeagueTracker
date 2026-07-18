@@ -111,12 +111,21 @@ function Scoreboard({ title, side, won, players, objectives, maxDamage, duration
   // No rank line at all when nobody has one (ranks hidden or all unranked) -
   // a column of "Unranked" tags would just be noise.
   const anyRanked = players.some(p => p.tier)
+  const totals = players.reduce(
+    (t, p) => ({ kills: t.kills + p.kills, deaths: t.deaths + p.deaths, assists: t.assists + p.assists, dmg: t.dmg + p.damageToChampions, gold: t.gold + p.gold }),
+    { kills: 0, deaths: 0, assists: 0, dmg: 0, gold: 0 },
+  )
   return (
     <div className="card" style={{ marginBottom: 14 }}>
       <div className="sb-head">
         <h2 style={{ margin: 0 }}>
           <span className={won ? 'win' : 'loss'}>{title}</span> <span className="mut">({side} side)</span>
         </h2>
+        <span className="sb-totals">
+          <span>{totals.kills} / <span className="loss">{totals.deaths}</span> / {totals.assists} <span className="mut">K/D/A</span></span>
+          <span>{(totals.dmg / 1000).toFixed(1)}K <span className="mut">dmg</span></span>
+          <span>{(totals.gold / 1000).toFixed(1)}K <span className="mut">gold</span></span>
+        </span>
         <ObjChips o={objectives} />
       </div>
       <div className="table-scroll">

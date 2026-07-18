@@ -15,6 +15,9 @@ const CATEGORIES = ['All', 'Laning', 'Vision', 'Combat', 'Objectives', 'Macro'] 
 // one outlier doesn't flatten the rest. Values still shown as text.
 const BAR_CLAMP = 120
 
+// Below this much separation, wins and losses look the same - not a story.
+const SEP_FLOOR = 8
+
 // Small trend sparkline: value per game across the window, oldest → newest.
 function Sparkline({ values, unit }: { values: number[]; unit: string }) {
   if (values.length < 2) return <span className="mut sm-text">not enough games to trend</span>
@@ -49,7 +52,7 @@ const STATES = [
 function verdict(m: ProfileMetric, state: string): string {
   const sep = m.separationPct ?? 0
   const dir = m.higherIsBetter ? 'higher' : 'lower'
-  if (Math.abs(sep) < 8) return 'About the same in wins and losses — not a deciding factor for you in these games.'
+  if (Math.abs(sep) < SEP_FLOOR) return 'About the same in wins and losses — not a deciding factor for you in these games.'
   if (sep > 0) {
     const causal = state === 'all'
       ? ' (but in "all games" this may partly be an outcome of already being ahead — confirm it in the even-or-behind view)'
@@ -57,6 +60,43 @@ function verdict(m: ProfileMetric, state: string): string {
     return `You post a ${dir} number when you win${causal}. A real lever to lean into.`
   }
   return 'This is worse in your wins than losses, which usually means it scales with game length rather than being a weakness — read the trend, not the gap alone.'
+}
+
+// Wins vs losses as two plain bars on a shared scale: the gap IS the story.
+// Wins carry the color; losses are the muted comparison (emphasis, not alarm).
+function PairedBars({ m }: { m: ProfileMetric }) {
+  const max = Math.max(m.avgWins ?? 0, m.avgLosses ?? 0) || 1
+  const rows = [
+    { who: 'wins', v: m.avgWins, cls: 'w' },
+    { who: 'losses', v: m.avgLosses, cls: 'l' },
+  ] as const
+  return (
+    <div className="pair-bars">
+      {rows.map(r => (
+        <div key={r.who} className="pair-row">
+          <span className="who">{r.who}</span>
+          <span className="pair-bar"><span className={`fill ${r.cls}`} style={{ width: `${Math.round((100 * (r.v ?? 0)) / max)}%` }} /></span>
+          <span className="val">{fmt(r.v, m.unit)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function MetricDetail({ m, state }: { m: ProfileMetric; state: string }) {
+  return (
+    <div className="profile-detail">
+      <p style={{ margin: '0 0 12px' }}>{m.description}</p>
+      <div className="grid tiles" style={{ marginBottom: 12 }}>
+        <div className="tile"><div className="label">In your wins</div><div className="value win">{fmt(m.avgWins, m.unit)}</div></div>
+        <div className="tile"><div className="label">In your losses</div><div className="value loss">{fmt(m.avgLosses, m.unit)}</div></div>
+        <div className="tile"><div className="label">Overall avg</div><div className="value">{fmt(m.avg, m.unit)}</div><div className="sub">{m.games} games · {m.higherIsBetter ? 'higher is better' : 'lower is better'}</div></div>
+      </div>
+      <div className="sub-h">Trend across these games</div>
+      <Sparkline values={m.recent} unit={m.unit} />
+      <p className="mut sm-text" style={{ margin: '10px 0 0' }}>{verdict(m, state)}</p>
+    </div>
+  )
 }
 
 export default function ProfileCard({ profile, windowLabel }: { profile: { all: ProfileGroup; evenBehind: ProfileGroup; ahead: ProfileGroup }; windowLabel: string }) {
@@ -67,17 +107,31 @@ export default function ProfileCard({ profile, windowLabel }: { profile: { all: 
   const group = profile[state]
   const stateDef = STATES.find(s => s.key === state)!
 
-  const rows = useMemo(
+  const scored = useMemo(
     () => (group?.metrics ?? [])
-      .filter(m => cat === 'All' || m.category === cat)
       .filter(m => m.separationPct !== null)
       .sort((a, b) => (b.separationPct ?? 0) - (a.separationPct ?? 0)),
-    [group, cat],
+    [group],
+  )
+
+  // The headline: the few metrics where wins and losses genuinely diverge.
+  const levers = useMemo(() => scored.filter(m => (m.separationPct ?? 0) >= SEP_FLOOR).slice(0, 4), [scored])
+  const drags = useMemo(
+    () => scored.filter(m => (m.separationPct ?? 0) <= -SEP_FLOOR).slice(-3).reverse(),
+    [scored],
+  )
+
+  const explorerRows = useMemo(
+    () => scored.filter(m => cat === 'All' || m.category === cat),
+    [scored, cat],
   )
 
   if (!profile.all || profile.all.metrics.length === 0) {
     return <div className="empty">No challenge data yet — reprocess games on the Data page.</div>
   }
+
+  const openLever = levers.find(m => m.key === open)
+  const openDrag = drags.find(m => m.key === open)
 
   return (
     <>
@@ -90,66 +144,91 @@ export default function ProfileCard({ profile, windowLabel }: { profile: { all: 
           ))}
         </div>
       </div>
-      <p className="mut sm-text" style={{ margin: '0 0 12px' }}>{stateDef.blurb}</p>
-
-      <div className="filters" style={{ margin: '0 0 12px' }}>
-        <div className="seg">
-          {CATEGORIES.map(c => (
-            <button key={c} className={c === cat ? 'on' : ''} onClick={() => setCat(c)}>{c}</button>
-          ))}
-        </div>
-        <span className="mut sm-text">click a row for the meaning + trend · avg in wins / losses on the right</span>
-      </div>
+      <p className="mut sm-text" style={{ margin: '0 0 14px' }}>{stateDef.blurb}</p>
 
       {group.games < 4 && (
         <div className="empty">Only {group.games} {stateDef.label.toLowerCase()} games in this window — widen the window (top of page) for a reliable read.</div>
       )}
 
-      <div className="profile-list">
-        {rows.map(m => {
-          const sep = m.separationPct ?? 0
-          const width = (Math.min(Math.abs(sep), BAR_CLAMP) / BAR_CLAMP) * 50
-          const good = sep >= 0
-          const isOpen = open === m.key
-          return (
-            <div key={m.key}>
-              <div className={`profile-row clickable ${isOpen ? 'active' : ''}`} onClick={() => setOpen(isOpen ? null : m.key)}>
-                <span className="profile-label">
-                  <span className="disclosure">{isOpen ? '▾' : '▸'}</span>
-                  {m.label}
-                  <span className="cat-chip">{m.category}</span>
-                </span>
-                <span className="profile-bar" title={`${sep > 0 ? '+' : ''}${sep}% separation between wins and losses`}>
-                  <span className="axis" />
-                  <span className={good ? 'fill good' : 'fill bad'}
-                    style={good ? { left: '50%', width: `${width}%` } : { right: '50%', width: `${width}%` }} />
-                </span>
-                <span className="profile-vals">
-                  <span className="win">{fmt(m.avgWins, m.unit)}</span>
-                  <span className="mut"> / </span>
-                  <span className="loss">{fmt(m.avgLosses, m.unit)}</span>
-                </span>
-              </div>
-              {isOpen && (
-                <div className="profile-detail">
-                  <p style={{ margin: '0 0 12px' }}>{m.description}</p>
-                  <div className="grid tiles" style={{ marginBottom: 12 }}>
-                    <div className="tile"><div className="label">In your wins</div><div className="value win">{fmt(m.avgWins, m.unit)}</div></div>
-                    <div className="tile"><div className="label">In your losses</div><div className="value loss">{fmt(m.avgLosses, m.unit)}</div></div>
-                    <div className="tile"><div className="label">Overall avg</div><div className="value">{fmt(m.avg, m.unit)}</div><div className="sub">{m.games} games · {m.higherIsBetter ? 'higher is better' : 'lower is better'}</div></div>
-                  </div>
-                  <div className="sub-h">Trend across these games</div>
-                  <Sparkline values={m.recent} unit={m.unit} />
-                  <p className="mut sm-text" style={{ margin: '10px 0 0' }}>{verdict(m, state)}</p>
+      {levers.length > 0 && (
+        <>
+          <div className="sub-h" style={{ marginTop: 0 }}>What wins your games <span className="mut" style={{ textTransform: 'none', letterSpacing: 0 }}>— click a card for the meaning + trend</span></div>
+          <div className="lever-grid">
+            {levers.map(m => (
+              <div key={m.key} className={`lever-card ${open === m.key ? 'active' : ''}`} title={m.description}
+                onClick={() => setOpen(open === m.key ? null : m.key)}>
+                <div className="lever-head">
+                  <span className="lever-name">{m.label}</span>
+                  <span className="sep-chip good">+{Math.round(Math.min(m.separationPct ?? 0, BAR_CLAMP * 4))}%</span>
                 </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
+                <PairedBars m={m} />
+              </div>
+            ))}
+          </div>
+          {openLever && <MetricDetail m={openLever} state={state} />}
+        </>
+      )}
+
+      {drags.length > 0 && (
+        <>
+          <div className="sub-h">Higher in your losses <span className="mut" style={{ textTransform: 'none', letterSpacing: 0 }}>— often just game length; click before reading it as a weakness</span></div>
+          <div className="drag-list">
+            {drags.map(m => (
+              <div key={m.key} className={`drag-row ${open === m.key ? 'active' : ''}`} onClick={() => setOpen(open === m.key ? null : m.key)}>
+                <span className="lever-name">{m.label}</span>
+                <span className="drag-vals"><span className="win">{fmt(m.avgWins, m.unit)}</span><span className="mut"> in wins vs </span><span className="loss">{fmt(m.avgLosses, m.unit)}</span><span className="mut"> in losses</span></span>
+              </div>
+            ))}
+          </div>
+          {openDrag && <MetricDetail m={openDrag} state={state} />}
+        </>
+      )}
+
+      <details className="explore">
+        <summary>Explore all {scored.length} metrics</summary>
+        <div className="filters" style={{ margin: '12px 0' }}>
+          <div className="seg">
+            {CATEGORIES.map(c => (
+              <button key={c} className={c === cat ? 'on' : ''} onClick={() => setCat(c)}>{c}</button>
+            ))}
+          </div>
+          <span className="mut sm-text">avg in wins / losses on the right</span>
+        </div>
+        <div className="profile-list">
+          {explorerRows.map(m => {
+            const sep = m.separationPct ?? 0
+            const width = (Math.min(Math.abs(sep), BAR_CLAMP) / BAR_CLAMP) * 50
+            const good = sep >= 0
+            const isOpen = open === m.key
+            return (
+              <div key={m.key}>
+                <div className={`profile-row clickable ${isOpen ? 'active' : ''}`} onClick={() => setOpen(isOpen ? null : m.key)}>
+                  <span className="profile-label">
+                    <span className="disclosure">{isOpen ? '▾' : '▸'}</span>
+                    {m.label}
+                    <span className="cat-chip">{m.category}</span>
+                  </span>
+                  <span className="profile-bar" title={`${sep > 0 ? '+' : ''}${sep}% separation between wins and losses`}>
+                    <span className="axis" />
+                    <span className={good ? 'fill good' : 'fill bad'}
+                      style={good ? { left: '50%', width: `${width}%` } : { right: '50%', width: `${width}%` }} />
+                  </span>
+                  <span className="profile-vals">
+                    <span className="win">{fmt(m.avgWins, m.unit)}</span>
+                    <span className="mut"> / </span>
+                    <span className="loss">{fmt(m.avgLosses, m.unit)}</span>
+                  </span>
+                </div>
+                {isOpen && <MetricDetail m={m} state={state} />}
+              </div>
+            )
+          })}
+        </div>
+      </details>
+
       <p className="mut sm-text" style={{ margin: '12px 0 0' }}>
-        {stateDef.label} games from {windowLabel}, wins vs losses. Green/right = you do more of it when you win.
-        Comparing within a game state (not across all games) keeps this from just rewarding the snowball you already had.
+        {stateDef.label} games from {windowLabel}, wins vs losses. Comparing within a game state
+        (not across all games) keeps this from just rewarding the snowball you already had.
       </p>
     </>
   )
