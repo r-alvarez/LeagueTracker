@@ -2,6 +2,9 @@
 # Traefik on the external `frontend` network is the only way in — no host
 # ports. The render agent on the gaming PC reaches the tracker through the
 # same hostnames (split-horizon DNS points them at the NAS on the LAN).
+#
+# GitOps note: Portainer CE polling appears to redeploy only when THIS file
+# changes, not on every repo commit (probe: 2026-07-18).
 
 x-lt-build: &lt-build
   context: ../..
