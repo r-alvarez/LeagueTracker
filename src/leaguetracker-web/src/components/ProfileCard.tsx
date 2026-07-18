@@ -4,7 +4,16 @@ import type { ProfileGroup, ProfileMetric } from '../types'
 function fmt(v: number | null, unit: string): string {
   if (v === null) return '—'
   if (unit === '%') return `${Math.round(v * 100)}%`
-  if (unit === 'sec') return `${Math.round(v / 60)}:${String(Math.round(v % 60)).padStart(2, '0')}`
+  if (unit === 'sec') {
+    // Short durations are LEADS (level 6 lead: -7 = seven seconds behind) -
+    // a clock render like "0:-7" or even "−0:07" reads as gibberish there,
+    // so under two minutes they print as signed seconds. Longer values are
+    // times into the game and keep m:ss (rounded to whole seconds first,
+    // avoiding "5:60").
+    const s = Math.round(Math.abs(v))
+    if (s < 120) return `${v < 0 ? '−' : '+'}${s}s`
+    return `${v < 0 ? '−' : ''}${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  }
   if (unit === '/min') return v.toFixed(2)
   return Number.isInteger(v) ? String(v) : v.toFixed(1)
 }
@@ -65,7 +74,13 @@ function verdict(m: ProfileMetric, state: string): string {
 // Wins vs losses as two plain bars on a shared scale: the gap IS the story.
 // Wins carry the color; losses are the muted comparison (emphasis, not alarm).
 function PairedBars({ m }: { m: ProfileMetric }) {
-  const max = Math.max(m.avgWins ?? 0, m.avgLosses ?? 0) || 1
+  // Bar length encodes non-negative magnitude only, clamped to the track:
+  // lead metrics can average negative in BOTH wins and losses (a level-6
+  // deficit either way), and dividing by a negative max sends widths past
+  // 300% and out of the card. Zero-length bars + the printed values are the
+  // honest rendering of "behind in both".
+  const max = Math.max(m.avgWins ?? 0, m.avgLosses ?? 0, 0) || 1
+  const width = (v: number | null) => Math.max(0, Math.min(100, Math.round((100 * (v ?? 0)) / max)))
   const rows = [
     { who: 'wins', v: m.avgWins, cls: 'w' },
     { who: 'losses', v: m.avgLosses, cls: 'l' },
@@ -75,7 +90,7 @@ function PairedBars({ m }: { m: ProfileMetric }) {
       {rows.map(r => (
         <div key={r.who} className="pair-row">
           <span className="who">{r.who}</span>
-          <span className="pair-bar"><span className={`fill ${r.cls}`} style={{ width: `${Math.round((100 * (r.v ?? 0)) / max)}%` }} /></span>
+          <span className="pair-bar"><span className={`fill ${r.cls}`} style={{ width: `${width(r.v)}%` }} /></span>
           <span className="val">{fmt(r.v, m.unit)}</span>
         </div>
       ))}

@@ -411,7 +411,7 @@ tr.drill table.data td, tr.drill table.data th { background: transparent; }
 .sep-chip.good { color: var(--delta-good); background: rgba(63, 185, 80, 0.12); }
 .pair-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 5px 0; }
 .pair-row .who { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
-.pair-bar { position: relative; height: 8px; background: var(--overlay-track); border-radius: 0 var(--radius-pill) var(--radius-pill) 0; }
+.pair-bar { position: relative; height: 8px; background: var(--overlay-track); border-radius: 0 var(--radius-pill) var(--radius-pill) 0; overflow: hidden; }
 .pair-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0 var(--radius-pill) var(--radius-pill) 0; transition: width 400ms ease; }
 .pair-bar .fill.w { background: var(--chart-green); }
 .pair-bar .fill.l { background: var(--ink-4); }

@@ -288,33 +288,41 @@ export default function Dashboard() {
           {stats.followIn.totalDeaths > 0 && (
             <div className="card kpi-card" style={{ marginBottom: 16 }}>
               <h2>Death context <span className="mut" style={{ fontWeight: 400 }}>— following teammates in</span></h2>
+              {/* Rates lead, counts are context - raw counts just scale with the
+                  window and read meaningless under "All". */}
               <div className="kpi-band" style={{ gridTemplateColumns: 'repeat(5, minmax(0, 1fr))' }}>
                 <div className="kpi">
                   <div className="label">Follow-in deaths</div>
-                  <div className="value">{stats.followIn.followIns}</div>
-                  <div className="sub">{pct(stats.followIn.rate)} of {stats.followIn.totalDeaths} deaths</div>
+                  <div className="value">{pct(stats.followIn.rate)}</div>
+                  <div className="sub">{stats.followIn.followIns} of {stats.followIn.totalDeaths} deaths</div>
                 </div>
                 <div className="kpi">
                   <div className="label">Got nothing back</div>
-                  <div className="value">{stats.followIn.pureLoss}</div>
-                  <div className="sub">no enemy fell, trigger → 10s after</div>
+                  <div className="value">{stats.followIn.followIns > 0 ? pct(stats.followIn.pureLoss / stats.followIn.followIns) : '—'}</div>
+                  <div className="sub">{stats.followIn.pureLoss} follow-ins · no enemy fell, trigger → 10s after</div>
                 </div>
                 <div className="kpi">
-                  <div className="label">2+ allies already down</div>
-                  <div className="value">{stats.followIn.twoPlusDown}</div>
-                  <div className="sub">walked into an already-lost fight</div>
+                  <div className="label">Already-lost fights</div>
+                  <div className="value">{stats.followIn.followIns > 0 ? pct(stats.followIn.twoPlusDown / stats.followIn.followIns) : '—'}</div>
+                  <div className="sub">{stats.followIn.twoPlusDown} with 2+ allies already down</div>
                 </div>
                 <div className="kpi">
-                  <div className="label">Team gold state</div>
-                  <div className="value">{stats.followIn.goldState.behind}↓ {stats.followIn.goldState.even}= {stats.followIn.goldState.ahead}↑</div>
-                  <div className="sub">behind / even / ahead (±1500)</div>
+                  <div className="label">While behind</div>
+                  {(() => {
+                    const gs = stats.followIn.goldState
+                    const total = gs.behind + gs.even + gs.ahead
+                    return <>
+                      <div className="value">{total > 0 ? pct(gs.behind / total) : '—'}</div>
+                      <div className="sub">{gs.behind}↓ {gs.even}= {gs.ahead}↑ team gold (±1500)</div>
+                    </>
+                  })()}
                 </div>
                 <div className="kpi">
                   <div className="label">Followed in after</div>
-                  <div className="value" style={{ fontSize: 17 }}>
-                    {stats.followIn.byRole.slice(0, 3).map(r => `${r.key} ${r.count}`).join(' · ') || '—'}
+                  <div className="value">{stats.followIn.byRole[0]?.key ?? '—'}</div>
+                  <div className="sub">
+                    {stats.followIn.byRole.slice(0, 3).map(r => `${r.key} ${r.count}`).join(' · ') || 'teammate role'}
                   </div>
-                  <div className="sub">teammate role</div>
                 </div>
               </div>
             </div>
