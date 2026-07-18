@@ -290,7 +290,7 @@ export default function Dashboard() {
               <h2>Death context <span className="mut" style={{ fontWeight: 400 }}>— following teammates in</span></h2>
               {/* Rates lead, counts are context - raw counts just scale with the
                   window and read meaningless under "All". */}
-              <div className="kpi-band" style={{ gridTemplateColumns: 'repeat(5, minmax(0, 1fr))' }}>
+              <div className="kpi-band cols-5">
                 <div className="kpi">
                   <div className="label">Follow-in deaths</div>
                   <div className="value">{pct(stats.followIn.rate)}</div>
@@ -299,7 +299,7 @@ export default function Dashboard() {
                 <div className="kpi">
                   <div className="label">Got nothing back</div>
                   <div className="value">{stats.followIn.followIns > 0 ? pct(stats.followIn.pureLoss / stats.followIn.followIns) : '—'}</div>
-                  <div className="sub">{stats.followIn.pureLoss} follow-ins · no enemy fell, trigger → 10s after</div>
+                  <div className="sub">{stats.followIn.pureLoss} follow-ins · no enemy fell within 10s</div>
                 </div>
                 <div className="kpi">
                   <div className="label">Already-lost fights</div>
@@ -455,7 +455,7 @@ export default function Dashboard() {
             </div>
             <div className="card">
               <h2>LP per day — {queue} <span className="mut" style={{ fontWeight: 400 }}>— hover a day for its games</span></h2>
-              <LpPerGameBars games={queueGames} />
+              <LpPerGameBars games={queueGames} points={lpPoints} />
             </div>
           </div>
         </>
