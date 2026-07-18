@@ -14,12 +14,19 @@ interface TooltipProps {
 function LpTooltip({ active, payload }: TooltipProps) {
   if (!active || !payload?.length) return null
   const p = payload[0].payload
+  // Back-filled history (imported from dpm.lol) has no cumulative win/loss
+  // counters - it's a day's closing rank, not a live snapshot.
+  const backfilled = p.wins + p.losses === 0
   return (
     <div className="viz-tooltip">
       <div className="v">{p.label}</div>
       <div className="l">
-        {new Date(p.timestampUtc).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-        {' · '}{p.wins}W/{p.losses}L
+        {backfilled
+          ? <>{new Date(p.timestampUtc).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · daily close (back-filled)</>
+          : <>
+              {new Date(p.timestampUtc).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              {' · '}{p.wins}W/{p.losses}L
+            </>}
       </div>
     </div>
   )
@@ -39,6 +46,12 @@ export default function LpLineChart({ points }: Props) {
   return (
     <ResponsiveContainer width="100%" height={260}>
       <AreaChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 8 }}>
+        <defs>
+          <linearGradient id="lpFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--series-1)" stopOpacity={0.22} />
+            <stop offset="100%" stopColor="var(--series-1)" stopOpacity={0.02} />
+          </linearGradient>
+        </defs>
         <CartesianGrid stroke="var(--grid)" strokeWidth={1} vertical={false} />
         <XAxis
           dataKey="t"
@@ -65,8 +78,7 @@ export default function LpLineChart({ points }: Props) {
           dataKey="rankValue"
           stroke="var(--series-1)"
           strokeWidth={2}
-          fill="var(--series-1)"
-          fillOpacity={0.1}
+          fill="url(#lpFill)"
           strokeLinejoin="round"
           strokeLinecap="round"
           activeDot={{ r: 5, fill: 'var(--series-1)', stroke: 'var(--surface)', strokeWidth: 2 }}
