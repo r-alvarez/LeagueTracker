@@ -687,3 +687,11 @@ export interface LpPerGame {
   lpAfter: string | null
   lpChange: number | null
 }
+
+export interface StopLoss {
+  streak: number
+  lastGameEndUtc: string | null
+  minutesSinceLastGame: number | null
+  sessionActive: boolean
+  nextGame: Array<{ afterLosses: number; games: number; winRate: number | null }>
+}

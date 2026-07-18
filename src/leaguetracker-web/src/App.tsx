@@ -9,6 +9,7 @@ import DataPage from './pages/DataPage'
 import Coach from './pages/Coach'
 import Fundamentals from './pages/Fundamentals'
 import LiveGameBanner from './components/LiveGameBanner'
+import StopLossBanner from './components/StopLossBanner'
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null)
@@ -47,6 +48,7 @@ export default function App() {
       </nav>
 
       <LiveGameBanner />
+      <StopLossBanner />
 
       <Routes>
         <Route path="/" element={<Dashboard />} />

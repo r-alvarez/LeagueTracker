@@ -479,3 +479,16 @@ games 5W-6L, unknown 4W-3L) otherwise reads as a verdict it isn't.
 steps ranked a 10 KDA below a 3 to anyone reading amber as a warning
 (which is what amber means everywhere else in this app). Better KDA is now
 simply brighter green.
+
+**Stop-loss banner: the tilt guard argues from the player's own history.**
+Motivating incident: 2026-07-13 went 0W-4L for -86 LP - more than three
+good days earn back. GET /api/stoploss computes, over all ranked games,
+the winrate of the NEXT game after N straight same-session losses
+(sessions chain games ending <3h apart; buckets 0/1/2/3+), plus the
+current tail streak. A global banner appears only while a losing session
+is live (2+ straight losses, last game <3h ago): amber at 2 ("one more
+loss and the math says stop"), red at 3+ ("the math says stop for
+today"), always citing the measured next-game winrate vs fresh. No LP
+involved, so it works on hide-LP instances and needs no attribution;
+evidence is suppressed below 5 bucket games. Generic break-reminders were
+rejected - the banner only says what the player's own record supports.
