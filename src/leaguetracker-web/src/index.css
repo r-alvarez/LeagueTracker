@@ -954,6 +954,7 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .fund-box-meta { display: inline-flex; align-items: center; gap: 7px; }
 .fund-box-meta:empty { display: none; }
 .fund-score { font-weight: 800; font-size: 12px; font-variant-numeric: tabular-nums; }
+.fund-trend { font-size: 9px; }
 
 /* Goal verdicts: a quiet left stripe + softly tinted border, so six "train
    this" boxes read as a to-do list rather than a wall of alarms. "later"

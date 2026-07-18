@@ -440,3 +440,17 @@ A bare 1fr track floors at the table's min-content width, forcing page-wide
 horizontal scroll on phones. Found measuring real layout width via headless
 dump (screenshot right-edge clipping turned out to be a capture artifact —
 Edge lays out wider than it captures).
+
+**Fundamentals ladder judged by own form, not Challenge levels.** The box
+chips and colors were anchored on the median of Riot's lifetime Challenge
+levels — cumulative grind counters. Cross-account data made the flaw
+undeniable: a Bronze 2 account with ~6x the lifetime volume (20,535 wards
+placed vs 3,070; 522 Baron powerplays vs 79) holds Master chips on every
+skill and a board that glows "ready" for Platinum. Chips removed from the
+ladder; colors now read the player's own recent-form percentile on the
+rows at/below the goal (60+ strong, 40+ train, below priority), each box
+carries a net trend arrow vs baseline, and the detail card auto-opens the
+weakest goal-relevant skill — the training map the page was meant to be.
+Challenges stay only as the detail card's labeled lifetime-context strip.
+The footnote now states the box numbers are self-relative and never
+comparable between accounts.
