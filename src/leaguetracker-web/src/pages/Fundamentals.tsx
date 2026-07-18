@@ -27,23 +27,29 @@ const BAND_H = 116
 // Climb goals the boxes are judged against (chips, not rows, are the judgment).
 const TARGETS = ['SILVER', 'GOLD', 'PLATINUM', 'EMERALD', 'DIAMOND']
 
-// Challenge levels skip EMERALD and run past DIAMOND; place them on the tier scale.
-const levelIdx = (level: string) => {
-  const i = TIER_ORDER.indexOf(level)
-  return i >= 0 ? i : ['MASTER', 'GRANDMASTER', 'CHALLENGER'].includes(level) ? TIER_ORDER.length : -1
-}
-
-/// ready = chip at/above the goal; focus/urgent = below it (1 / 2+ tiers) on a
-/// row that matters for the goal; later = the row only gates beyond the goal.
+/// Colors read the player's OWN form (recent-window percentile within their own
+/// history) on the rows that matter for the goal. Riot Challenge levels are
+/// deliberately not judged: they're lifetime grind counters — a high-playtime
+/// Bronze account holds Master chips everywhere — so they anchor nothing and
+/// live only in the detail card's labeled context strip.
 function areaStatus(a: FundamentalArea, target: string): 'ready' | 'focus' | 'urgent' | 'later' | 'none' {
   const rowI = TIER_ORDER.indexOf(a.tier)
   const targetI = TIER_ORDER.indexOf(target)
   if (rowI > targetI) return 'later'
-  if (!a.ladder) return 'none'
-  const chipI = levelIdx(a.ladder.level)
-  if (chipI < 0) return 'none'
-  if (chipI >= targetI) return 'ready'
-  return targetI - chipI >= 2 ? 'urgent' : 'focus'
+  if (a.score === null) return 'none'
+  return a.score >= 60 ? 'ready' : a.score >= 40 ? 'focus' : 'urgent'
+}
+
+/// Net direction of an area's scored metrics, recent vs baseline.
+function areaTrend(a: FundamentalArea): 'up' | 'down' | null {
+  let up = 0
+  let down = 0
+  for (const t of a.tiles) {
+    if (t.higherIsBetter === null || t.value === null || t.old === null || t.value === t.old) continue
+    if (t.value > t.old === t.higherIsBetter) up++
+    else down++
+  }
+  return up > down ? 'up' : down > up ? 'down' : null
 }
 
 function TierEmblem({ tier, size = 30 }: { tier: string; size?: number }) {
@@ -74,18 +80,6 @@ function Delta({ t }: { t: LensTile }) {
 /// "top 12%" from the challenges percentile (share of players at or above the level).
 const topShare = (p: number | null) => (p !== null ? `top ${Math.max(1, Math.round(p * 100))}%` : null)
 
-function LadderChip({ area, compact }: { area: FundamentalArea; compact?: boolean }) {
-  if (!area.ladder) {
-    return compact ? null : <span className="mut sm-text">no Riot ladder anchor</span>
-  }
-  const share = topShare(area.ladder.topShare)
-  return (
-    <span className={`rank-chip ${tierClass(area.ladder.level)}`} title="Median level of the mapped Riot Challenges">
-      {area.ladder.level}{share && !compact ? ` · ${share}` : ''}
-    </span>
-  )
-}
-
 function AreaDetail({ area, data }: { area: FundamentalArea; data: FundamentalsResponse }) {
   const [selected, setSelected] = useState(area.tiles[0]?.key)
   useEffect(() => { setSelected(area.tiles[0]?.key) }, [area])
@@ -97,7 +91,6 @@ function AreaDetail({ area, data }: { area: FundamentalArea; data: FundamentalsR
         <h2>
           {area.label} <span className="mut">gates at {TIER_LABEL[area.tier]}</span>
         </h2>
-        <LadderChip area={area} />
         <Ring score={area.score} size={44} />
       </div>
       <p className="mut sm-text fund-desc">{area.desc}</p>
@@ -217,10 +210,15 @@ export default function Fundamentals() {
     return idx * BAND_H + (1 - frac) * BAND_H
   }, [rank, rows])
 
+  // Auto-open the weakest skill that matters for the goal (rows gating beyond
+  // it only when nothing below scores) — the "train this next" default.
   const weakest = useMemo(() => {
     const scored = (data?.areas ?? []).filter(a => a.score !== null)
-    return scored.length > 0 ? scored.reduce((a, b) => (a.score! <= b.score! ? a : b)).key : null
-  }, [data])
+    const targetI = TIER_ORDER.indexOf(target)
+    const relevant = scored.filter(a => TIER_ORDER.indexOf(a.tier) <= targetI)
+    const pool = relevant.length > 0 ? relevant : scored
+    return pool.length > 0 ? pool.reduce((a, b) => (a.score! <= b.score! ? a : b)).key : null
+  }, [data, target])
 
   const selectedArea = data?.areas.find(a => a.key === (areaKey ?? weakest)) ?? data?.areas[0]
 
@@ -285,9 +283,13 @@ export default function Fundamentals() {
                     >
                       <span className="fund-box-label">{a.label}</span>
                       <span className="fund-box-meta">
-                        <LadderChip area={a} compact />
                         {a.score !== null && (
                           <span className="fund-score" style={{ color: ringColor(a.score) }}>{a.score}</span>
+                        )}
+                        {data.hasBaseline && areaTrend(a) && (
+                          <span className={`fund-trend ${areaTrend(a) === 'up' ? 'win' : 'loss'}`}>
+                            {areaTrend(a) === 'up' ? '▲' : '▼'}
+                          </span>
                         )}
                       </span>
                     </button>
@@ -309,13 +311,16 @@ export default function Fundamentals() {
             </div>
             <p className="mut sm-text" style={{ margin: '10px 2px 0' }}>
               Boxes sit at the rank tier where each skill typically starts deciding games — they don't move with your
-              performance. The number on a box is your last {data.window} games' percentile within your own {data.games}-game
-              history; the tier chip is the median of Riot's own Challenge levels mapped to that skill (lifetime, so it
-              partly reflects playtime). Colors judge each chip against your <strong>{TIER_LABEL[target]}</strong> goal:{' '}
-              <span className="fund-key ready">ready</span> at/above it, <span className="fund-key focus">train</span> one
-              tier short, <span className="fund-key urgent">priority</span> two or more short;{' '}
-              <span className="fund-key later">white</span> skills gate beyond the goal — not applicable yet, still worth
-              improving. {rankLineTop === null && 'Rank line hidden — rank/LP display is off for this instance.'}
+              performance. The number on a box is your recent form: where your last {data.window} games sit within your own{' '}
+              {data.games}-game history (self-relative — never comparable between accounts), with the arrow showing whether
+              the underlying metrics moved up or down vs your baseline. Colors read that form on the skills that matter for
+              your <strong>{TIER_LABEL[target]}</strong> goal: <span className="fund-key ready">strong</span> — recent games
+              sit high in your own history, <span className="fund-key focus">train</span> — middling,{' '}
+              <span className="fund-key urgent">priority</span> — well below your usual;{' '}
+              <span className="fund-key later">white</span> skills gate beyond the goal — not judged yet. Riot Challenge
+              levels are lifetime grind counters (a high-playtime account holds Master chips at any rank), so they appear
+              only as labeled context in the detail card, never as a verdict.{' '}
+              {rankLineTop === null && 'Rank line hidden — rank/LP display is off for this instance.'}
             </p>
           </div>
 
