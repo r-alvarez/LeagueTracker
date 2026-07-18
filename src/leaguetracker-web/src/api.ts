@@ -1,4 +1,4 @@
-import type { AnalyticsSummary, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StorageInfo, Status } from './types'
+import type { AnalyticsSummary, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const resp = await fetch(url)
@@ -59,6 +59,7 @@ export const api = {
   },
   lpHistory: (queue: string) => get<LpPoint[]>(`/api/lp/history?queue=${encodeURIComponent(queue)}`),
   lpPerGame: () => get<LpPerGame[]>('/api/lp/per-game'),
+  stopLoss: () => get<StopLoss>('/api/stoploss'),
   jobStatus: () => get<JobStatus>('/api/jobs/status'),
   // No params = the whole thing: pages Riot's match list until it runs dry, all queues.
   syncHistory: () => post<JobStatus>('/api/sync/history'),

@@ -630,6 +630,50 @@ app.MapPost("/api/analytics/reprocess", (IServiceScopeFactory scopeFactory, JobS
     return Results.Accepted("/api/jobs/status", jobs.Snapshot());
 });
 
+// --- Stop-loss ------------------------------------------------------------------
+// Evidence for the tilt guard: how the NEXT ranked game historically went after
+// N straight same-session losses (a session chains games ending <3h apart),
+// plus the current tail streak. Winrate-only - no LP, so it works on every
+// instance and doesn't need attribution.
+app.MapGet("/api/stoploss", async (LeagueDbContext db, CancellationToken ct) =>
+{
+    var games = await db.Matches.AsNoTracking()
+        .Where(m => m.IsRanked && m.DurationSec >= 300)
+        .OrderBy(m => m.GameEndUtc)
+        .Select(m => new { m.GameEndUtc, m.Win })
+        .ToListAsync(ct);
+
+    const double sessionGapMin = 180;
+    var total = new int[4];   // index = losses immediately before the game, capped at 3+
+    var wins = new int[4];
+    var streak = 0;
+    DateTime? prevEnd = null;
+    foreach (var g in games)
+    {
+        if (prevEnd is { } p && (g.GameEndUtc - p).TotalMinutes > sessionGapMin) streak = 0;
+        var idx = Math.Min(streak, 3);
+        total[idx]++;
+        if (g.Win) wins[idx]++;
+        streak = g.Win ? 0 : streak + 1;
+        prevEnd = g.GameEndUtc;
+    }
+
+    var minutesSince = prevEnd is { } last ? (int?)Math.Round((DateTime.UtcNow - last).TotalMinutes) : null;
+    return Results.Ok(new
+    {
+        Streak = streak,
+        LastGameEndUtc = prevEnd,
+        MinutesSinceLastGame = minutesSince,
+        SessionActive = minutesSince is { } m && m <= sessionGapMin,
+        NextGame = Enumerable.Range(0, 4).Select(i => new
+        {
+            AfterLosses = i,
+            Games = total[i],
+            WinRate = total[i] > 0 ? (double?)Math.Round(100.0 * wins[i] / total[i]) : null,
+        }).ToList(),
+    });
+});
+
 // --- LP -------------------------------------------------------------------------
 
 app.MapGet("/api/lp/history", async (LeagueDbContext db, string? queue, CancellationToken ct) =>
