@@ -1,4 +1,4 @@
-import type { AnalyticsSummary, ChallengeBenchmark, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StorageInfo, Status } from './types'
+import type { AnalyticsSummary, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StorageInfo, Status } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const resp = await fetch(url)
@@ -64,12 +64,6 @@ export const api = {
   syncHistory: () => post<JobStatus>('/api/sync/history'),
   importFolder: (path: string) => post<JobStatus>(`/api/import?path=${encodeURIComponent(path)}`),
   analytics: (lastN: number) => get<AnalyticsSummary>(`/api/analytics/summary?lastN=${lastN}`),
-  challengePercentiles: async (): Promise<ChallengeBenchmark | null> => {
-    const r = await fetch('/api/challenges/percentiles')
-    if (r.status === 204) return null   // not fetched from Riot yet (or the fetch failed with nothing cached)
-    if (!r.ok) throw new Error(`/api/challenges/percentiles -> HTTP ${r.status}`)
-    return r.json()
-  },
   live: async (): Promise<LiveGame | null> => {
     const r = await fetch('/api/live')
     if (r.status === 204) return null   // not in a game

@@ -7,7 +7,6 @@ import { LaneGoldChart, RollingWinRateChart } from '../components/TrendCharts'
 import ChampBadge from '../components/ChampBadge'
 import ProfileCard from '../components/ProfileCard'
 import ProfileHeader from '../components/ProfileHeader'
-import ChallengesCard from '../components/ChallengesCard'
 import RoleIcon from '../components/RoleIcon'
 import { WinrateBar } from '../components/Stats'
 
@@ -146,6 +145,7 @@ export default function Dashboard() {
   const [lpPoints, setLpPoints] = useState<LpPoint[]>([])
   const [lpGames, setLpGames] = useState<LpPerGame[]>([])
   const [deaths, setDeaths] = useState<AnalyticsSummary | null>(null)
+  const [kpiOpen, setKpiOpen] = useState(false)
 
   // Freshly captured games should show up without a manual reload, so every
   // loader refetches on a quiet interval alongside its trigger.
@@ -184,7 +184,6 @@ export default function Dashboard() {
 
   const o = stats?.overall
   const s = stats?.scope
-  const soloDelta = stats?.lpDeltas.find(d => d.queue === 'Solo/Duo')
   const windowLabel = useMemo(() => {
     const w = WINDOWS.find(x => x.key === windowKey)!
     if (w.key === 'all') return `all ${s?.games ?? ''} ranked games`.trim()
@@ -208,56 +207,73 @@ export default function Dashboard() {
 
       {stats && s && o && (
         <>
-          <div className="grid tiles" style={{ marginBottom: 16 }}>
-            <div className="card tile">
-              <div className="label">Record</div>
-              <div className="value">{s.wins}-{s.losses}</div>
-              <div className="sub">
-                {pct(s.winRate)} · {s.champions} champs
-                {soloDelta && (soloDelta.last30 !== null || soloDelta.last7 !== null) &&
-                  ` · LP 30d ${signed(soloDelta.last30)} / 7d ${signed(soloDelta.last7)}`}
+          {/* Six headline numbers, one calm band; everything second-order sits
+              behind the expander so the first read is never a wall of figures.
+              LP deltas live in the profile header, so they aren't repeated here. */}
+          <div className="card kpi-card" style={{ marginBottom: 16 }}>
+            <div className="kpi-band">
+              <div className="kpi">
+                <div className="label">Record</div>
+                <div className="value">{s.wins}-{s.losses}</div>
+                <div className="sub">{pct(s.winRate)} WR · {s.champions} champs</div>
+              </div>
+              <div className="kpi">
+                <div className="label">KDA</div>
+                <div className="value">{o.kda}</div>
+                <div className="sub">KP {pct(o.kp)}</div>
+              </div>
+              <div className="kpi">
+                <div className="label">Damage/min</div>
+                <div className="value">{o.dpm}</div>
+                <div className="sub">{o.gpm} gold/min</div>
+              </div>
+              <div className="kpi">
+                <div className="label">CS@10</div>
+                <div className="value">{o.csAt10}</div>
+                <div className="sub">{o.csPerMin} CS/min</div>
+              </div>
+              <div className="kpi">
+                <div className="label">Lane gold@10</div>
+                <div className={`value ${o.laneGoldAt10 !== null ? (o.laneGoldAt10 >= 0 ? 'win' : 'loss') : ''}`}>{signed(o.laneGoldAt10)}</div>
+                <div className="sub">CS diff {signed(o.laneCsAt10)}</div>
+              </div>
+              <div className="kpi">
+                <div className="label">Deaths/game</div>
+                <div className="value">{o.deathsPerGame}</div>
+                <div className="sub">{o.deathsPre10} before 10:00</div>
               </div>
             </div>
-            <div className="card tile">
-              <div className="label">KDA</div>
-              <div className="value">{o.kda}</div>
-              <div className="sub">KP {pct(o.kp)}</div>
-            </div>
-            <div className="card tile">
-              <div className="label">DPM / GPM</div>
-              <div className="value">{o.dpm}</div>
-              <div className="sub">{o.gpm} gpm · early {o.dpmEarly} · mid {o.dpmMid} · late {o.dpmLate}</div>
-            </div>
-            <div className="card tile">
-              <div className="label">CS@10</div>
-              <div className="value">{o.csAt10}</div>
-              <div className="sub">{o.csPerMin} cs/min</div>
-            </div>
-            <div className="card tile">
-              <div className="label">Lane gold@10</div>
-              <div className="value">{signed(o.laneGoldAt10)}</div>
-              <div className="sub">cs diff {signed(o.laneCsAt10)}</div>
-            </div>
-            <div className="card tile">
-              <div className="label">Vision/min</div>
-              <div className="value">{o.visionPerMin}</div>
-              <div className="sub">{o.controlWardsPerGame} control/game</div>
-            </div>
-            <div className="card tile">
-              <div className="label">Deaths/game</div>
-              <div className="value">{o.deathsPerGame}</div>
-              <div className="sub">pre10 {o.deathsPre10} · 20+ {o.deathsPost20}</div>
-            </div>
-            <div className="card tile">
-              <div className="label">Solo kills/game</div>
-              <div className="value">{o.soloKillsPerGame}</div>
-              <div className="sub">multikills: {o.triples}×3 {o.quadras}×4 {o.pentas}×5</div>
-            </div>
-            <div className="card tile">
-              <div className="label">Skillshots dodged / hit</div>
-              <div className="value">{o.skillshotsDodgedPerGame} / {o.skillshotsHitPerGame}</div>
-              <div className="sub">per game · dmg taken {o.damageTakenPerMin}/min</div>
-            </div>
+            <button className="kpi-toggle" onClick={() => setKpiOpen(v => !v)}>
+              {kpiOpen ? 'Hide detail ▴' : 'More detail ▾'}
+            </button>
+            {kpiOpen && (
+              <div className="kpi-detail">
+                <div className="stat-row">
+                  <span className="k">Damage/min by phase<small>early · mid · late game</small></span>
+                  <span className="v">{o.dpmEarly} · {o.dpmMid} · {o.dpmLate}</span>
+                </div>
+                <div className="stat-row">
+                  <span className="k">Damage taken<small>per minute</small></span>
+                  <span className="v">{o.damageTakenPerMin}</span>
+                </div>
+                <div className="stat-row">
+                  <span className="k">Deaths by phase<small>pre-10 · 10–20 · 20+</small></span>
+                  <span className="v">{o.deathsPre10} · {o.deaths10To20} · {o.deathsPost20}</span>
+                </div>
+                <div className="stat-row">
+                  <span className="k">Vision<small>{o.controlWardsPerGame} control wards/game</small></span>
+                  <span className="v">{o.visionPerMin}/min</span>
+                </div>
+                <div className="stat-row">
+                  <span className="k">Solo kills/game<small>multikills {o.triples} triple · {o.quadras} quadra · {o.pentas} penta</small></span>
+                  <span className="v">{o.soloKillsPerGame}</span>
+                </div>
+                <div className="stat-row">
+                  <span className="k">Skillshots/game<small>dodged · hit</small></span>
+                  <span className="v">{o.skillshotsDodgedPerGame} · {o.skillshotsHitPerGame}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {stats.observations.length > 0 && (
@@ -273,9 +289,6 @@ export default function Dashboard() {
             <h2>Strengths &amp; weaknesses <span className="mut" style={{ fontWeight: 400 }}>— what separates your wins from losses</span></h2>
             <ProfileCard profile={stats.profile} windowLabel={windowLabel} />
           </div>
-
-          <ChallengesCard />
-
 
           {stats.followIn.totalDeaths > 0 && (
             <details className="card" style={{ marginBottom: 16 }}>

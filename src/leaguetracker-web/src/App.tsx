@@ -17,10 +17,17 @@ export default function App() {
     api.status().then(setStatus).catch(() => setStatus(null))
   }, [])
 
+  // Month-level dates and a patch range keep the scope line one calm phrase;
+  // the full patch list lives in the tooltip for anyone who wants it.
+  const month = (d: string) =>
+    new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+  const patches = status?.patches ?? []
   const scope = status && status.matches > 0
     ? `${status.matches} games` +
-      (status.patches.length > 0 ? ` · patches ${status.patches.join(', ')}` : '') +
-      (status.dateFrom ? ` · ${status.dateFrom} → ${status.dateTo}` : '')
+      (patches.length > 0
+        ? ` · patch ${patches[0]}${patches.length > 1 ? ` → ${patches[patches.length - 1]}` : ''}`
+        : '') +
+      (status.dateFrom && status.dateTo ? ` · ${month(status.dateFrom)} → ${month(status.dateTo)}` : '')
     : null
 
   return (
@@ -28,7 +35,7 @@ export default function App() {
       <header className="topbar">
         <h1>LeagueTracker</h1>
         {status && <span className="player">{status.riotId}</span>}
-        {scope && <span className="sub">{scope}</span>}
+        {scope && <span className="sub" title={patches.length > 1 ? `patches ${patches.join(', ')}` : undefined}>{scope}</span>}
       </header>
 
       <nav className="tabs">

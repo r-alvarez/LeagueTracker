@@ -408,3 +408,35 @@ Note: the player's account of both games was checked against the data
 before tuning (3s/161u co-location confirmed) - the tune stands on the
 mislabel, not on the plea. Existing rows keep old tags until a
 /api/analytics/reprocess; the verdict fold changes apply immediately.
+
+## 2026-07-18 — Dashboard reads like a summary, not a spreadsheet
+
+**Stat tiles collapsed into one KPI band with progressive disclosure.** Nine
+cards of dense numbers became six headline figures (record, KDA, DPM, CS@10,
+lane gold@10, deaths/game) with one context line each, and everything
+second-order (phase splits, vision, multikills, skillshots) behind a "More
+detail" expander. Modeled on how dpm.lol/tracker.gg front a summary strip:
+the reader gets the state of the account in one glance and digs only on
+intent. LP deltas left off the tiles — the profile header already owns them.
+
+**Strengths & weaknesses leads with the story, not the data.** The 26-bar
+wall answered "what are my numbers" but not "what wins my games". Now the
+card opens with up to four win-lever cards (|separation| >= 8pp) drawn as
+paired win/loss bars on a shared scale, a quiet higher-in-losses strip with
+an explicit game-length caveat, and the full explorer collapsed behind
+"Explore all metrics". The separation floor keeps noise metrics from
+masquerading as insight.
+
+**"Vs the ladder" (Riot Challenges percentiles) removed from the dashboard.**
+Challenges are lifetime achievement grinds: account-scoped, playtime-
+confounded, never windowed. "Master Tank: Iron" measures champion-pool
+choice, not skill; percentile deltas there produce "train this" advice that
+is actively misleading. Fundamentals keeps its per-area ladder context,
+which is scoped to real skill areas. Component, endpoint call, and CSS all
+deleted rather than hidden — nothing consumes challengePercentiles now.
+
+**Mobile: grid tracks that host tables are minmax(0,1fr), never bare 1fr.**
+A bare 1fr track floors at the table's min-content width, forcing page-wide
+horizontal scroll on phones. Found measuring real layout width via headless
+dump (screenshot right-edge clipping turned out to be a capture artifact —
+Edge lays out wider than it captures).

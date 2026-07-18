@@ -127,13 +127,33 @@ nav.tabs a.active {
 .grid { display: grid; gap: 16px; }
 .tiles { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .two-col { grid-template-columns: 3fr 2fr; }
-@media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+/* minmax(0, 1fr), not 1fr: a bare 1fr track floors at the table's min-content
+   width, forcing page-wide horizontal scroll on phones. */
+@media (max-width: 900px) { .two-col { grid-template-columns: minmax(0, 1fr); } }
 
 /* Stat tile: eyebrow label, hero-weight number (proportional figures at
    display size), muted context line - baseline rhythm from the dataviz spec. */
 .tile .label { color: var(--muted); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
 .tile .value { font-size: 27px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.15; margin-top: 5px; }
 .tile .sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+
+/* KPI band: one card, six headline numbers separated by hairline dividers -
+   a row of figures the eye can sweep, not a wall of boxed tiles. Second-order
+   numbers live in the expander below it. */
+.kpi-band { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px 0; }
+.kpi { min-width: 0; padding: 2px 20px; border-left: 1px solid var(--grid); }
+.kpi:first-child { border-left: 0; padding-left: 2px; }
+.kpi .label { color: var(--muted); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap; }
+.kpi .value { font-size: 30px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.15; margin-top: 6px; }
+.kpi .sub { color: var(--muted); font-size: 12px; margin-top: 3px; white-space: nowrap; }
+.kpi-toggle {
+  margin-top: 12px; padding: 0; border: 0; background: transparent;
+  color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.kpi-toggle:hover { color: var(--ink); }
+.kpi-detail { margin-top: 10px; border-top: 1px solid var(--grid); display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 0 36px; }
+.kpi-detail .stat-row { padding: 9px 0; }
+.kpi-detail .stat-row .v { font-size: 15px; }
 
 .filters { display: flex; gap: 8px; align-items: center; margin: 0 0 14px; flex-wrap: wrap; }
 .seg {
@@ -200,6 +220,10 @@ table.data tbody tr.row-loss:hover td { background: rgba(240, 85, 106, 0.11); }
 /* Scoreboard (match detail, General tab) */
 .sb-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
 .sb-head h2 { font-size: 16px; }
+/* Team aggregates beside the result: K/D/A, damage, gold - the side's story
+   in one glance before the per-player rows (tracker.gg-style header). */
+.sb-totals { display: inline-flex; gap: 14px; font-weight: 650; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sb-totals .mut { font-weight: 450; font-size: 11.5px; }
 .obj-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .obj-chip {
   font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
@@ -369,6 +393,43 @@ tr.drill table.data td, tr.drill table.data th { background: transparent; }
 .profile-detail .tiles { grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .profile-detail .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
 .spark-scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-2); margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+/* Win levers: the headline read of strengths & weaknesses - one metric per
+   card, wins vs losses as paired bars on a shared scale. Wins carry the hue,
+   losses are the gray comparison; the gap between the bars is the story. */
+.lever-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); gap: 12px; margin-bottom: 8px; }
+.lever-card {
+  min-width: 0;
+  background: var(--surface-inset); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; cursor: pointer; transition: border-color 120ms;
+}
+.lever-card:hover { border-color: var(--border-strong); }
+.lever-card.active { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--panel-2); }
+.lever-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.lever-name { font-weight: 650; font-size: 13px; }
+.sep-chip { font-size: 11px; font-weight: 700; border-radius: var(--radius-pill); padding: 1px 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sep-chip.good { color: var(--delta-good); background: rgba(63, 185, 80, 0.12); }
+.pair-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 5px 0; }
+.pair-row .who { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.pair-bar { position: relative; height: 8px; background: var(--overlay-track); border-radius: 0 var(--radius-pill) var(--radius-pill) 0; }
+.pair-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0 var(--radius-pill) var(--radius-pill) 0; transition: width 400ms ease; }
+.pair-bar .fill.w { background: var(--chart-green); }
+.pair-bar .fill.l { background: var(--ink-4); }
+.pair-row .val { font-size: 12.5px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Metrics that lean the other way, kept quiet - usually game-length artifacts. */
+.drag-list { display: flex; flex-direction: column; margin-bottom: 8px; }
+.drag-row { display: flex; justify-content: space-between; gap: 4px 12px; padding: 7px 8px; border-radius: 8px; cursor: pointer; font-size: 12.5px; flex-wrap: wrap; }
+.drag-row:hover { background: var(--overlay-hover); }
+.drag-row.active { background: var(--panel-2); }
+.drag-vals { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Collapsed full-metric explorer under the headline view. */
+details.explore > summary { cursor: pointer; color: var(--muted); font-size: 12.5px; font-weight: 600; margin-top: 14px; list-style: none; }
+details.explore > summary::-webkit-details-marker { display: none; }
+details.explore > summary::before { content: '▸ '; }
+details.explore[open] > summary::before { content: '▾ '; }
+details.explore > summary:hover { color: var(--ink); }
 
 /* Mini win-rate meter: accent fill on a same-surface track, value alongside. */
 .meter {
@@ -1084,7 +1145,7 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .cp-none { display: block; padding: 6px; }
 
 /* Key observations: scannable accent-ticked rows instead of a bullet list. */
-.obs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 8px 16px; }
+.obs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 8px 16px; }
 .obs-item {
   position: relative; padding: 8px 12px 8px 24px;
   background: var(--surface-inset); border: 1px solid var(--border); border-radius: 10px;
@@ -1094,19 +1155,6 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
   content: ''; position: absolute; left: 10px; top: 14px;
   width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
 }
-
-/* Vs-the-ladder rows: fixed chip/bar/value columns so bars share one x-origin. */
-.lad-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) 86px 92px 56px;
-  gap: 10px; align-items: center; padding: 6px 6px; border-radius: 8px;
-  transition: background 120ms;
-}
-.lad-row:hover { background: var(--overlay-hover); }
-.lad-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 12.5px; }
-.lad-chip { text-align: center; font-size: 10px; padding: 1px 4px; }
-.lad-bar { position: relative; height: 6px; background: var(--overlay-track); border-radius: var(--radius-pill); overflow: hidden; }
-.lad-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: var(--radius-pill); }
-.lad-val { font-size: 11.5px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .day-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -1172,6 +1220,11 @@ nav.tabs a { white-space: nowrap; flex: 0 0 auto; }
      header tiles (portrait duel, team ranks) need the full width. */
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tile .value { font-size: 20px; }
+
+  /* KPI band: two per row; dividers off, spacing does the separating. */
+  .kpi-band { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; }
+  .kpi { border-left: 0; padding: 0; }
+  .kpi .value { font-size: 22px; }
   .tile:has(.mh-row), .tile:has(.rank-duel) { grid-column: 1 / -1; }
   .mh-row, .rank-duel { flex-wrap: wrap; }
 
