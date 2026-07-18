@@ -30,9 +30,12 @@ const signed = (v: number | null | undefined) => (v === null || v === undefined 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 const kdaCls = (v: number) => (v >= 5 ? 'kda-5' : v >= 4 ? 'kda-4' : v >= 3 ? 'kda-3' : v < 1 ? 'kda-low' : '')
 
-type SortKey = 'key' | 'games' | 'winRate' | 'kda' | 'lpTotal' | 'kp' | 'csPerMin' | 'laneGoldAt10' | 'deathsPerGame'
+// No LP column here on purpose: per-champion LP is only ever a PARTIAL sum
+// (games missed by live capture carry none), and a partial sum over a biased
+// subsample reads as a verdict the winrate column already gives honestly.
+type SortKey = 'key' | 'games' | 'winRate' | 'kda' | 'kp' | 'csPerMin' | 'laneGoldAt10' | 'deathsPerGame'
 
-function SplitTable({ title, rows, champIcons, compact, hideLp }: { title: string; rows: SplitRow[]; champIcons?: boolean; compact?: boolean; hideLp?: boolean }) {
+function SplitTable({ title, rows, champIcons, compact }: { title: string; rows: SplitRow[]; champIcons?: boolean; compact?: boolean }) {
   const [open, setOpen] = useState<string | null>(null)
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'games', dir: -1 })
 
@@ -63,7 +66,7 @@ function SplitTable({ title, rows, champIcons, compact, hideLp }: { title: strin
               <tr>
                 <Th k="key" label={champIcons ? 'Champion' : 'Role'} /><Th k="games" label="Games" num /><Th k="winRate" label="WR" />
                 <Th k="kda" label="KDA" num />
-                {!compact && <>{!hideLp && <Th k="lpTotal" label="LP" num />}<Th k="kp" label="KP" num /><Th k="csPerMin" label="CS/m" num /><Th k="laneGoldAt10" label="G@10" num /></>}
+                {!compact && <><Th k="kp" label="KP" num /><Th k="csPerMin" label="CS/m" num /><Th k="laneGoldAt10" label="G@10" num /></>}
                 <Th k="deathsPerGame" label="Deaths" num />
               </tr>
             </thead>
@@ -79,14 +82,6 @@ function SplitTable({ title, rows, champIcons, compact, hideLp }: { title: strin
                     <td><WinrateBar wins={r.wins} losses={r.games - r.wins} /></td>
                     <td className="num"><span className={`kda-ratio ${kdaCls(r.kda)}`} style={{ fontSize: 13 }}>{r.kda.toFixed(2)}</span></td>
                     {!compact && <>
-                      {!hideLp && <td className="num" title="Sum of real attributed LP changes - only live-captured games carry one. A partial sum (n/m games) can skew away from the winrate when the missing games lean one way.">
-                        {r.lpTotal !== null && r.lpKnown > 0
-                          ? <>
-                              <span className={r.lpTotal >= 0 ? 'win' : 'loss'}>{r.lpTotal >= 0 ? '+' : ''}{r.lpTotal}</span>
-                              {r.lpKnown < r.games && <span className="mut sm-text"> · {r.lpKnown}/{r.games}g</span>}
-                            </>
-                          : <span className="mut">—</span>}
-                      </td>}
                       <td className="num">{pct(r.kp)}</td>
                       <td className="num">{r.csPerMin}</td>
                       <td className="num">{signed(r.laneGoldAt10)}</td>
@@ -95,7 +90,7 @@ function SplitTable({ title, rows, champIcons, compact, hideLp }: { title: strin
                   </tr>
                   {open === r.key && r.detail && (
                     <tr className="drill">
-                      <td colSpan={9}>
+                      <td colSpan={8}>
                         <div className="drill-chips obj-chips">
                           <span className="obj-chip">{r.detail.avgKills} / {r.detail.avgDeaths} / {r.detail.avgAssists} <span className="mut">avg score</span></span>
                           <span className="obj-chip">{r.detail.csAt10} <span className="mut">CS@10</span></span>
@@ -400,7 +395,7 @@ export default function Dashboard() {
           </div>
 
           <div className="grid two-col" style={{ marginBottom: 16 }}>
-            <SplitTable title="Champion performance" rows={stats.byChampion} champIcons hideLp={status?.hideLp} />
+            <SplitTable title="Champion performance" rows={stats.byChampion} champIcons />
             <div className="grid" style={{ alignContent: 'start' }}>
               <SplitTable title="Role performance" rows={stats.byRole} compact />
               {deaths && deaths.games > 0 && (
