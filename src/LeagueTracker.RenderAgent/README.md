@@ -49,6 +49,13 @@ replays through the client too.
   is why it renders soon after each game, before the next patch lands.
 - Failed jobs are marked on the server (visible on the Data & sync page) and
   retried only after "retry" is requested (`POST /api/render/{matchId}/retry`).
+- A window whose recording freezes (hung replay simulation) is retried once on
+  a freshly relaunched game process; if it freezes again, that window is
+  skipped, the remaining windows still render, and the job fails naming the
+  skipped windows - partial coverage is never silent.
+- A job postponed 3 times for the identical reason is failed instead of
+  recycled: identical repeats mean deterministic, and deterministic failures
+  belong on the Data page, not in an invisible retry loop.
 - Keep the replay window visible while recording (not minimized) - window
   capture grabs the window's contents.
 

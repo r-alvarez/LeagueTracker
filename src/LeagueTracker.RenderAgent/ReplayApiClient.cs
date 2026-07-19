@@ -103,6 +103,28 @@ public sealed class ReplayApiClient : IDisposable
         }
     }
 
+    /// Parks the free camera at a reference point ahead of the dropdown
+    /// clicks, re-asserting the selection (some render writes clear it).
+    /// Returns where the camera actually ended up - the game may ignore or
+    /// clamp the position, and the tracking check must measure from reality,
+    /// not intent. Best-effort: a failed write just leaves the camera (and
+    /// the returned reference) wherever the world reload put it.
+    public async Task<(double X, double Z)?> ParkCameraAsync(double x, double y, double z, string? selectionName, CancellationToken ct)
+    {
+        try
+        {
+            object body = selectionName is { Length: > 0 }
+                ? new { cameraPosition = new { x, y, z }, selectionName }
+                : new { cameraPosition = new { x, y, z } };
+            await PostAsync("/replay/render", body, ct);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+        }
+        await Task.Delay(300, ct);
+        return await GetCameraPositionAsync(ct);
+    }
+
     /// Camera world position - the ground truth for whether a camera lock is
     /// actually tracking (the position moves) or just claimed.
     public async Task<(double X, double Z)?> GetCameraPositionAsync(CancellationToken ct)
