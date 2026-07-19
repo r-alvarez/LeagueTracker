@@ -525,7 +525,18 @@ public sealed class RenderAgent(AgentConfig config)
         // Camera verification first - its ~5s doubles as settle time for the
         // freshly-initialized UI, which made a fog click right after the
         // camera clicks miss on the session's first window.
-        if (!await CameraTracksAsync(replayApi, parked, ct)) return false;
+        if (!await CameraTracksAsync(replayApi, parked, ct))
+        {
+            // Which failure is it? Camera still at the park = clicks never
+            // landed (or lock has no effect); moved but near the park =
+            // stationary champion near the reference; empty selection = a
+            // write cleared it. The loops this diagnoses are rare enough
+            // that the extra API reads don't matter.
+            var current = await replayApi.GetCameraPositionAsync(ct);
+            var selection = await replayApi.GetSelectionAsync(ct);
+            Log.Warn($"Camera check failed: parked=({parked?.X:0},{parked?.Z:0}) now=({current?.X:0},{current?.Z:0}) selection='{selection}'");
+            return false;
+        }
 
         // Fog perspective: the dropdown defaults to All (no fog); pick the
         // tracked player's side. Deterministic click, no readback available,
