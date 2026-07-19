@@ -510,14 +510,17 @@ timestamp. Now: relaunch + retry once; a second freeze skips the window,
 the remaining windows render, and the job fails naming what was skipped -
 partial coverage with a visible reason instead of an invisible loop.
 
-**Camera-lock verification measures distance from a parked reference that
-rotates per attempt** (12600,12600 / 1800,12800 / 12800,1800) instead of the
-world-reload corner. The old check read "camera still near the default
-corner" as "lock failed", which is wrong whenever the fight is near blue
-fountain and the champion stands still (stealth included) - the most
-plausible reading of the Shaco job that failed "camera did not engage" on
-six consecutive idle-time attempts. The camera is parked via the Replay
-API's cameraPosition (safe before the clicks; render writes reset the
-dropdown state, which is also why the park re-asserts the selection), and
-the check measures from the read-back position, so an ignored write
-degrades to the old behaviour rather than a new failure mode.
+**Camera-lock verification is death-aware.** The engage-failure frame from
+the looping Shaco job proved the lock WAS engaged (dropdown: "Shaco
+(TheCosmicPeach) in 6...") - the player was dead during the pre-roll, and a
+locked camera parks a dead champion's view at their fountain, which for a
+blue-side player is exactly the world-reload corner the check used as its
+"unlocked" reference. Locked-on-a-corpse and never-locked were
+indistinguishable, and every retry re-seeked into the same death - a
+deterministic loop. Now: when the check fails, ask liveclientdata for
+isDead; wait out respawns up to 25s (playback keeps running) and re-verify -
+the respawned champion walking out of the fountain moves a locked camera.
+Longer respawns fall through to the postpone cap, the backstop for every
+deterministic verify failure. (A rotating parked reference was tried first
+and stays as a harmless fallback: the Replay API ignores cameraPosition
+writes, so the park read-back just returns the world-reload corner.)

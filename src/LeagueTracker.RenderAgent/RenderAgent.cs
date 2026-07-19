@@ -526,7 +526,31 @@ public sealed class RenderAgent(AgentConfig config)
         // Camera verification first - its ~5s doubles as settle time for the
         // freshly-initialized UI, which made a fog click right after the
         // camera clicks miss on the session's first window.
-        if (!await CameraTracksAsync(replayApi, parked, ct))
+        var tracks = await CameraTracksAsync(replayApi, parked, ct);
+
+        // A locked camera parks a dead champion's view at their fountain -
+        // for a blue-side player that IS the world-reload corner, so the
+        // check cannot tell "locked on a corpse" from "never locked" (the
+        // EUW1_7921086396 loop: every attempt re-seeked into the same death).
+        // Playback keeps running, so wait out a short respawn and re-check:
+        // a locked camera follows the champion out of the fountain, an
+        // unlocked one stays. Recording then starts a few seconds into the
+        // pre-roll cushion, which the 20s window lead absorbs.
+        if (!tracks && cameraName is { Length: > 0 }
+            && await replayApi.GetPlayerDeathStateAsync(cameraName, ct) is { IsDead: true } death
+            && death.RespawnIn <= 25)
+        {
+            Log.Info($"Tracked player is dead (respawn in {death.RespawnIn:0}s) - waiting to re-verify the camera lock");
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(death.RespawnIn + 5);
+            while (DateTime.UtcNow < deadline
+                && await replayApi.GetPlayerDeathStateAsync(cameraName, ct) is { IsDead: true })
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            }
+            tracks = await CameraTracksAsync(replayApi, parked, ct);
+        }
+
+        if (!tracks)
         {
             // Which failure is it? Camera still at the park = clicks never
             // landed (or lock has no effect); moved but near the park =
