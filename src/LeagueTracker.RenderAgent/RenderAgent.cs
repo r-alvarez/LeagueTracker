@@ -384,6 +384,7 @@ public sealed class RenderAgent(AgentConfig config)
                 }
                 if (!engaged)
                 {
+                    await CaptureEngageFailureAsync(job, window.Index, ct);
                     throw new RenderPostponedException("the camera did not engage (user active?)");
                 }
 
@@ -622,6 +623,23 @@ public sealed class RenderAgent(AgentConfig config)
             await Task.Delay(TimeSpan.FromSeconds(1), ct);
         }
         throw new TimeoutException($"seek to {targetSec}s did not settle");
+    }
+
+    /// One full-desktop frame at the moment engagement gave up - it shows what
+    /// the camera dropdown actually looked like (mode-specific UI, duplicate
+    /// champions, focus thieves), which the position numbers can't.
+    private async Task CaptureEngageFailureAsync(RenderJob job, int windowIndex, CancellationToken ct)
+    {
+        try
+        {
+            var path = Path.Combine(_workDir, $"engage-fail-{job.MatchId}-w{windowIndex:00}.png");
+            await RunFfmpegAsync($"-y -f lavfi -i ddagrab=framerate=5 -frames:v 1 -vf hwdownload,format=bgra \"{path}\"", ct);
+            Log.Warn($"Engage failure frame saved: {path}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Warn($"Could not save an engage failure frame: {ex.Message}");
+        }
     }
 
     private Task CaptureAsync(string output, int durationSec, CancellationToken ct)
