@@ -125,6 +125,32 @@ public sealed class ReplayApiClient : IDisposable
         return await GetCameraPositionAsync(ct);
     }
 
+    /// Whether the named player is currently dead in the replay, with their
+    /// respawn countdown. The camera lock parks a dead champion's camera at
+    /// their fountain - on blue side that is also the world-reload corner, so
+    /// tracking checks need this to tell "locked on a corpse" from "no lock".
+    public async Task<(bool IsDead, double RespawnIn)?> GetPlayerDeathStateAsync(string playerName, CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{Base}/liveclientdata/playerlist", ct));
+            foreach (var player in doc.RootElement.EnumerateArray())
+            {
+                var matches = ((string[])["riotIdGameName", "summonerName", "riotId"])
+                    .Select(field => player.TryGetProperty(field, out var v) ? v.GetString() : null)
+                    .Any(n => string.Equals(n, playerName, StringComparison.OrdinalIgnoreCase));
+                if (!matches) continue;
+                return (
+                    player.TryGetProperty("isDead", out var dead) && dead.GetBoolean(),
+                    player.TryGetProperty("respawnTimer", out var timer) ? timer.GetDouble() : 0);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+        }
+        return null;
+    }
+
     /// Camera world position - the ground truth for whether a camera lock is
     /// actually tracking (the position moves) or just claimed.
     public async Task<(double X, double Z)?> GetCameraPositionAsync(CancellationToken ct)
