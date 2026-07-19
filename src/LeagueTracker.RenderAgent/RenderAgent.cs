@@ -10,6 +10,9 @@ public sealed class RenderAgent(AgentConfig config)
     private readonly List<TrackerClient> _trackers =
         [.. config.ServerUrls.Select(url => new TrackerClient(url, config))];
     private readonly HashSet<string> _reportedClaimFailures = [];
+    // Postpone history per (tracker, job): a reason that repeats identically
+    // is a deterministic failure wearing a transient's clothes.
+    private readonly Dictionary<string, (string Reason, int Count)> _postpones = [];
     private readonly string _workDir = Path.Combine(Path.GetTempPath(), "leaguetracker-agent");
 
     private string _gameDir = "";
@@ -174,12 +177,14 @@ public sealed class RenderAgent(AgentConfig config)
         var windows = config.MaxWindowsPerJob > 0 ? job.Windows.Take(config.MaxWindowsPerJob).ToList() : job.Windows;
         Log.Info($"Job {job.MatchId} ({job.Kind}) from {tracker.ServerUrl}: {windows.Count} window(s), following \"{job.MyName}\" ({job.MyChampion})");
 
+        var postponeKey = $"{tracker.ServerUrl}|{job.Kind}:{job.MatchId}";
         try
         {
             if (MockRender) await MockRenderJobAsync(tracker, job, windows, ct);
             else await RenderJobAsync(tracker, job, windows, ct);
 
             await tracker.CompleteAsync(job, ct);
+            _postpones.Remove(postponeKey);
             Log.Info($"Job {job.MatchId} complete");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -188,10 +193,26 @@ public sealed class RenderAgent(AgentConfig config)
         }
         catch (RenderPostponedException ex)
         {
-            Log.Warn($"Job {job.MatchId} postponed: {ex.Message} - retried automatically when the lease expires (~30 min)");
+            var count = _postpones.TryGetValue(postponeKey, out var prior) && prior.Reason == ex.Message
+                ? prior.Count + 1 : 1;
+            _postpones[postponeKey] = (ex.Message, count);
+            if (count >= MaxIdenticalPostpones)
+            {
+                // The same reason this many times running is deterministic,
+                // not transient - fail so it surfaces on the Data page (where
+                // retry is a click) instead of recycling on every lease expiry.
+                _postpones.Remove(postponeKey);
+                Log.Error($"Job {job.MatchId} failed: postponed {count} times with the same reason: {ex.Message}");
+                await tracker.FailAsync(job, $"postponed {count} times with the same reason - {ex.Message}", CancellationToken.None);
+            }
+            else
+            {
+                Log.Warn($"Job {job.MatchId} postponed ({count}/{MaxIdenticalPostpones} for this reason): {ex.Message} - retried automatically when the lease expires (~30 min)");
+            }
         }
         catch (Exception ex)
         {
+            _postpones.Remove(postponeKey);
             Log.Error($"Job {job.MatchId} failed: {ex.Message}");
             await tracker.FailAsync(job, ex.Message, CancellationToken.None);
         }
@@ -222,20 +243,39 @@ public sealed class RenderAgent(AgentConfig config)
         await tracker.DownloadReplayAsync(job, roflPath, ct);
 
         Process? game = null;
+        string? cameraName = null;
         using var replayApi = new ReplayApiClient();
-        try
+
+        async Task<Process> StartReplayAsync()
         {
             Log.Info("Launching replay through the client...");
             await lcu.ScanAsync(ct);
             await Task.Delay(TimeSpan.FromSeconds(2), ct);
             await lcu.WatchAsync(gameId, ct);
-            game = await WaitForGameProcessAsync(ct);
-
-            await WaitForReplayApiAsync(game, replayApi, ct);
+            var proc = await WaitForGameProcessAsync(ct);
+            await WaitForReplayApiAsync(proc, replayApi, ct);
             await replayApi.SetPlaybackAsync(time: null, paused: true, speed: 1, ct);
-            // One-time UI assert (target frame, no side frames, fog flag);
-            // never repeated - render-API writes reset the camera mode.
-            await ResolveCameraNameAsync(replayApi, job, ct);
+            // UI assert (target frame, no side frames, fog flag) - once per
+            // game process; a relaunch redoes it because the fresh process
+            // starts from the persisted UI state again.
+            cameraName = await ResolveCameraNameAsync(replayApi, job, ct);
+            return proc;
+        }
+
+        // Only for a hung process: the Replay API keeps answering on one, so
+        // nothing short of a fresh process gives a recording a real retry.
+        async Task RestartReplayAsync()
+        {
+            try { if (game is { HasExited: false }) game.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            game?.Dispose();
+            game = null;
+            await Task.Delay(TimeSpan.FromSeconds(5), ct);
+            game = await StartReplayAsync();
+        }
+
+        try
+        {
+            game = await StartReplayAsync();
 
             // The camera/fog dropdowns are clicked PER WINDOW, after its seek:
             // any seek that rewinds (and the engage verification always plays
@@ -272,12 +312,15 @@ public sealed class RenderAgent(AgentConfig config)
             }
             var slot = (Index: slotIndex, Blue: players[slotIndex].Blue);
 
+            var skippedWindows = new List<int>();
             foreach (var window in windows)
             {
                 var output = Path.Combine(_workDir, $"{job.MatchId}-w{window.Index:00}.mp4");
                 var duration = Math.Max(2, window.EndSec - window.StartSec);
                 var preRoll = Math.Max(0, window.StartSec - EngagePreRollSec);
                 var engaged = false;
+                var frozen = 0;
+                var skippedThis = false;
                 for (var attempt = 1; ; attempt++)
                 {
                     Log.Info($"Window {window.Index} ({window.Label}, {window.StartSec}-{window.EndSec}s): seeking...");
@@ -285,7 +328,7 @@ public sealed class RenderAgent(AgentConfig config)
                     await WaitForSeekAsync(replayApi, preRoll, ct);
                     await replayApi.SetPlaybackAsync(time: null, paused: false, speed: 1, ct);
 
-                    engaged = await EngageCameraAsync(replayApi, slot, ct);
+                    engaged = await EngageCameraAsync(replayApi, slot, attempt, cameraName, ct);
                     if (!engaged)
                     {
                         if (attempt >= 3) break;
@@ -312,13 +355,32 @@ public sealed class RenderAgent(AgentConfig config)
                     // keeps answering, seeks "settling" and all) while the
                     // simulation is stuck - every API-side check passes and the
                     // capture is a still image. The rendered game clock is the
-                    // ground truth the API can't fake; a hung game won't
-                    // recover, so postpone rather than retry in this instance.
+                    // ground truth the API can't fake. A hung game never
+                    // recovers, so the retry needs a fresh process; a window
+                    // that hangs the fresh process too has a cursed timestamp
+                    // in this .rofl - skip it so the remaining windows render,
+                    // and the job-end failure names it.
                     if (await SimFrozeDuringAsync(output, ct))
                     {
-                        throw new RenderPostponedException($"the game clock froze during window {window.Index}'s recording - replay simulation hung");
+                        frozen++;
+                        if (frozen >= 2)
+                        {
+                            skippedWindows.Add(window.Index);
+                            skippedThis = true;
+                            Log.Warn($"Window {window.Index}: the simulation hung again on a fresh game process - skipping this window");
+                            await RestartReplayAsync();
+                            break;
+                        }
+                        Log.Warn($"Window {window.Index}: the game clock froze during recording - relaunching the replay to retry the window");
+                        await RestartReplayAsync();
+                        continue;
                     }
                     break;
+                }
+                if (skippedThis)
+                {
+                    if (File.Exists(output)) File.Delete(output);
+                    continue;
                 }
                 if (!engaged)
                 {
@@ -328,6 +390,14 @@ public sealed class RenderAgent(AgentConfig config)
                 await tracker.UploadAsync(job, window.Index, output, ct);
                 File.Delete(output);
                 Log.Info($"Window {window.Index}: uploaded");
+            }
+            if (skippedWindows.Count > 0)
+            {
+                // Partial coverage must not read as complete: fail with the
+                // skipped windows named, so the gap is visible on the Data
+                // page next to the clips that did upload.
+                throw new InvalidOperationException(
+                    $"window(s) {string.Join(", ", skippedWindows)} skipped - the replay simulation hangs at their recordings; every other window uploaded");
             }
         }
         finally
@@ -412,14 +482,33 @@ public sealed class RenderAgent(AgentConfig config)
     private const double FogRedY = 0.9035;
 
     private const int EngagePreRollSec = 10;
+    private const int MaxIdenticalPostpones = 3;
+
+    /// The lock check measures distance from a parked reference point. It
+    /// rotates per attempt: a fight can coincide with one park spot (making a
+    /// real lock look unengaged when the champion also stands still), but it
+    /// cannot coincide with all of them, so the coincidence never repeats on
+    /// every attempt of every lease.
+    private static readonly (double X, double Z)[] CameraParkSpots =
+    [
+        (12600, 12600),
+        (1800, 12800),
+        (12800, 1800),
+    ];
 
     /// Clicks the tracked champion in the camera dropdown and their side in
     /// the fog dropdown, then verifies the camera really tracks - the Replay
     /// API has no working equivalent, and the verification cannot
     /// false-positive while the directed camera is disabled. Runs while the
     /// replay is playing (the lock only engages during playback).
-    private async Task<bool> EngageCameraAsync(ReplayApiClient replayApi, (int Index, bool Blue) slot, CancellationToken ct)
+    private async Task<bool> EngageCameraAsync(ReplayApiClient replayApi, (int Index, bool Blue) slot, int attempt, string? cameraName, CancellationToken ct)
     {
+        // Park the free camera away from where the world-reload leaves it,
+        // BEFORE the clicks (render-API writes reset the camera mode). The
+        // park re-asserts the selection too, in case a prior write cleared it.
+        var spot = CameraParkSpots[(attempt - 1) % CameraParkSpots.Length];
+        var parked = await replayApi.ParkCameraAsync(spot.X, 1911, spot.Z, cameraName, ct);
+
         if (!GameWindow.TryClickAt(GameWindowTitle, PanelX, CameraBoxY))
         {
             Log.Warn("Could not focus the game window for the camera dropdown");
@@ -436,7 +525,7 @@ public sealed class RenderAgent(AgentConfig config)
         // Camera verification first - its ~5s doubles as settle time for the
         // freshly-initialized UI, which made a fog click right after the
         // camera clicks miss on the session's first window.
-        if (!await CameraTracksAsync(replayApi, ct)) return false;
+        if (!await CameraTracksAsync(replayApi, parked, ct)) return false;
 
         // Fog perspective: the dropdown defaults to All (no fog); pick the
         // tracked player's side. Deterministic click, no readback available,
@@ -459,16 +548,19 @@ public sealed class RenderAgent(AgentConfig config)
     /// again when its lease expires, instead of needing a manual retry.
     private sealed class RenderPostponedException(string message) : Exception(message);
 
-    private static async Task<bool> CameraTracksAsync(ReplayApiClient api, CancellationToken ct)
+    private static async Task<bool> CameraTracksAsync(ReplayApiClient api, (double X, double Z)? reference, CancellationToken ct)
     {
-        // After any seek the world reloads and an unlocked camera sits at the
-        // default corner; a locked one snaps to the champion. Distance from
-        // that corner is therefore a lock signal that works even while the
-        // champion stands still; movement between samples is the fallback
-        // (e.g. for the rare fight right next to the default corner).
+        // A locked camera snaps to the champion; an unlocked one stays where
+        // it was parked. Distance from the park reference is therefore a lock
+        // signal that works even while the champion stands still; movement
+        // between samples is the fallback for a fight that happens to sit
+        // near the reference (which the rotating park spots keep from
+        // repeating on every attempt). Reference falls back to the
+        // world-reload corner when parking couldn't be read back.
+        var (refX, refZ) = reference ?? (DefaultCameraX, DefaultCameraZ);
         await Task.Delay(TimeSpan.FromSeconds(2), ct);
         var a = await api.GetCameraPositionAsync(ct);
-        if (a is { } snap && Math.Abs(snap.X - DefaultCameraX) + Math.Abs(snap.Z - DefaultCameraZ) > 1500) return true;
+        if (a is { } snap && Math.Abs(snap.X - refX) + Math.Abs(snap.Z - refZ) > 1500) return true;
         await Task.Delay(TimeSpan.FromSeconds(2.5), ct);
         var b = await api.GetCameraPositionAsync(ct);
         return a is { } pa && b is { } pb && Math.Abs(pa.X - pb.X) + Math.Abs(pa.Z - pb.Z) > 75;

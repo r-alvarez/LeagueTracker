@@ -492,3 +492,32 @@ today"), always citing the measured next-game winrate vs fresh. No LP
 involved, so it works on hide-LP instances and needs no attribution;
 evidence is suppressed below 5 bucket games. Generic break-reminders were
 rejected - the banner only says what the player's own record supports.
+
+## 2026-07-19 — Render agent: no more postpone-loops
+
+**Three identical postponements hard-fail the job** (agent-side counter,
+in-memory per session; the server-side fail is what persists). Postpone
+exists for transient conditions, but a reason that repeats identically is
+deterministic: two jobs from 17-18/07 recycled on every lease expiry for a
+day-plus without surfacing anywhere. Failing puts them on the Data page
+where retry is a click.
+
+**A sim-hung window is retried once on a fresh game process, then skipped.**
+A hung replay only looks alive (the Replay API answers, seeks settle) and
+never recovers within the process, so the old postpone-and-relaunch-next-
+lease cycle re-rendered the same early windows forever and froze at the same
+timestamp. Now: relaunch + retry once; a second freeze skips the window,
+the remaining windows render, and the job fails naming what was skipped -
+partial coverage with a visible reason instead of an invisible loop.
+
+**Camera-lock verification measures distance from a parked reference that
+rotates per attempt** (12600,12600 / 1800,12800 / 12800,1800) instead of the
+world-reload corner. The old check read "camera still near the default
+corner" as "lock failed", which is wrong whenever the fight is near blue
+fountain and the champion stands still (stealth included) - the most
+plausible reading of the Shaco job that failed "camera did not engage" on
+six consecutive idle-time attempts. The camera is parked via the Replay
+API's cameraPosition (safe before the clicks; render writes reset the
+dropdown state, which is also why the park re-asserts the selection), and
+the check measures from the read-back position, so an ignored write
+degrades to the old behaviour rather than a new failure mode.
