@@ -35,6 +35,60 @@ const kdaCls = (v: number) => (v >= 5 ? 'kda-5' : v >= 4 ? 'kda-4' : v >= 3 ? 'k
 // subsample reads as a verdict the winrate column already gives honestly.
 type SortKey = 'key' | 'games' | 'winRate' | 'kda' | 'kp' | 'csPerMin' | 'laneGoldAt10' | 'deathsPerGame'
 
+// The champion drill-down reads as its own mini-dashboard: a band of stat
+// tiles over a scrollable column of matchup widgets. Same tile/winrate-bar
+// vocabulary the KPI bands and champion rows already speak, so an expanded row
+// never looks like a different app grafted into the table.
+function MatchupDrill({ detail, dpm }: { detail: NonNullable<SplitRow['detail']>; dpm: number }) {
+  const tiles: { label: string; value: string | number }[] = [
+    { label: 'Avg K / D / A', value: `${detail.avgKills} / ${detail.avgDeaths} / ${detail.avgAssists}` },
+    { label: 'CS@10', value: detail.csAt10 },
+    { label: 'Solo kills/game', value: detail.soloKillsPerGame },
+    { label: 'Vision/min', value: detail.visionPerMin },
+    { label: 'Dodges/game', value: detail.skillshotsDodgedPerGame },
+    { label: 'DPM', value: Math.round(dpm) },
+  ]
+  const opponents = detail.matchups.length
+
+  return (
+    <div className="champ-drill">
+      <div className="drill-tiles">
+        {tiles.map(t => (
+          <div key={t.label} className="mini-tile">
+            <div className="label">{t.label}</div>
+            <div className="value">{t.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="matchup-block">
+        <div className="matchup-head">
+          <span>Lane matchups</span>
+          {opponents > 0 && <span className="mut">{opponents} {opponents === 1 ? 'opponent' : 'opponents'} faced</span>}
+        </div>
+        {opponents > 0 ? (
+          <div className="matchup-scroll">
+            {detail.matchups.map(mu => {
+              const wins = Math.round(mu.winRate * mu.games)
+              return (
+                <div key={mu.opponent} className="matchup-row">
+                  <div className="mu-champ"><ChampBadge name={mu.opponent} small /></div>
+                  <span className="mu-games">{mu.games}G</span>
+                  <WinrateBar wins={wins} losses={mu.games - wins} />
+                  <span className="mu-metric">G@10<b className={mu.laneGoldAt10 !== null ? (mu.laneGoldAt10 >= 0 ? 'win' : 'loss') : ''}>{signed(mu.laneGoldAt10)}</b></span>
+                  <span className="mu-metric">KDA<b>{mu.kda}</b></span>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="matchup-empty">No lane opponents identified in this window.</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function SplitTable({ title, rows, champIcons, compact }: { title: string; rows: SplitRow[]; champIcons?: boolean; compact?: boolean }) {
   const [open, setOpen] = useState<string | null>(null)
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'games', dir: -1 })
@@ -90,35 +144,8 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
                   </tr>
                   {open === r.key && r.detail && (
                     <tr className="drill">
-                      <td colSpan={8}>
-                        <div className="drill-chips obj-chips">
-                          <span className="obj-chip">{r.detail.avgKills} / {r.detail.avgDeaths} / {r.detail.avgAssists} <span className="mut">avg score</span></span>
-                          <span className="obj-chip">{r.detail.csAt10} <span className="mut">CS@10</span></span>
-                          <span className="obj-chip">{r.detail.soloKillsPerGame} <span className="mut">solo kills/g</span></span>
-                          <span className="obj-chip">{r.detail.visionPerMin} <span className="mut">vision/m</span></span>
-                          <span className="obj-chip">{r.detail.skillshotsDodgedPerGame} <span className="mut">dodges/g</span></span>
-                          <span className="obj-chip">{Math.round(r.dpm)} <span className="mut">DPM</span></span>
-                        </div>
-                        {r.detail.matchups.length > 0 ? (
-                          <div className="table-scroll" style={{ marginTop: 8 }}>
-                            <table className="data">
-                              <thead>
-                                <tr><th>Lane matchup (2+ games)</th><th className="num">Games</th><th className="num">WR</th><th className="num">G@10</th><th className="num">KDA</th></tr>
-                              </thead>
-                              <tbody>
-                                {r.detail.matchups.map(mu => (
-                                  <tr key={mu.opponent}>
-                                    <td><ChampBadge name={mu.opponent} small /></td>
-                                    <td className="num">{mu.games}</td>
-                                    <td className={`num ${mu.winRate >= 0.5 ? 'win' : 'loss'}`}>{pct(mu.winRate)}</td>
-                                    <td className="num">{signed(mu.laneGoldAt10)}</td>
-                                    <td className="num">{mu.kda}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        ) : <p className="mut" style={{ margin: '8px 0 0' }}>No repeated lane matchups in this window.</p>}
+                      <td colSpan={compact ? 6 : 8}>
+                        <MatchupDrill detail={r.detail} dpm={r.dpm} />
                       </td>
                     </tr>
                   )}
