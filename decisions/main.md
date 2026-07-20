@@ -492,3 +492,21 @@ today"), always citing the measured next-game winrate vs fresh. No LP
 involved, so it works on hide-LP instances and needs no attribution;
 evidence is suppressed below 5 bucket games. Generic break-reminders were
 rejected - the banner only says what the player's own record supports.
+
+**Champion drill-down: every matchup, shown as widgets not a nested table.**
+The expanded champion row used to hard-filter lane matchups to `Count() >= 2`
+and cap at 10 (Reports.cs), so Ahri's 15 games collapsed to 3 visible
+opponents behind a "(2+ games)" label. It now returns every opponent faced
+(Take(50), a per-champ-per-window list is naturally bounded by games played),
+ordered games-desc so repeated laners still lead. Single-game rows are safe to
+show because WinrateBar only tints win rate at 5+ games - a 0/100% singleton
+never reads as a verdict. The drill body was re-skinned to the app's own
+tile/widget vocabulary: the six stat pills became a `mini-tile` band (the
+KPI-band eyebrow+hero-number treatment at drill scale), and the matchup table
+became a scrollable column of `matchup-row` widgets (icon + games + the same
+WinrateBar the champion rows use + G@10/KDA), max-height 236px so a champ with
+many distinct laners scrolls in place instead of blowing out the card. Empty
+state is now a dashed-border widget message. Rejected a responsive card grid
+for the matchups - the vertical scroll-list matches the "infinite scroll bar"
+ask and stays denser. The window filter already drives this data, so "All"
+works for free once the 2+ threshold is gone.
