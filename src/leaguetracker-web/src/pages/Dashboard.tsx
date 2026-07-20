@@ -357,11 +357,11 @@ export default function Dashboard() {
 
           <div className="grid two-col" style={{ marginBottom: 16 }}>
             <div className="card">
-              <h2>Rolling win rate (last 10)</h2>
+              <h2>Form <span className="mut" style={{ fontWeight: 400 }}>— rolling win rate</span></h2>
               <RollingWinRateChart series={stats.series} />
             </div>
             <div className="card">
-              <h2>Lane gold@10 per game</h2>
+              <h2>Laning <span className="mut" style={{ fontWeight: 400 }}>— gold vs your laner at 10:00</span></h2>
               <LaneGoldChart series={stats.series} />
             </div>
           </div>

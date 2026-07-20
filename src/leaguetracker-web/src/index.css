@@ -511,6 +511,13 @@ details.explore > summary:hover { color: var(--ink); }
 .viz-tooltip .v { font-weight: 700; font-size: 14px; }
 .viz-tooltip .l { color: var(--ink-2); }
 
+/* Chart verdict: the trend stated in words above the plot - the chart shows
+   the shape, this line says what to make of it. Only the verb is tinted. */
+.chart-verdict { color: var(--muted); font-size: 12.5px; margin: -6px 0 10px; }
+.chart-verdict .up { color: var(--delta-good); font-weight: 650; }
+.chart-verdict .down { color: var(--lp-loss); font-weight: 650; }
+.chart-verdict .steady { color: var(--ink-2); font-weight: 650; }
+
 button.action {
   border: 1px solid var(--border); background: var(--panel-2); color: var(--ink);
   border-radius: 9px; padding: 6px 14px; font: inherit; font-weight: 650; cursor: pointer;
