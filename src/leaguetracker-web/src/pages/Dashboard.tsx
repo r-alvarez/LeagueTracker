@@ -199,10 +199,41 @@ export default function Dashboard() {
     return () => clearInterval(id)
   }, [queue])
 
+  // The API serves per-game LP newest-first; chronological order here so the
+  // window slices below can take "the last N" from the end.
   const queueGames = useMemo(
-    () => lpGames.filter(g => g.queueName.includes(queue === 'Flex' ? 'Flex' : 'Solo')),
+    () => lpGames
+      .filter(g => g.queueName.includes(queue === 'Flex' ? 'Flex' : 'Solo'))
+      .sort((a, b) => a.gameEndUtc.localeCompare(b.gameEndUtc)),
     [lpGames, queue],
   )
+
+  // The LP charts follow the same window as everything above. Count windows
+  // ("Last 30") count per queue - a queue-scoped ladder chart windowed by
+  // games of the other queue would be nonsense.
+  const windowedLpGames = useMemo(() => {
+    const w = WINDOWS.find(x => x.key === windowKey)!
+    if ('days' in w) {
+      const cutoff = Date.now() - w.days * 86_400_000
+      return queueGames.filter(g => new Date(g.gameEndUtc).getTime() >= cutoff)
+    }
+    if ('lastGames' in w) return queueGames.slice(-w.lastGames)
+    return queueGames
+  }, [queueGames, windowKey])
+
+  const windowedLpPoints = useMemo(() => {
+    const w = WINDOWS.find(x => x.key === windowKey)!
+    const cutoff = 'days' in w
+      ? Date.now() - w.days * 86_400_000
+      : 'lastGames' in w && windowedLpGames.length > 0
+        ? new Date(windowedLpGames[0].gameEndUtc).getTime()
+        : null
+    if (cutoff === null) return lpPoints
+    // Keep the last snapshot before the cutoff: the line enters the window at
+    // its pre-window rank, so the first game's movement stays visible.
+    const idx = lpPoints.findIndex(p => new Date(p.timestampUtc).getTime() >= cutoff)
+    return idx === -1 ? lpPoints.slice(-1) : lpPoints.slice(Math.max(0, idx - 1))
+  }, [lpPoints, windowedLpGames, windowKey])
 
   const o = stats?.overall
   const s = stats?.scope
@@ -478,11 +509,11 @@ export default function Dashboard() {
           <div className="grid two-col">
             <div className="card">
               <h2>LP over time — {queue}</h2>
-              <LpLineChart points={lpPoints} />
+              <LpLineChart points={windowedLpPoints} />
             </div>
             <div className="card">
               <h2>LP per day — {queue} <span className="mut" style={{ fontWeight: 400 }}>— hover a day for its games</span></h2>
-              <LpPerGameBars games={queueGames} points={lpPoints} />
+              <LpPerGameBars games={windowedLpGames} points={windowedLpPoints} />
             </div>
           </div>
         </>
