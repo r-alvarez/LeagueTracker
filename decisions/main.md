@@ -510,3 +510,20 @@ state is now a dashed-border widget message. Rejected a responsive card grid
 for the matchups - the vertical scroll-list matches the "infinite scroll bar"
 ask and stays denser. The window filter already drives this data, so "All"
 works for free once the 2+ threshold is gone.
+
+**Trend charts: adaptive smoothing, date axis, verdict sentence.** A
+last-10 rolling win rate over 330 games is sample jitter (0-100%
+sawtooth), and "game 143" on the x-axis anchors nothing. The rolling
+window now scales with the data (10 games <=80, 20 <=200, 30 beyond;
+floored at half the window so tiny scopes still draw), partial ramp-in
+windows are dropped (the old opening 100%-after-one-game spike), and
+the axis speaks dates (~6 evenly spaced ticks; marks stay equally
+spaced per game). Both charts open with a computed verdict sentence -
+recent half vs earlier half of the selected window ("Trending up - 57%
+over your last 165 vs 49% the 165 before") - dead zones +-5 WR points /
++-75 gold so noise never gets narrated as a trend. Lane gold keeps the
+per-game diverging bars (disasters stay visible) but fades them past 80
+games under a bold rolling-average line in neutral ink - deliberately
+not blue/red, it summarizes the bars rather than reading as a second
+series. Rejected trend-line-only at large windows (hides outliers) and
+weekly bucketing (uneven buckets, gaps for non-play days).
