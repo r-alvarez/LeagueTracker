@@ -132,7 +132,12 @@ public sealed class RenderAgent(AgentConfig config)
                 {
                     using (probe) phaseNow = await probe.GetGameflowPhaseAsync(ct);
                 }
-                _orphanStrikes = phaseNow == "None" ? _orphanStrikes + 1 : 0;
+                // Idle-gated: replays watched via the tracker's links look
+                // exactly like orphans (API-launched replays leave gameflow
+                // at None - verified live), but a human watching one is not
+                // idle. Only an unattended None-phase process qualifies.
+                var unattended = GameWindow.UserIdleTime >= TimeSpan.FromSeconds(config.IdleSeconds);
+                _orphanStrikes = unattended && phaseNow == "None" ? _orphanStrikes + 1 : 0;
                 if (_orphanStrikes >= 3)
                 {
                     _orphanStrikes = 0;
