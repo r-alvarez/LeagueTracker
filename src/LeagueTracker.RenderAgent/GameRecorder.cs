@@ -97,15 +97,17 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
         // NVENC first; if ffmpeg dies straight away (driver/session limit),
         // fall back to CPU x264 rather than losing the VOD.
-        var result = await CaptureAsync(partPath, g, nvenc: true, ct);
+        var eventsPath = Path.Combine(RecordingsDir, $"{baseName}.events.csv.gz");
+        var result = await CaptureAsync(partPath, eventsPath, g, nvenc: true, ct);
         if (result is { FfmpegFailedEarly: true })
         {
             Log.Warn("NVENC capture failed at startup - falling back to CPU encoding");
-            result = await CaptureAsync(partPath, g, nvenc: false, ct);
+            result = await CaptureAsync(partPath, eventsPath, g, nvenc: false, ct);
         }
         if (result is { FfmpegFailedEarly: true })
         {
             Log.Error($"Capture would not start: {result.StderrTail}");
+            try { if (File.Exists(eventsPath)) File.Delete(eventsPath); } catch { /* telemetry without video is noise */ }
             return false;
         }
 
@@ -162,7 +164,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         }
     }
 
-    private async Task<CaptureResult?> CaptureAsync(string partPath, GameWindowInfo g, bool nvenc, CancellationToken ct)
+    private async Task<CaptureResult?> CaptureAsync(string partPath, string eventsPath, GameWindowInfo g, bool nvenc, CancellationToken ct)
     {
         var fps = Math.Clamp(config.RecordFramerate, 15, 120);
         var width = g.Rect.Width & ~1;   // encoders need even dimensions
@@ -188,6 +190,9 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         }) ?? throw new InvalidOperationException("could not start ffmpeg");
 
         var stderrTail = DrainStderrAsync(proc.StandardError);
+        // Hooks live exactly as long as the capture, so event t_ms and video
+        // time share a zero point (within ffmpeg's first-frame latency).
+        using var inputLogger = config.RecordInputs ? InputLogger.TryStart(eventsPath, g.Process.MainWindowHandle) : null;
         var startedUtc = DateTime.UtcNow;
         var clockMap = new List<(double, double)>();
         string? activePlayer = null;
@@ -287,6 +292,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 schemaVersion = 1,
                 videoFile = $"{baseName}.mp4",
                 matchId = session is { PlatformId.Length: > 0 } ? $"{session.PlatformId}_{session.GameId}" : null,
+                eventsFile = File.Exists(Path.Combine(RecordingsDir, $"{baseName}.events.csv.gz")) ? $"{baseName}.events.csv.gz" : null,
                 gameId = session?.GameId,
                 platformId = session?.PlatformId,
                 queueId = session?.QueueId,
@@ -340,10 +346,15 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var part = Path.Combine(recorder.RecordingsDir, $"{baseName}.part.mp4");
         var fps = Math.Clamp(config.RecordFramerate, 15, 120);
         Log.Info($"Record test: 10s of the primary desktop at {fps}fps...");
-        await recorder.RunFfmpegAsync(
-            $"-y -f lavfi -i ddagrab=framerate={fps} -t 10 " +
-            $"-c:v h264_nvenc -preset p4 -rc vbr -cq {config.RecordQuality} -b:v 0 -maxrate 25M -bufsize 50M -g {fps * 4} " +
-            $"-movflags +frag_keyframe+empty_moov -f mp4 \"{part}\"", ct);
+        var events = Path.Combine(recorder.RecordingsDir, $"{baseName}.events.csv.gz");
+        using (config.RecordInputs ? InputLogger.TryStart(events) : null)
+        {
+            await recorder.RunFfmpegAsync(
+                $"-y -f lavfi -i ddagrab=framerate={fps} -t 10 " +
+                $"-c:v h264_nvenc -preset p4 -rc vbr -cq {config.RecordQuality} -b:v 0 -maxrate 25M -bufsize 50M -g {fps * 4} " +
+                $"-movflags +frag_keyframe+empty_moov -f mp4 \"{part}\"", ct);
+        }
+        if (File.Exists(events)) Log.Info($"Record test: input telemetry at {events} ({new FileInfo(events).Length} bytes)");
         await recorder.FinalizeAsync(part, Path.Combine(recorder.RecordingsDir, $"{baseName}.mp4"), ct);
         Log.Info($"Record test complete: {Path.Combine(recorder.RecordingsDir, baseName + ".mp4")}");
     }

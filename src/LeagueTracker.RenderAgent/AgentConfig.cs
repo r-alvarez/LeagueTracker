@@ -38,6 +38,11 @@ public sealed class AgentConfig
     /// roughly like x264 CRF). 26 lands near 1.5-3 GB per game at 1440p60.
     public int RecordQuality { get; set; } = 26;
 
+    /// Log keyboard/mouse alongside each recording (events.csv.gz next to
+    /// the mp4) - feeds the review UI's APM line and input overlay. Only
+    /// active while a game recording is running.
+    public bool RecordInputs { get; set; } = true;
+
     /// Cloudflare Access service token (Zero Trust > Access > Service Auth) -
     /// lets the agent through the Access wall the trackers sit behind. Blank =
     /// no Access in front (dev against localhost).
@@ -66,6 +71,7 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_MAX_WINDOWS") is { Length: > 0 } max && int.TryParse(max, out var m)) config.MaxWindowsPerJob = m;
         if (Environment.GetEnvironmentVariable("LT_RECORD") is { Length: > 0 } record) config.RecordGames = record is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_RECORDINGS_DIR") is { Length: > 0 } recDir) config.RecordingsDir = recDir;
+        if (Environment.GetEnvironmentVariable("LT_RECORD_INPUTS") is { Length: > 0 } inputs) config.RecordInputs = inputs is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_ID") is { Length: > 0 } cfId) config.CfAccessClientId = cfId;
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_SECRET") is { Length: > 0 } cfSecret) config.CfAccessClientSecret = cfSecret;
 
