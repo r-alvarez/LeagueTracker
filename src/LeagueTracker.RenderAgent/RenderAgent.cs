@@ -46,7 +46,7 @@ public sealed class RenderAgent(AgentConfig config)
             await Task.Delay(TimeSpan.FromSeconds(60), ct);
         }
 
-        _ffmpeg = ResolveFfmpeg();
+        _ffmpeg = ResolveFfmpeg(config);
         if (_ffmpeg is not { Length: > 0 })
         {
             Log.Error("ffmpeg not found - install it (winget install Gyan.FFmpeg) or drop ffmpeg.exe next to the agent");
@@ -429,6 +429,12 @@ public sealed class RenderAgent(AgentConfig config)
 
     private string LeagueRoot => Path.GetDirectoryName(_gameDir)!;
 
+    /// For the game recorder, which shares the resolved tools but runs its
+    /// own loop. Both are only meaningful after ValidateAsync; the league
+    /// root is null in mock mode (no install to resolve).
+    public string ResolvedFfmpeg => _ffmpeg;
+    public string? ResolvedLeagueRoot => _gameDir is { Length: > 0 } ? LeagueRoot : null;
+
     /// selectionName only takes a name exactly as the game knows it, and Riot
     /// ID formats vary - so try what the game itself reports for the tracked
     /// player (champion matches first) and keep the first that verifiably
@@ -721,7 +727,9 @@ public sealed class RenderAgent(AgentConfig config)
         return stderr;
     }
 
-    private string ResolveFfmpeg()
+    /// Static so the recorder's smoke test can resolve ffmpeg without going
+    /// through tracker validation (which waits for a reachable server).
+    public static string ResolveFfmpeg(AgentConfig config)
     {
         if (config.FfmpegPath is { Length: > 0 }) return File.Exists(config.FfmpegPath) ? config.FfmpegPath : "";
         var local = Path.Combine(AppContext.BaseDirectory, "ffmpeg.exe");

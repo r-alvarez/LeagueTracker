@@ -18,7 +18,14 @@ internal static class GameWindow
     public static (int X, int Y, int Width, int Height)? FindClientRect(string title)
     {
         var hwnd = FindWindowW(null, title);
-        if (hwnd == 0) return null;
+        return hwnd == 0 ? null : ClientRectOf(hwnd);
+    }
+
+    /// Same, from a window handle - the recorder resolves the live game's
+    /// window through its process, since a concurrent replay render would
+    /// make a title lookup ambiguous.
+    public static (int X, int Y, int Width, int Height)? ClientRectOf(nint hwnd)
+    {
         if (!GetClientRect(hwnd, out var rect)) return null;
         var origin = default(NativePoint);
         if (!ClientToScreen(hwnd, ref origin)) return null;
@@ -26,6 +33,15 @@ internal static class GameWindow
         var height = rect.Bottom - rect.Top;
         return width > 0 && height > 0 ? (origin.X, origin.Y, width, height) : null;
     }
+
+    /// Whether the rect sits inside the primary display - ffmpeg's ddagrab
+    /// (default output) captures the primary, so a window elsewhere can't be
+    /// recorded without further plumbing; the recorder warns instead of
+    /// producing a video of the wrong screen.
+    public static bool IsOnPrimaryDisplay((int X, int Y, int Width, int Height) rect) =>
+        rect.X >= 0 && rect.Y >= 0
+        && rect.X + rect.Width <= GetSystemMetrics(0 /* SM_CXSCREEN */)
+        && rect.Y + rect.Height <= GetSystemMetrics(1 /* SM_CYSCREEN */);
 
     /// Time since the last keyboard/mouse input, session-wide.
     public static TimeSpan UserIdleTime
@@ -115,6 +131,9 @@ internal static class GameWindow
 
     [DllImport("user32.dll")]
     private static extern bool GetLastInputInfo(ref LastInputInfo info);
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
 
     [DllImport("user32.dll")]
     private static extern bool SetCursorPos(int x, int y);

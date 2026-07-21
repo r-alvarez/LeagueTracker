@@ -59,10 +59,35 @@ replays through the client too.
 - Keep the replay window visible while recording (not minimized) - window
   capture grabs the window's contents.
 
+## Live-game recording
+
+With `RecordGames` on (the default), the agent also records your own games:
+when the local client's gameflow phase turns `InProgress` (a real game -
+replay renders report `WatchInProgress` and never trigger it), the game
+window is captured via Desktop Duplication straight into NVENC on the GPU,
+so the encoding cost while playing is negligible. Recording stops when the
+game ends and produces, per game, in `RecordingsDir`:
+
+- `<date>_<matchId>.mp4` - the full VOD (faststart, browser-playable).
+- `<date>_<matchId>.json` - match id, queue, active player, and a
+  video-time -> game-clock map (sampled from the Live Client API) so
+  timeline events can be placed on the video.
+- `<date>_<matchId>.jpg` - a mid-game thumbnail.
+
+While recording runs, the capture writes a fragmented `.part.mp4`, so a
+crash or power cut costs seconds of footage, not the game; interrupted
+recordings are finalized on the next agent start. If NVENC refuses to
+start, one CPU-encoder retry (x264 veryfast) happens before giving up on
+that game. The game must be on the primary display (fullscreen or
+borderless both work - Desktop Duplication captures either).
+
 ## Test/debug environment flags
 
 - `LT_MOCK_RENDER=1` - render ffmpeg test patterns instead of launching the
   game (verifies the queue/upload pipeline on a machine without League).
+- `LT_RECORD_TEST=1` - record 10s of the primary desktop through the real
+  capture/encode/finalize path, then exit (verifies NVENC without a game).
+- `LT_RECORD=0` / `LT_RECORDINGS_DIR` - recording overrides.
 - `LT_ONCE=1` - process a single job, then exit.
 - `LT_MAX_WINDOWS=1` - cap windows per job (quick smoke of a real render).
 - `LT_SERVER_URL` / `LT_LEAGUE_PATH` / `LT_FFMPEG_PATH` - config overrides.

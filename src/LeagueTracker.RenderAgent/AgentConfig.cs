@@ -22,6 +22,22 @@ public sealed class AgentConfig
     /// reliably (and politely) when nobody is using the PC.
     public int IdleSeconds { get; set; } = 120;
 
+    /// Record live games (Ascent-style auto-VOD): capture the game window
+    /// while the local player is in a real game.
+    public bool RecordGames { get; set; } = true;
+
+    /// Where finished recordings (mp4 + sidecar json + thumbnail) land.
+    /// Blank = <My Videos>\LeagueTracker.
+    public string RecordingsDir { get; set; } = "";
+
+    /// Live-game recording framerate. 60 reads better for mechanics review;
+    /// 30 halves the file size.
+    public int RecordFramerate { get; set; } = 60;
+
+    /// NVENC constant-quality target (lower = better looking and bigger,
+    /// roughly like x264 CRF). 26 lands near 1.5-3 GB per game at 1440p60.
+    public int RecordQuality { get; set; } = 26;
+
     /// Cloudflare Access service token (Zero Trust > Access > Service Auth) -
     /// lets the agent through the Access wall the trackers sit behind. Blank =
     /// no Access in front (dev against localhost).
@@ -48,6 +64,8 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_LEAGUE_PATH") is { Length: > 0 } league) config.LeaguePath = league;
         if (Environment.GetEnvironmentVariable("LT_FFMPEG_PATH") is { Length: > 0 } ffmpeg) config.FfmpegPath = ffmpeg;
         if (Environment.GetEnvironmentVariable("LT_MAX_WINDOWS") is { Length: > 0 } max && int.TryParse(max, out var m)) config.MaxWindowsPerJob = m;
+        if (Environment.GetEnvironmentVariable("LT_RECORD") is { Length: > 0 } record) config.RecordGames = record is not ("0" or "false");
+        if (Environment.GetEnvironmentVariable("LT_RECORDINGS_DIR") is { Length: > 0 } recDir) config.RecordingsDir = recDir;
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_ID") is { Length: > 0 } cfId) config.CfAccessClientId = cfId;
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_SECRET") is { Length: > 0 } cfSecret) config.CfAccessClientSecret = cfSecret;
 

@@ -524,3 +524,37 @@ Longer respawns fall through to the postpone cap, the backstop for every
 deterministic verify failure. (A rotating parked reference was tried first
 and stays as a harmless fallback: the Replay API ignores cameraPosition
 writes, so the park read-back just returns the world-reload corner.)
+
+## 2026-07-21 — Live-game recording (auto-VOD)
+
+**The render agent doubles as a game recorder.** A second loop beside the
+render loop: when the local LCU gameflow phase turns `InProgress` (a real
+game - replay renders report `WatchInProgress`, so the two can never
+confuse each other), capture the game window and stop when the game ends.
+Chosen over a separate recorder app (Ascent et al) because the agent
+already owns every needed ingredient: LCU polling, window geometry,
+ffmpeg, and residency on the gaming PC. Inspecting Ascent's local install
+showed its recorder is a bundled headless OBS driven the same way - there
+is no secret in the capture, only in being resident and phase-aware.
+
+**Capture is ddagrab straight into NVENC, no CPU round-trip.** ffmpeg's
+ddagrab hands out D3D11 frames; h264_nvenc consumes them on the GPU, so
+recording while playing costs a hardware encode session and nothing else.
+Verified vs Ascent's own settings (1080p30 @ 5 Mbps CBR); ours records the
+native window at vbr cq26 (~1.5-3 GB per game at 1440p60), 60fps default
+because mechanics review reads better at 60. One x264 fallback attempt if
+NVENC refuses to init, then the game is sat out (a broken encoder is
+deterministic - retrying every pass would spam ffmpeg all game).
+
+**Fragmented mp4 while recording, faststart on finalize.** A live game
+cannot be re-captured, so the on-disk format must survive a crash: every
+moof fragment is self-contained, and orphaned `.part.mp4`s are finalized
+at next agent start. The finalize remux is a stream copy (ms per GB).
+
+**Sidecar json carries identity and the clock map.** Match id comes from
+the gameflow session (known from the loading screen, before the game
+serves anything); video-time -> game-clock pairs are sampled every 30s
+from liveclientdata/gamestats so the review UI can place Match-V5 timeline
+events on the video without guessing the loading-screen offset. Recording
+metadata is files-next-to-video, no db - same rebuildable-index philosophy
+as the tracker: anything derivable must be derivable again.
