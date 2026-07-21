@@ -558,3 +558,16 @@ from liveclientdata/gamestats so the review UI can place Match-V5 timeline
 events on the video without guessing the loading-screen offset. Recording
 metadata is files-next-to-video, no db - same rebuildable-index philosophy
 as the tracker: anything derivable must be derivable again.
+
+**Agent deploys drain, never kill; orphaned replays are idle-gated kills.**
+Two deploys tonight hard-killed the agent seconds after it claimed a clip
+job (a claim can land between checking the log and killing), leaving the
+replay process orphaned - which blocks every later pass as "Game client
+running" until it happens to exit. Now `stop.requested` next to the exe
+makes the agent postpone between windows (job re-leases), finalize any
+live recording, and exit; the deploy script waits for the exit. Backstop
+for hard kills: a game process while gameflow reports None for 3
+consecutive polls AND the user is input-idle is an orphan and gets
+killed. Idle matters because API-launched replays leave gameflow at None
+(verified live) - so a replay watched via the tracker's links is
+indistinguishable from an orphan except by someone being at the keyboard.
