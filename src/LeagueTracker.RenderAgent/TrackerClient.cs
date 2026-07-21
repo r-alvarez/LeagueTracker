@@ -66,6 +66,25 @@ public sealed class TrackerClient
         return JsonSerializer.Deserialize<RenderJob>(await resp.Content.ReadAsStringAsync(ct), Json);
     }
 
+    /// Frees leases a previous incarnation of this agent took to its grave
+    /// (crash, hard kill) so its interrupted jobs re-queue now instead of at
+    /// lease expiry. Returns the released job keys. Best-effort: a tracker
+    /// without the endpoint (not yet redeployed) just keeps expiry behavior.
+    public async Task<List<string>> ReleaseStaleLeasesAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _http.PostAsync($"{ServerUrl}/api/render/release-stale?agent={Uri.EscapeDataString(_agentName)}", null, ct);
+            if (!resp.IsSuccessStatusCode || !IsJson(resp)) return [];
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            return [.. doc.RootElement.GetProperty("released").EnumerateArray().Select(e => e.GetString()).OfType<string>()];
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return [];
+        }
+    }
+
     private static bool IsJson(HttpResponseMessage resp) =>
         resp.Content.Headers.ContentType?.MediaType is "application/json";
 

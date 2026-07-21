@@ -54,6 +54,17 @@ public sealed class RenderAgent(AgentConfig config)
             await Task.Delay(TimeSpan.FromSeconds(60), ct);
         }
 
+        // A previous incarnation of this agent may have died holding leases
+        // (crash, hard kill mid-render) - free them so those jobs re-queue
+        // now rather than after the 30-minute lease.
+        foreach (var tracker in _trackers)
+        {
+            if (await tracker.ReleaseStaleLeasesAsync(ct) is { Count: > 0 } released)
+            {
+                Log.Info($"Released stale lease(s) on {tracker.ServerUrl}: {string.Join(", ", released)}");
+            }
+        }
+
         _ffmpeg = ResolveFfmpeg(config);
         if (_ffmpeg is not { Length: > 0 })
         {

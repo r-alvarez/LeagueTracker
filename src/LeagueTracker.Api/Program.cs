@@ -453,6 +453,12 @@ app.MapPost("/api/render/{matchId}/fail", async (string matchId, HttpRequest req
     return Results.Ok();
 });
 
+// A restarting agent frees the leases a dead previous incarnation of itself
+// took to its grave, so interrupted jobs re-queue immediately instead of
+// waiting out the 30-minute lease.
+app.MapPost("/api/render/release-stale", (string agent, RenderLeaseService leases) =>
+    Results.Ok(new { released = leases.ReleaseAgent(agent) }));
+
 // Re-queues the match: clears the failed marker AND deletes any existing
 // clips, so both failed and badly-rendered matches get picked up again.
 app.MapPost("/api/render/{matchId}/retry", (string matchId, ClipService clips, FullGameService full, string kind = "clips") =>
