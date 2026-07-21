@@ -375,6 +375,17 @@ public sealed class RenderAgent(AgentConfig config)
                 // and the finally below kills our replay process - no orphan.
                 if (StopRequested) throw new RenderPostponedException("agent stop requested (deploy in progress)");
 
+                // The player queueing up mid-render takes the machine back:
+                // finishing the job would leave two game processes fighting
+                // over focus and window title just as their game loads. Same
+                // postpone path - the replay dies in the finally, the job
+                // re-leases for the next quiet stretch.
+                if (await lcu.GetGameflowPhaseAsync(ct) is { Length: > 0 } playerPhase
+                    and not ("None" or "WatchInProgress" or "TerminatedInError"))
+                {
+                    throw new RenderPostponedException($"player entered {playerPhase} mid-render");
+                }
+
                 var output = Path.Combine(_workDir, $"{job.MatchId}-w{window.Index:00}.mp4");
                 var duration = Math.Max(2, window.EndSec - window.StartSec);
                 var preRoll = Math.Max(0, window.StartSec - EngagePreRollSec);
