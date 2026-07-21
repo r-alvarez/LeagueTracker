@@ -86,6 +86,13 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             using (lcu) session = await lcu.GetGameSessionAsync(ct);
         }
 
+        if (!ShouldRecord(session, out var skipReason))
+        {
+            Log.Info($"Not recording this game: {skipReason}");
+            while (await PhaseAsync(ct) == "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
+            return true;
+        }
+
         var game = await WaitForGameWindowAsync(ct);
         if (game is not { } g) return true; // no window (yet) - not a capture defect, retry next pass
 
@@ -119,6 +126,40 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     }
 
     private sealed record GameWindowInfo(Process Process, (int X, int Y, int Width, int Height) Rect);
+
+    /// Riot queue ids -> the config categories of RecordQueues. Kept to the
+    /// queues Riot actually runs; retired ids are harmless to keep.
+    private static readonly Dictionary<long, string> QueueCategories = new()
+    {
+        [420] = "ranked-solo",
+        [440] = "ranked-flex",
+        [400] = "normal", [430] = "normal", [480] = "normal", [490] = "normal",
+        [450] = "aram",
+        [700] = "clash", [720] = "clash",
+        [830] = "coop-ai", [840] = "coop-ai", [850] = "coop-ai",
+        [870] = "coop-ai", [880] = "coop-ai", [890] = "coop-ai",
+        [900] = "urf", [1900] = "urf",
+        [1300] = "nexus-blitz",
+        [1700] = "arena", [1710] = "arena",
+        [2300] = "brawl",
+        [950] = "doom-bots", [960] = "doom-bots",
+        [0] = "custom",   // customs and Practice Tool both report queue 0
+    };
+
+    private bool ShouldRecord(LcuClient.GameSession? session, out string skipReason)
+    {
+        skipReason = "";
+        var enabled = config.RecordQueues.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(q => q.ToLowerInvariant()).ToHashSet();
+        if (enabled.Contains("all")) return true;
+        // No session = nothing to classify by; record rather than risk losing
+        // a game that was wanted (the sidecar just lacks a match id too).
+        if (session is null) return true;
+        var category = QueueCategories.GetValueOrDefault(session.QueueId, "other");
+        if (enabled.Contains(category)) return true;
+        skipReason = $"queue {session.QueueId} ({category}, {session.GameMode ?? "?"}) is not in RecordQueues ({config.RecordQueues})";
+        return false;
+    }
 
     private sealed record CaptureResult(
         bool FfmpegFailedEarly, string StderrTail, DateTime StartedUtc, TimeSpan Duration,
