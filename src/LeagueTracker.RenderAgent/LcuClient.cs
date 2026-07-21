@@ -74,6 +74,31 @@ public sealed class LcuClient : IDisposable
         }
     }
 
+    public sealed record GameSession(long GameId, string? PlatformId, long QueueId, string? GameMode);
+
+    /// Identity of the game the player is currently in, from the gameflow
+    /// session - known from the loading screen on, before the game process
+    /// serves anything. PlatformId + GameId is the tracker-side match id.
+    public async Task<GameSession?> GetGameSessionAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{_base}/lol-gameflow/v1/session", ct));
+            if (!doc.RootElement.TryGetProperty("gameData", out var gameData)) return null;
+            var gameId = gameData.TryGetProperty("gameId", out var id) ? id.GetInt64() : 0;
+            var platform = gameData.TryGetProperty("platformId", out var p) ? p.GetString() : null;
+            var queueId = gameData.TryGetProperty("queue", out var queue) && queue.TryGetProperty("id", out var qid)
+                ? qid.GetInt64() : -1;
+            var gameMode = gameData.TryGetProperty("queue", out var q2) && q2.TryGetProperty("gameMode", out var gm)
+                ? gm.GetString() : null;
+            return gameId > 0 ? new GameSession(gameId, platform, queueId, gameMode) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public async Task<string> GetReplaysPathAsync(CancellationToken ct)
     {
         var json = await _http.GetStringAsync($"{_base}/lol-replays/v1/rofls/path", ct);

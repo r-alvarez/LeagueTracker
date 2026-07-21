@@ -8,10 +8,34 @@ Log.Info($"LeagueTracker render agent · server {config.ServerUrl} · agent \"{c
 
 try
 {
+    if (Environment.GetEnvironmentVariable("LT_RECORD_TEST") is "1" or "true")
+    {
+        // Deliberately before tracker validation - the capture pipeline has
+        // no server dependency, and the test must run with the NAS down too.
+        if (RenderAgent.ResolveFfmpeg(config) is not { Length: > 0 } ff)
+        {
+            Log.Error("ffmpeg not found - install it or set FfmpegPath");
+            return 1;
+        }
+        await GameRecorder.RecordTestAsync(config, ff, cts.Token);
+        return 0;
+    }
+
     var agent = new RenderAgent(config);
     if (!await agent.ValidateAsync(cts.Token)) return 1;
 
-    await agent.RunAsync(cts.Token);
+    // Rendering and live-game recording are independent loops: renders use
+    // the PC while nobody plays, the recorder only acts while somebody does.
+    var loops = new List<Task> { agent.RunAsync(cts.Token) };
+    if (config.RecordGames && agent.ResolvedLeagueRoot is { } leagueRoot)
+    {
+        loops.Add(new GameRecorder(config, agent.ResolvedFfmpeg, leagueRoot).RunAsync(cts.Token));
+    }
+    else if (config.RecordGames)
+    {
+        Log.Warn("Game recording is on but no League install was resolved (mock mode?) - recorder not started");
+    }
+    await Task.WhenAll(loops);
     return 0;
 }
 catch (OperationCanceledException) when (cts.IsCancellationRequested)
