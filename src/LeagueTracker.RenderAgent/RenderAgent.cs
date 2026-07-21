@@ -19,6 +19,14 @@ public sealed class RenderAgent(AgentConfig config)
     private string _gameExe = "";
     private string _ffmpeg = "";
     private bool _reportedUserActive;
+    private int _orphanStrikes;
+
+    /// Deploys ask the agent to stop by dropping this file next to the exe:
+    /// the agent finishes (or cleanly postpones) what it is doing and exits,
+    /// instead of being hard-killed mid-render - which leaves an orphaned
+    /// replay process behind and loses the claimed job until lease expiry.
+    public static string StopSentinelPath => Path.Combine(AppContext.BaseDirectory, "stop.requested");
+    public static bool StopRequested => File.Exists(StopSentinelPath);
 
     /// MockRender skips the game entirely and renders test-pattern clips with
     /// ffmpeg - lets the whole queue/upload pipeline be verified on a machine
@@ -77,6 +85,7 @@ public sealed class RenderAgent(AgentConfig config)
         Log.Info($"Polling every {config.PollSeconds}s. Ctrl+C to stop.");
         while (!ct.IsCancellationRequested)
         {
+            if (StopRequested) { Log.Info("stop.requested found - render loop exiting"); return; }
             try
             {
                 var processedJob = await RunOnceAsync(ct);
@@ -111,7 +120,37 @@ public sealed class RenderAgent(AgentConfig config)
         // in game). Tracked accounts playing elsewhere don't need this PC.
         if (!MockRender)
         {
-            if (Process.GetProcessesByName(GameProcessName) is { Length: > 0 }) { Log.Info("Game client running - waiting"); return false; }
+            if (Process.GetProcessesByName(GameProcessName) is { Length: > 0 } games)
+            {
+                // A game process while the client says "None" is an orphaned
+                // replay from an interrupted agent (a live game is InProgress,
+                // a watched replay WatchInProgress) - without cleanup it
+                // blocks rendering until it happens to exit on its own.
+                // Three consecutive polls, so flow transitions never qualify.
+                var phaseNow = (string?)null;
+                if (LcuClient.TryConnect(LeagueRoot) is { } probe)
+                {
+                    using (probe) phaseNow = await probe.GetGameflowPhaseAsync(ct);
+                }
+                _orphanStrikes = phaseNow == "None" ? _orphanStrikes + 1 : 0;
+                if (_orphanStrikes >= 3)
+                {
+                    _orphanStrikes = 0;
+                    Log.Warn("Game process running but the client has been out of game for 3 polls - killing the orphaned replay");
+                    foreach (var orphan in games)
+                    {
+                        try { orphan.Kill(entireProcessTree: true); } catch { /* already gone */ }
+                        orphan.Dispose();
+                    }
+                }
+                else
+                {
+                    foreach (var g in games) g.Dispose();
+                    Log.Info("Game client running - waiting");
+                }
+                return false;
+            }
+            _orphanStrikes = 0;
 
             // Vanguard only allows replay launches through the League client, so
             // there's no point claiming a job while it's closed.
@@ -315,6 +354,11 @@ public sealed class RenderAgent(AgentConfig config)
             var skippedWindows = new List<int>();
             foreach (var window in windows)
             {
+                // Between windows is the safe place to honor a deploy's stop
+                // request: the postpone releases the job for the next agent,
+                // and the finally below kills our replay process - no orphan.
+                if (StopRequested) throw new RenderPostponedException("agent stop requested (deploy in progress)");
+
                 var output = Path.Combine(_workDir, $"{job.MatchId}-w{window.Index:00}.mp4");
                 var duration = Math.Max(2, window.EndSec - window.StartSec);
                 var preRoll = Math.Max(0, window.StartSec - EngagePreRollSec);
