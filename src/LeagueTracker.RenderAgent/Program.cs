@@ -6,6 +6,9 @@ Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 var config = AgentConfig.Load();
 Log.Info($"LeagueTracker render agent · server {config.ServerUrl} · agent \"{config.AgentName}\"");
 
+// A sentinel left from the previous deploy would stop this agent instantly.
+try { File.Delete(RenderAgent.StopSentinelPath); } catch { /* fine - likely absent */ }
+
 try
 {
     if (Environment.GetEnvironmentVariable("LT_RECORD_TEST") is "1" or "true")

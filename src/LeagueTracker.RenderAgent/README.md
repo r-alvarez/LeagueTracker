@@ -98,3 +98,20 @@ borderless both work - Desktop Duplication captures either).
 dotnet publish src/LeagueTracker.RenderAgent -c Release
 # output: src/LeagueTracker.RenderAgent/bin/Release/net10.0/win-x64/publish
 ```
+
+## Deploying over a running agent
+
+Never hard-kill the agent - it may have just claimed a render job (a claim
+can land seconds after the last log line), and a kill mid-render orphans
+the replay process, which then blocks all rendering as "Game client
+running". Instead:
+
+1. Create `stop.requested` next to the deployed exe.
+2. Wait for the process to exit (in-flight jobs postpone cleanly and
+   re-lease; an in-flight game recording finalizes what it has).
+3. Replace the exe, delete nothing else, relaunch. The agent deletes the
+   sentinel on startup.
+
+If an agent was hard-killed anyway, the next agent cleans up: a game
+process while the client reports out-of-game for 3 consecutive polls is
+recognized as an orphaned replay and killed.

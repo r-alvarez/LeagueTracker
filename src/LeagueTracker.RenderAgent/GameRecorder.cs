@@ -41,6 +41,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
         while (!ct.IsCancellationRequested)
         {
+            if (RenderAgent.StopRequested) { Log.Info("stop.requested found - recorder exiting"); return; }
             try
             {
                 var phase = await PhaseAsync(ct);
@@ -201,6 +202,10 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
                 g.Process.Refresh();
                 if (g.Process.HasExited) break;
+
+                // A deploy's stop request ends the recording cleanly (the VOD
+                // up to here survives) rather than orphaning the capture.
+                if (RenderAgent.StopRequested) break;
 
                 // ffmpeg dying this early is an encoder/capture init problem,
                 // not a game event - report it so the caller can fall back.
