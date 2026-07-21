@@ -28,4 +28,19 @@ public sealed class RenderLeaseService
     {
         lock (_gate) _leases.Remove(matchId);
     }
+
+    /// Every lease held by the named agent, released. For agent startup:
+    /// only one agent exists per design (two would fight over the game
+    /// client), so a fresh start under the same name means the previous
+    /// holder died and its claims will never complete - without this, an
+    /// interrupted job sits "rendering" until the lease expires.
+    public List<string> ReleaseAgent(string agent)
+    {
+        lock (_gate)
+        {
+            var held = _leases.Where(kv => kv.Value.Agent == agent).Select(kv => kv.Key).ToList();
+            foreach (var key in held) _leases.Remove(key);
+            return held;
+        }
+    }
 }
