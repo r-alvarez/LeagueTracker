@@ -55,7 +55,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                         // reach) - retrying every pass would spam ffmpeg
                         // launches all game, so sit it out.
                         Log.Warn("Recording gave up on this game - waiting for it to end");
-                        while (await PhaseAsync(ct) == "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
+                        while (!RenderAgent.StopRequested && await PhaseAsync(ct) == "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
                     }
                     continue;
                 }
@@ -89,7 +89,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         if (!ShouldRecord(session, out var skipReason))
         {
             Log.Info($"Not recording this game: {skipReason}");
-            while (await PhaseAsync(ct) == "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
+            // StopRequested too: a deploy must not wait for the game to end.
+            while (!RenderAgent.StopRequested && await PhaseAsync(ct) == "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
             return true;
         }
 
@@ -143,7 +144,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         [1700] = "arena", [1710] = "arena",
         [2300] = "brawl",
         [950] = "doom-bots", [960] = "doom-bots",
-        [0] = "custom",   // customs and Practice Tool both report queue 0
+        [0] = "custom",      // custom lobbies
+        [3140] = "custom",   // Practice Tool (own queue id since ~2026, observed live)
     };
 
     private bool ShouldRecord(LcuClient.GameSession? session, out string skipReason)
@@ -156,6 +158,10 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         // a game that was wanted (the sidecar just lacks a match id too).
         if (session is null) return true;
         var category = QueueCategories.GetValueOrDefault(session.QueueId, "other");
+        // Unmapped queue but a mode name that identifies it: trust the mode.
+        if (category is "other" && session.GameMode is "PRACTICETOOL") category = "custom";
+        if (category is "other" && session.GameMode is "ARAM") category = "aram";
+        if (category is "other" && session.GameMode is "URF" or "ARURF") category = "urf";
         if (enabled.Contains(category)) return true;
         skipReason = $"queue {session.QueueId} ({category}, {session.GameMode ?? "?"}) is not in RecordQueues ({config.RecordQueues})";
         return false;
