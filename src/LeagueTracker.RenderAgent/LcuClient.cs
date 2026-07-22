@@ -91,7 +91,34 @@ public sealed class LcuClient : IDisposable
                 ? qid.GetInt64() : -1;
             var gameMode = gameData.TryGetProperty("queue", out var q2) && q2.TryGetProperty("gameMode", out var gm)
                 ? gm.GetString() : null;
+            // gameData.platformId is empty in practice (observed on live and
+            // practice games alike) - the client's region endpoint is the
+            // reliable source, mapped to the platform id match ids use.
+            if (platform is not { Length: > 0 }) platform = await GetPlatformIdAsync(ct);
             return gameId > 0 ? new GameSession(gameId, platform, queueId, gameMode) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// Platform id ("EUW1") from the client's region ("EUW").
+    public async Task<string?> GetPlatformIdAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{_base}/riotclient/region-locale", ct));
+            var region = doc.RootElement.TryGetProperty("region", out var r) ? r.GetString() : null;
+            return region?.ToUpperInvariant() switch
+            {
+                "EUW" => "EUW1", "EUNE" => "EUN1", "NA" => "NA1", "BR" => "BR1",
+                "LAN" => "LA1", "LAS" => "LA2", "OCE" => "OC1", "TR" => "TR1",
+                "JP" => "JP1", "KR" => "KR", "RU" => "RU", "ME" => "ME1",
+                "SG" => "SG2", "TW" => "TW2", "VN" => "VN2",
+                { Length: > 0 } other => other, // new region: better a guess in the log than nothing
+                _ => null,
+            };
         }
         catch
         {
