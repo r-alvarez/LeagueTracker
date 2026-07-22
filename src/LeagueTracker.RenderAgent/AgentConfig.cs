@@ -43,6 +43,12 @@ public sealed class AgentConfig
     /// active while a game recording is running.
     public bool RecordInputs { get; set; } = true;
 
+    /// Record the game's audio track (and ONLY the game's - captured from
+    /// the game process via Windows process loopback, so Discord/music
+    /// never enter the VOD). Needs Windows 10 2004+; falls back to
+    /// video-only when unavailable.
+    public bool RecordAudio { get; set; } = true;
+
     /// Which queue kinds get recorded, comma-separated: ranked-solo,
     /// ranked-flex, normal (draft/blind/swiftplay/quickplay), aram, clash,
     /// coop-ai, urf, nexus-blitz, arena, brawl, doom-bots, custom (customs +
@@ -80,6 +86,7 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_RECORDINGS_DIR") is { Length: > 0 } recDir) config.RecordingsDir = recDir;
         if (Environment.GetEnvironmentVariable("LT_RECORD_INPUTS") is { Length: > 0 } inputs) config.RecordInputs = inputs is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_RECORD_QUEUES") is { Length: > 0 } queues) config.RecordQueues = queues;
+        if (Environment.GetEnvironmentVariable("LT_RECORD_AUDIO") is { Length: > 0 } audio) config.RecordAudio = audio is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_ID") is { Length: > 0 } cfId) config.CfAccessClientId = cfId;
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_SECRET") is { Length: > 0 } cfSecret) config.CfAccessClientSecret = cfSecret;
 

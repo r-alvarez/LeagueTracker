@@ -295,17 +295,22 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var fps = Math.Clamp(config.RecordFramerate, 15, 120);
         var width = g.Rect.Width & ~1;   // encoders need even dimensions
         var height = g.Rect.Height & ~1;
-        var input = $"-y -f lavfi -i ddagrab=framerate={fps}:offset_x={Math.Max(0, g.Rect.X)}:offset_y={Math.Max(0, g.Rect.Y)}:video_size={width}x{height}";
+        // Game-only audio via process loopback; when it can't start, the
+        // recording proceeds with no audio track rather than failing.
+        using var audio = config.RecordAudio ? ProcessAudioCapture.TryStart(g.Process.Id) : null;
+        var input = $"-y -f lavfi -i ddagrab=framerate={fps}:offset_x={Math.Max(0, g.Rect.X)}:offset_y={Math.Max(0, g.Rect.Y)}:video_size={width}x{height}"
+            + (audio is null ? "" : $" {ProcessAudioCapture.FfmpegInputArgs}");
         // ddagrab hands out D3D11 frames; NVENC eats them on the GPU without a
         // round-trip through system memory - that is the whole low-overhead
         // trick. The CPU fallback has to download frames first.
         var encode = nvenc
             ? $"-c:v h264_nvenc -preset p4 -rc vbr -cq {config.RecordQuality} -b:v 0 -maxrate 25M -bufsize 50M -g {fps * 4}"
             : "-vf hwdownload,format=bgra -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p";
+        var mapping = audio is null ? "" : "-map 0:v -map 1:a -c:a aac -b:a 160k";
         // Fragmented mp4: every fragment is self-contained, so a crash or
         // power cut costs seconds, not the whole game. FinalizeAsync remuxes
         // to a normal faststart mp4 for clean browser playback.
-        var args = $"{input} {encode} -movflags +frag_keyframe+empty_moov -f mp4 \"{partPath}\"";
+        var args = $"{input} {encode} {mapping} -movflags +frag_keyframe+empty_moov -f mp4 \"{partPath}\"";
 
         using var proc = Process.Start(new ProcessStartInfo(ffmpeg, args)
         {
@@ -473,12 +478,33 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var fps = Math.Clamp(config.RecordFramerate, 15, 120);
         Log.Info($"Record test: 10s of the primary desktop at {fps}fps...");
         var events = Path.Combine(recorder.RecordingsDir, $"{baseName}.events.csv.gz");
-        using (config.RecordInputs ? InputLogger.TryStart(events) : null)
+        // Audio path needs a process that actually plays sound - spawn one
+        // looping a stock Windows wav and capture ITS process, exactly as a
+        // game would be captured.
+        Process? noise = null;
+        if (config.RecordAudio)
         {
-            await recorder.RunFfmpegAsync(
-                $"-y -f lavfi -i ddagrab=framerate={fps} -t 10 " +
-                $"-c:v h264_nvenc -preset p4 -rc vbr -cq {config.RecordQuality} -b:v 0 -maxrate 25M -bufsize 50M -g {fps * 4} " +
-                $"-movflags +frag_keyframe+empty_moov -f mp4 \"{part}\"", ct);
+            noise = Process.Start(new ProcessStartInfo("powershell",
+                "-NoProfile -c \"$p = New-Object Media.SoundPlayer 'C:\\Windows\\Media\\Alarm01.wav'; $p.PlayLooping(); Start-Sleep 14\"")
+            { UseShellExecute = false, CreateNoWindow = true });
+        }
+        try
+        {
+            using var audio = noise is null ? null : ProcessAudioCapture.TryStart(noise.Id);
+            var audioIn = audio is null ? "" : $" {ProcessAudioCapture.FfmpegInputArgs}";
+            var mapping = audio is null ? "" : "-map 0:v -map 1:a -c:a aac -b:a 160k ";
+            using (config.RecordInputs ? InputLogger.TryStart(events) : null)
+            {
+                await recorder.RunFfmpegAsync(
+                    $"-y -f lavfi -i ddagrab=framerate={fps}{audioIn} -t 10 " +
+                    $"-c:v h264_nvenc -preset p4 -rc vbr -cq {config.RecordQuality} -b:v 0 -maxrate 25M -bufsize 50M -g {fps * 4} " +
+                    $"{mapping}-movflags +frag_keyframe+empty_moov -f mp4 \"{part}\"", ct);
+            }
+        }
+        finally
+        {
+            try { if (noise is { HasExited: false }) noise.Kill(); } catch { /* already gone */ }
+            noise?.Dispose();
         }
         if (File.Exists(events)) Log.Info($"Record test: input telemetry at {events} ({new FileInfo(events).Length} bytes)");
         await recorder.FinalizeAsync(part, Path.Combine(recorder.RecordingsDir, $"{baseName}.mp4"), ct);
