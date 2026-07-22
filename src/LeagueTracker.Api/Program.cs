@@ -321,6 +321,37 @@ app.MapPut("/api/vods/{matchId}", async (string matchId, HttpRequest request, Vo
     return Results.Ok(new { bytes = new FileInfo(target).Length });
 });
 
+// Chunked variant of the mp4 upload: Cloudflare caps request bodies around
+// 100MB, so a multi-GB VOD arrives as ordered 64MB pieces appended at their
+// offset, then an atomic commit that checks the assembled size.
+app.MapPut("/api/vods/{matchId}/chunk", async (string matchId, long offset, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+{
+    if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
+    if (vods.TargetPath(matchId, "vod.mp4.part") is not { } part) return Results.BadRequest();
+
+    request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
+        .MaxRequestBodySize = 256L * 1024 * 1024;
+
+    Directory.CreateDirectory(Path.GetDirectoryName(part)!);
+    await using var file = new FileStream(part, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
+    if (offset > file.Length) return Results.Conflict(new { expected = file.Length });
+    file.Seek(offset, SeekOrigin.Begin);
+    await request.Body.CopyToAsync(file, ct);
+    return Results.Ok(new { length = file.Length });
+});
+
+app.MapPost("/api/vods/{matchId}/commit", (string matchId, long size, VodService vods) =>
+{
+    if (vods.TargetPath(matchId, "vod.mp4.part") is not { } part || !File.Exists(part)) return Results.NotFound();
+    if (new FileInfo(part).Length != size)
+    {
+        File.Delete(part); // wrong size = a chunk went missing; restart clean
+        return Results.Conflict(new { error = "assembled size mismatch - upload restarted" });
+    }
+    File.Move(part, vods.TargetPath(matchId, "vod.mp4")!, overwrite: true);
+    return Results.Ok();
+});
+
 // Sidecar pieces (small): recording metadata, input telemetry, thumbnail.
 // Only meaningful once the mp4 landed, hence the vod-dir requirement.
 app.MapPut("/api/vods/{matchId}/{file}", async (string matchId, string file, HttpRequest request, VodService vods, CancellationToken ct) =>
