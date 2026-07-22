@@ -113,6 +113,19 @@ public sealed class TrackerClient
     /// only upload once the mp4 is accepted.
     public async Task<bool> UploadVodAsync(string matchId, string mp4Path, string? metaPath, string? eventsPath, string? thumbPath, CancellationToken ct)
     {
+        // Byte-cheap probe before shipping chunks: a tracker without the VOD
+        // endpoints (not yet redeployed) or an unreachable one fails here,
+        // not 64MB into an upload it was never going to accept.
+        try
+        {
+            using var probe = await _http.GetAsync($"{ServerUrl}/api/matches/{matchId}/vod/status", ct);
+            if (!probe.IsSuccessStatusCode || !IsJson(probe)) return false;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return false;
+        }
+
         // Chunked: Cloudflare rejects bodies over ~100MB, and a VOD runs to
         // gigabytes. 64MB pieces + a size-checked commit; the first chunk
         // answering 404 means this tracker doesn't know the match.
