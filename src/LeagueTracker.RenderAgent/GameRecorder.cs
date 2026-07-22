@@ -38,9 +38,15 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         ? dir
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "LeagueTracker");
 
+    /// Sidecars (telemetry, recording metadata, thumbnail, upload stamps)
+    /// live one level down so the recordings folder itself stays a clean
+    /// list of publishable mp4s.
+    public string MetaDir => Path.Combine(RecordingsDir, "metadata");
+
     public async Task RunAsync(CancellationToken ct)
     {
         Directory.CreateDirectory(RecordingsDir);
+        Directory.CreateDirectory(MetaDir);
         FinalizeOrphans();
         Log.Info($"Game recorder on - live games land in {RecordingsDir} ({config.RecordFramerate}fps, NVENC cq {config.RecordQuality})");
         _lastSweep = DateTime.UtcNow;
@@ -122,7 +128,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
         // NVENC first; if ffmpeg dies straight away (driver/session limit),
         // fall back to CPU x264 rather than losing the VOD.
-        var eventsPath = Path.Combine(RecordingsDir, $"{baseName}.events.csv.gz");
+        var eventsPath = Path.Combine(MetaDir, $"{baseName}.events.csv.gz");
         var result = await CaptureAsync(partPath, eventsPath, g, nvenc: true, ct);
         if (result is { FfmpegFailedEarly: true })
         {
@@ -138,7 +144,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
         var finalPath = Path.Combine(RecordingsDir, $"{baseName}.mp4");
         await FinalizeAsync(partPath, finalPath, ct);
-        WriteSidecar(Path.Combine(RecordingsDir, $"{baseName}.json"), baseName, session, g, result!);
+        WriteSidecar(Path.Combine(MetaDir, $"{baseName}.json"), baseName, session, g, result!);
         Log.Info($"Recording complete: {baseName}.mp4 ({result!.Duration.TotalMinutes:0} min)");
         // Customs/Practice Tool have no Riot match for a tracker to own -
         // those recordings are local-only, not eternal upload retries.
@@ -179,19 +185,19 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// just leaves the stamp missing, and the next agent start retries.
     private async Task TryUploadVodAsync(string matchId, string baseName, CancellationToken ct)
     {
-        string P(string ext) => Path.Combine(RecordingsDir, baseName + ext);
+        string M(string ext) => Path.Combine(MetaDir, baseName + ext);
         foreach (var tracker in _trackers)
         {
             try
             {
-                if (!await tracker.UploadVodAsync(matchId, P(".mp4"),
-                        File.Exists(P(".json")) ? P(".json") : null,
-                        File.Exists(P(".events.csv.gz")) ? P(".events.csv.gz") : null,
-                        File.Exists(P(".jpg")) ? P(".jpg") : null, ct))
+                if (!await tracker.UploadVodAsync(matchId, Path.Combine(RecordingsDir, baseName + ".mp4"),
+                        File.Exists(M(".json")) ? M(".json") : null,
+                        File.Exists(M(".events.csv.gz")) ? M(".events.csv.gz") : null,
+                        File.Exists(M(".jpg")) ? M(".jpg") : null, ct))
                 {
                     continue; // tracker doesn't know this match - not its account
                 }
-                File.WriteAllText(P(".uploaded"), tracker.ServerUrl);
+                File.WriteAllText(M(".uploaded"), tracker.ServerUrl);
                 Log.Info($"VOD {matchId} uploaded to {tracker.ServerUrl}");
                 return;
             }
@@ -217,10 +223,10 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         if (!config.UploadVods) return;
         string? resolvedPlatform = null;
         var platformProbed = false;
-        foreach (var sidecar in Directory.EnumerateFiles(RecordingsDir, "*.json").OrderBy(f => f))
+        foreach (var sidecar in Directory.EnumerateFiles(MetaDir, "*.json").OrderBy(f => f))
         {
             var baseName = Path.GetFileNameWithoutExtension(sidecar);
-            if (File.Exists(Path.Combine(RecordingsDir, baseName + ".uploaded"))) continue;
+            if (File.Exists(Path.Combine(MetaDir, baseName + ".uploaded"))) continue;
             if (!File.Exists(Path.Combine(RecordingsDir, baseName + ".mp4"))) continue;
             string? matchId;
             try
@@ -454,7 +460,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             File.Move(partPath, finalPath);
         }
 
-        var thumb = Path.ChangeExtension(finalPath, ".jpg");
+        var thumb = Path.Combine(MetaDir, Path.GetFileNameWithoutExtension(finalPath) + ".jpg");
         foreach (var seek in new[] { 600, 60, 2 })  // mid-game if it lasted, else whatever exists
         {
             try
@@ -477,7 +483,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 schemaVersion = 1,
                 videoFile = $"{baseName}.mp4",
                 matchId = session is { PlatformId.Length: > 0 } ? $"{session.PlatformId}_{session.GameId}" : null,
-                eventsFile = File.Exists(Path.Combine(RecordingsDir, $"{baseName}.events.csv.gz")) ? $"{baseName}.events.csv.gz" : null,
+                eventsFile = File.Exists(Path.Combine(MetaDir, $"{baseName}.events.csv.gz")) ? $"{baseName}.events.csv.gz" : null,
                 gameId = session?.GameId,
                 platformId = session?.PlatformId,
                 queueId = session?.QueueId,
@@ -527,11 +533,12 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     {
         var recorder = new GameRecorder(config, ffmpeg, leagueRoot: "");
         Directory.CreateDirectory(recorder.RecordingsDir);
+        Directory.CreateDirectory(recorder.MetaDir);
         var baseName = $"record-test-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}";
         var part = Path.Combine(recorder.RecordingsDir, $"{baseName}.part.mp4");
         var fps = Math.Clamp(config.RecordFramerate, 15, 120);
         Log.Info($"Record test: 10s of the primary desktop at {fps}fps...");
-        var events = Path.Combine(recorder.RecordingsDir, $"{baseName}.events.csv.gz");
+        var events = Path.Combine(recorder.MetaDir, $"{baseName}.events.csv.gz");
         // Audio path needs a process that actually plays sound - spawn one
         // looping a stock Windows wav and capture ITS process, exactly as a
         // game would be captured.
