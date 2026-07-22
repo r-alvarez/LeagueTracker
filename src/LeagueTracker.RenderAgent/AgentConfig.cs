@@ -43,6 +43,15 @@ public sealed class AgentConfig
     /// active while a game recording is running.
     public bool RecordInputs { get; set; } = true;
 
+    /// Non-blank = YouTube-ready recording names: "{prefix} - 22 Jul 2026 -
+    /// Game 2" (numbered per day, by what's already in RecordingsDir).
+    /// Blank = timestamp + match id names.
+    public string RecordNamePrefix { get; set; } = "";
+
+    /// Send finished VODs to the tracker that owns the match (the in-app
+    /// review player). Off = recordings stay local only.
+    public bool UploadVods { get; set; } = true;
+
     /// Record the game's audio track (and ONLY the game's - captured from
     /// the game process via Windows process loopback, so Discord/music
     /// never enter the VOD). Needs Windows 10 2004+; falls back to
