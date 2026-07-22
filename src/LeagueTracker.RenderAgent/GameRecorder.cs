@@ -185,16 +185,40 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// imported, agent killed): retried at startup, oldest first.
     private async Task SweepUnuploadedAsync(CancellationToken ct)
     {
+        string? resolvedPlatform = null;
+        var platformProbed = false;
         foreach (var sidecar in Directory.EnumerateFiles(RecordingsDir, "*.json").OrderBy(f => f))
         {
             var baseName = Path.GetFileNameWithoutExtension(sidecar);
             if (File.Exists(Path.Combine(RecordingsDir, baseName + ".uploaded"))) continue;
             if (!File.Exists(Path.Combine(RecordingsDir, baseName + ".mp4"))) continue;
-            string? matchId = null;
+            string? matchId;
             try
             {
-                using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(sidecar, ct));
-                matchId = doc.RootElement.TryGetProperty("matchId", out var id) ? id.GetString() : null;
+                var root = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(sidecar, ct))!;
+                matchId = root["matchId"]?.GetValue<string>();
+                // Sidecars recorded before the platform fallback existed have
+                // a gameId but no match id - repair them when the client can
+                // say which platform this PC plays on (once per sweep).
+                if (matchId is not { Length: > 0 } && root["gameId"]?.GetValue<long>() is > 0 and var gameId)
+                {
+                    if (!platformProbed)
+                    {
+                        platformProbed = true;
+                        if (LcuClient.TryConnect(leagueRoot) is { } lcu)
+                        {
+                            using (lcu) resolvedPlatform = await lcu.GetPlatformIdAsync(ct);
+                        }
+                    }
+                    if (resolvedPlatform is { Length: > 0 })
+                    {
+                        matchId = $"{resolvedPlatform}_{gameId}";
+                        root["matchId"] = matchId;
+                        root["platformId"] = resolvedPlatform;
+                        await File.WriteAllTextAsync(sidecar, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), ct);
+                        Log.Info($"Backfilled match id {matchId} into {baseName}.json");
+                    }
+                }
             }
             catch
             {
