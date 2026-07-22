@@ -140,7 +140,12 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         await FinalizeAsync(partPath, finalPath, ct);
         WriteSidecar(Path.Combine(RecordingsDir, $"{baseName}.json"), baseName, session, g, result!);
         Log.Info($"Recording complete: {baseName}.mp4 ({result!.Duration.TotalMinutes:0} min)");
-        if (matchId is not null) await TryUploadVodAsync(matchId, baseName, ct);
+        // Customs/Practice Tool have no Riot match for a tracker to own -
+        // those recordings are local-only, not eternal upload retries.
+        if (matchId is not null && QueueCategories.GetValueOrDefault(session!.QueueId, "other") is not "custom")
+        {
+            await TryUploadVodAsync(matchId, baseName, ct);
+        }
         return true;
     }
 
