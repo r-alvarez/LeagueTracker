@@ -113,13 +113,37 @@ public sealed class TrackerClient
     /// only upload once the mp4 is accepted.
     public async Task<bool> UploadVodAsync(string matchId, string mp4Path, string? metaPath, string? eventsPath, string? thumbPath, CancellationToken ct)
     {
+        // Chunked: Cloudflare rejects bodies over ~100MB, and a VOD runs to
+        // gigabytes. 64MB pieces + a size-checked commit; the first chunk
+        // answering 404 means this tracker doesn't know the match.
+        const int ChunkBytes = 64 * 1024 * 1024;
         await using (var file = File.OpenRead(mp4Path))
         {
-            using var content = new StreamContent(file);
-            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("video/mp4");
-            using var resp = await _http.PutAsync($"{ServerUrl}/api/vods/{matchId}", content, ct);
-            if (resp.StatusCode == HttpStatusCode.NotFound) return false;
-            resp.EnsureSuccessStatusCode();
+            var buffer = new byte[ChunkBytes];
+            long offset = 0;
+            while (offset < file.Length)
+            {
+                var read = await file.ReadAsync(buffer.AsMemory(0, (int)Math.Min(ChunkBytes, file.Length - offset)), ct);
+                if (read == 0) break;
+                using var content = new ByteArrayContent(buffer, 0, read);
+                content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+                using var resp = await _http.PutAsync($"{ServerUrl}/api/vods/{matchId}/chunk?offset={offset}", content, ct);
+                if (resp.StatusCode == HttpStatusCode.NotFound) return false;
+                if (resp.StatusCode == HttpStatusCode.Conflict)
+                {
+                    // Server has a different partial length (an earlier
+                    // attempt died mid-chunk) - resume from where it is.
+                    var body = await resp.Content.ReadAsStringAsync(ct);
+                    var expected = JsonDocument.Parse(body).RootElement.GetProperty("expected").GetInt64();
+                    offset = expected;
+                    file.Seek(offset, SeekOrigin.Begin);
+                    continue;
+                }
+                resp.EnsureSuccessStatusCode();
+                offset += read;
+            }
+            using var commit = await _http.PostAsync($"{ServerUrl}/api/vods/{matchId}/commit?size={file.Length}", null, ct);
+            commit.EnsureSuccessStatusCode();
         }
         foreach (var (name, path, type) in new[]
         {

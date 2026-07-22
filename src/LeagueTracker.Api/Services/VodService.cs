@@ -36,14 +36,20 @@ public sealed class VodService(DataPaths paths)
     /// review player: the recording sidecar plus the derived APM series.
     public object Status(string matchId)
     {
-        if (VideoPath(matchId) is null) return new { exists = false };
+        if (VideoPath(matchId) is not { } videoPath) return new { exists = false };
         object? meta = null;
         if (MetaPath(matchId) is { } metaPath)
         {
             try { meta = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(metaPath)); }
             catch { /* sidecar unreadable - the VOD still plays */ }
         }
-        return new { exists = true, meta, apm = ApmSeries(matchId) };
+        return new
+        {
+            exists = true,
+            sizeMb = (int)(new FileInfo(videoPath).Length / 1024 / 1024),
+            meta,
+            apm = ApmSeries(matchId),
+        };
     }
 
     /// Actions-per-minute over the game in 10s buckets, derived from the

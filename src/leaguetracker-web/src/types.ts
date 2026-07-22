@@ -407,6 +407,37 @@ export interface FullGameStatus {
   error: string | null
 }
 
+export interface VodClockPair {
+  videoSec: number
+  gameSec: number
+}
+
+export interface VodMeta {
+  matchId: string | null
+  gameMode: string | null
+  activePlayer: string | null
+  recordingStartUtc: string
+  recordingEndUtc: string
+  width: number
+  height: number
+  fps: number
+  encoder: string
+  clockMap: VodClockPair[]
+}
+
+export interface VodApm {
+  bucketSec: number
+  apm: number[]
+  averageApm: number
+}
+
+export interface VodStatus {
+  exists: boolean
+  sizeMb: number | null
+  meta: VodMeta | null
+  apm: VodApm | null
+}
+
 export interface StorageInfo {
   rawGamesMb: number
   replaysMb: number

@@ -1,4 +1,4 @@
-import type { AnalyticsSummary, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status } from './types'
+import type { AnalyticsSummary, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const resp = await fetch(url)
@@ -31,6 +31,8 @@ export const api = {
   clips: (id: string) => get<ClipInfo[]>(`/api/matches/${id}/clips`),
   deleteClip: async (id: string, index: number) => { await fetch(`/api/matches/${id}/clips/${index}`, { method: 'DELETE' }) },
   renderQueue: () => get<RenderQueueRow[]>('/api/render/queue'),
+  vodStatus: (id: string) => get<VodStatus>(`/api/matches/${id}/vod/status`),
+  deleteVod: async (id: string) => { await fetch(`/api/matches/${id}/vod`, { method: 'DELETE' }) },
   fullGameStatus: (id: string) => get<FullGameStatus>(`/api/matches/${id}/fullgame/status`),
   requestFullGame: (id: string) => post<FullGameStatus>(`/api/matches/${id}/fullgame`),
   toggleFullGameKeep: (id: string) => post<FullGameStatus>(`/api/matches/${id}/fullgame/keep`),

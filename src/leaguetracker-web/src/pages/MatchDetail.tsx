@@ -6,6 +6,7 @@ import { sourceLabel, unitKind, useAbilityLabels, useChampionIcons, useLoadoutIc
 import Loadout from '../components/Loadout'
 import { ItemIcon, PerkIcon, UnitGlyph } from '../components/GameIcons'
 import ReviewCard from '../components/ReviewCard'
+import VodReview from '../components/VodReview'
 import { RelTime, tierClass } from '../components/Stats'
 
 type Tab = 'general' | 'details' | 'runes' | 'timeline'
@@ -659,6 +660,8 @@ export default function MatchDetail() {
           <ReviewCard matchId={m.id} />
         </div>
       )}
+
+      <VodReview matchId={m.id} moments={clips.flatMap(c => c.events)} deaths={deaths} />
 
       {fullGame && (fullGame.state !== 'none' || m.hasReplay) && (
         <div className="card" style={{ marginBottom: 14 }}>
