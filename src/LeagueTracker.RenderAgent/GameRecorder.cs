@@ -116,7 +116,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
         using var process = g.Process;
         var matchId = session is { PlatformId.Length: > 0 } s ? $"{s.PlatformId}_{s.GameId}" : null;
-        var baseName = $"{DateTime.Now:yyyy-MM-dd_HH-mm}{(matchId is null ? "" : $"_{matchId}")}";
+        var baseName = BuildBaseName(matchId);
         var partPath = Path.Combine(RecordingsDir, $"{baseName}.part.mp4");
         Log.Info($"Recording game {matchId ?? "(id unknown)"}: {g.Rect.Width}x{g.Rect.Height} -> {baseName}.mp4");
 
@@ -142,11 +142,35 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         Log.Info($"Recording complete: {baseName}.mp4 ({result!.Duration.TotalMinutes:0} min)");
         // Customs/Practice Tool have no Riot match for a tracker to own -
         // those recordings are local-only, not eternal upload retries.
-        if (matchId is not null && QueueCategories.GetValueOrDefault(session!.QueueId, "other") is not "custom")
+        if (config.UploadVods && matchId is not null && QueueCategories.GetValueOrDefault(session!.QueueId, "other") is not "custom")
         {
             await TryUploadVodAsync(matchId, baseName, ct);
         }
         return true;
+    }
+
+    /// "Road to Platinum - 22 Jul 2026 - Game 2": the day's next number,
+    /// counted from what is already on disk so restarts never reuse one.
+    /// Blank prefix keeps the sortable timestamp + match id scheme.
+    private string BuildBaseName(string? matchId)
+    {
+        if (config.RecordNamePrefix is not { Length: > 0 } rawPrefix)
+        {
+            return $"{DateTime.Now:yyyy-MM-dd_HH-mm}{(matchId is null ? "" : $"_{matchId}")}";
+        }
+        var prefix = string.Concat(rawPrefix.Where(ch => !Path.GetInvalidFileNameChars().Contains(ch))).Trim();
+        var day = DateTime.Now.ToString("dd MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        var pattern = new System.Text.RegularExpressions.Regex(
+            $@"^{System.Text.RegularExpressions.Regex.Escape($"{prefix} - {day} - Game ")}(\d+)");
+        var next = 1;
+        foreach (var file in Directory.EnumerateFiles(RecordingsDir, "*.mp4"))
+        {
+            if (pattern.Match(Path.GetFileName(file)) is { Success: true } m && int.TryParse(m.Groups[1].Value, out var n))
+            {
+                next = Math.Max(next, n + 1);
+            }
+        }
+        return $"{prefix} - {day} - Game {next}";
     }
 
     /// Offers the VOD to each tracker until the one owning the match takes
@@ -190,6 +214,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// imported, agent killed): retried at startup, oldest first.
     private async Task SweepUnuploadedAsync(CancellationToken ct)
     {
+        if (!config.UploadVods) return;
         string? resolvedPlatform = null;
         var platformProbed = false;
         foreach (var sidecar in Directory.EnumerateFiles(RecordingsDir, "*.json").OrderBy(f => f))
