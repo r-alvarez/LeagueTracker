@@ -45,12 +45,14 @@ public sealed class ReviewService(LeagueDbContext db)
     /// to step into: one flagged death across a fight-heavy game is still the
     /// habit of accounting, not the absence of it.
     private const int ExposureFights = 12;
-    /// Q2's volume path: a fight record at least this lopsided (won vs lost),
-    /// with this many objectives banked and none conceded, bought the map even
-    /// when the conversion ratio lags the win count - conversion opportunity
-    /// doesn't scale linearly with wins.
-    private const int VolumeWinFactor = 3;
-    private const int VolumeConvertedFloor = 5;
+    /// Q2 charges start here: before this, a death with numbers present is a
+    /// lane trade, not an overstay.
+    private const int OverstayFromSec = 480;
+    /// A fight with this many enemies committed can't be exited solo - dying
+    /// inside one is a teamfight outcome, never an overstay or a fog pick.
+    private const int CommittedFightEnemies = 3;
+    /// A building you took this close to a skipped fight marks the absence paid.
+    private const int PaidAbsenceWindowSec = 90;
 
     public async Task<object?> GetAsync(string matchId, CancellationToken ct)
     {
@@ -152,7 +154,7 @@ public sealed class ReviewService(LeagueDbContext db)
 
             result[m.Id] = new Review(
                 LaneDuel(m, me, opp, matchDeaths, matchKills, matchObjectives, fights, allyPids, matchPositions),
-                FightsVerdict(fights),
+                FightsVerdict(fights, matchDeaths, matchObjectives, me),
                 Discipline(matchDeaths, matchObjectives, matchPositions, allyPids, me, fights),
                 Stewardship(m));
         }
@@ -274,31 +276,64 @@ public sealed class ReviewService(LeagueDbContext db)
         });
     }
 
-    // --- Q2: did my fights buy the map? ---------------------------------------------
+    // --- Q2: did I leave my fights alive? --------------------------------------------
 
-    private static Verdicted FightsVerdict(List<FightDto> fights)
+    /// Charges only what the player controls: overstays - dying with the numbers
+    /// present, outside a fight both teams had committed to. The fight record and
+    /// conversions stay in the detail as context; the team's fight war belongs on
+    /// the map, not on this card. Calibrated against the 2026-07-22 game audit:
+    /// 0/1/2+ overstays run 52.5%/35.8%/0% win rate over 336 games, and 77% of
+    /// losses score zero - the verdict stays earnable in defeat.
+    private static Verdicted FightsVerdict(
+        List<FightDto> fights, List<Death> deaths, List<ObjectiveEvent> objectives, MatchParticipant? me)
     {
-        var mine = fights.Where(f => f.Participated).ToList();
-        var won = mine.Count(f => f.Result == "won");
-        var lost = mine.Count(f => f.Result == "lost");
-        var converted = mine.Count(f => f.Result == "won" && f.ConvertedObjective);
-        var conceded = mine.Count(f => f.Result == "lost" && f.ConvertedObjective);
+        var overstays = deaths
+            .Where(d => d.TimeSec >= OverstayFromSec
+                && d is { AlliesNearDeath: >= 2, EnemiesNearDeath: not null }
+                && d.AlliesNearDeath >= d.EnemiesNearDeath
+                && !InCommittedFight(fights, d.TimeSec))
+            .Select(d => new { d.TimeSec, AlliesNear = d.AlliesNearDeath, EnemiesNear = d.EnemiesNearDeath, d.KilledBy })
+            .ToList();
 
-        string? verdict = won + lost == 0 ? null
-            : won > lost && converted * 2 >= won ? "yes"
-            : won >= lost * VolumeWinFactor && won > lost && converted >= VolumeConvertedFloor && conceded == 0 ? "yes"
-            : lost > won || conceded > converted ? "no"
-            : "mixed";
+        // A skipped fight the split paid for: a building of yours within the window.
+        List<ObjectiveEvent> myBuildings = me is null
+            ? []
+            : objectives.Where(o => o.ByMyTeam && !EpicKinds.Contains(o.Kind) && o.KillerParticipantId == me.ParticipantId).ToList();
+        var paidAbsences = fights
+            .Where(f => !f.Participated)
+            .Select(f => new
+            {
+                f.StartSec,
+                f.Result,
+                Size = $"{f.Allies}v{f.Enemies}",
+                Paid = myBuildings
+                    .Where(b => b.TimeSec >= f.StartSec - PaidAbsenceWindowSec && b.TimeSec <= f.EndSec + PaidAbsenceWindowSec)
+                    .Select(b => b.Kind).ToList(),
+            })
+            .Where(a => a.Paid is { Count: > 0 })
+            .ToList();
+
+        var mine = fights.Where(f => f.Participated).ToList();
+        var hasEvidence = mine is { Count: > 0 } || deaths.Any(d => d.TimeSec >= OverstayFromSec);
+        var verdict = !hasEvidence ? null
+            : overstays.Count switch { 0 => "yes", 1 => "mixed", _ => "no" };
 
         return new Verdicted(verdict, new
         {
             Participated = mine.Count,
-            Won = won,
-            Lost = lost,
-            Converted = converted,
-            Conceded = conceded,
+            Won = mine.Count(f => f.Result == "won"),
+            Lost = mine.Count(f => f.Result == "lost"),
+            Draw = mine.Count(f => f.Result == "draw"),
+            Converted = mine.Count(f => f.Result == "won" && f.ConvertedObjective),
+            Conceded = mine.Count(f => f.Result == "lost" && f.ConvertedObjective),
+            Overstays = overstays,
+            PaidAbsences = paidAbsences,
         });
     }
+
+    private static bool InCommittedFight(List<FightDto> fights, int timeSec) => fights.Any(f =>
+        f is { Participated: true, Enemies: >= CommittedFightEnemies }
+        && timeSec >= f.StartSec && timeSec <= f.EndSec);
 
     // --- Q4: did I keep my lead / recover my deficit? --------------------------------
 
@@ -348,17 +383,22 @@ public sealed class ReviewService(LeagueDbContext db)
         // the fight) is a trade, not a stepping error - only pure losses count
         // against the verdict. Null FollowPureLoss (pre-column rows) stays
         // harsh until a reprocess fills it.
+        // Fog picks (nobody visible near you, post-laning, outside a committed
+        // fight) and outnumbered steps (they had you by 2+ bodies) both charge
+        // here: whether the enemy was accounted for is exactly this question.
         var ganked = 0;
         var followIns = 0;
         var followInsTraded = 0;
-        var isolated = 0;
+        var fogPicks = 0;
+        var outnumbered = 0;
         var withTeam = 0;
         foreach (var d in deaths)
         {
             if (d.EnemyJunglerNear == true && d.TimeSec < LaneEndSec) ganked++;
             else if (d.FollowTeammate is not null && d.FollowPureLoss == false) followInsTraded++;
             else if (d.FollowTeammate is not null) followIns++;
-            else if (d is { EnemiesNearDeath: >= 2, AlliesNearDeath: 0 }) isolated++;
+            else if (d is { EnemiesNearDeath: 0 } && d.TimeSec >= LaneEndSec && !InCommittedFight(fights, d.TimeSec)) fogPicks++;
+            else if (d is { EnemiesNearDeath: { } e, AlliesNearDeath: { } a } && e >= a + 2) outnumbered++;
             else withTeam++;
         }
 
@@ -391,7 +431,7 @@ public sealed class ReviewService(LeagueDbContext db)
         // fight stepped into is evidence FOR accounting, not just noise around
         // the flagged deaths. One lapse across a fight-heavy game keeps the
         // yes; the no thresholds stay exactly as harsh as before.
-        var bad = ganked + followIns + isolated;
+        var bad = ganked + followIns + fogPicks + outnumbered;
         var fightsStepped = fights.Count(f => f.Participated);
         var unpaidConcessions = concededAbsent.Count(c => !c.Paid);
         var verdict = bad == 0 && unpaidConcessions == 0 ? "yes"
@@ -405,7 +445,8 @@ public sealed class ReviewService(LeagueDbContext db)
             Ganked = ganked,
             FollowIns = followIns,
             FollowInsTraded = followInsTraded,
-            Isolated = isolated,
+            FogPicks = fogPicks,
+            Outnumbered = outnumbered,
             WithTeam = withTeam,
             Flagged = bad,
             FightsStepped = fightsStepped,

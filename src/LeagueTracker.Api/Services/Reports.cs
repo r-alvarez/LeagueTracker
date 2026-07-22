@@ -386,9 +386,11 @@ public static class Reports
                         SoloKillsPerGame = Math.Round(Avg(g.Select(m => (double)m.SoloKills)), 2),
                         VisionPerMin = Math.Round(Avg(g.Select(m => m.VisionScore / DurMin(m))), 2),
                         SkillshotsDodgedPerGame = Math.Round(Avg(g.Where(m => m.SkillshotsDodged is not null).Select(m => (double)m.SkillshotsDodged!)), 1),
+                        // Every opponent faced, single-game ones included - the UI
+                        // scrolls the full list and only tints win rate at 5+ games,
+                        // so noisy 0/100% singletons never read as a verdict.
                         Matchups = g.Where(m => m.OpponentChampion is not null)
                             .GroupBy(m => m.OpponentChampion!)
-                            .Where(x => x.Count() >= 2)
                             .Select(x => new
                             {
                                 Opponent = x.Key,
@@ -400,7 +402,7 @@ public static class Reports
                                 Kda = Math.Round(Avg(x.Select(Kda)), 2),
                             })
                             .OrderByDescending(x => x.Games).ThenBy(x => x.WinRate)
-                            .Take(10).ToList(),
+                            .Take(50).ToList(),
                     }
                     : null,
             })
