@@ -22,6 +22,11 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     private static readonly string[] NearGamePhases =
         ["Lobby", "Matchmaking", "ReadyCheck", "ChampSelect", "GameStart"];
 
+    private readonly List<TrackerClient> _trackers =
+        [.. config.ServerUrls.Select(url => new TrackerClient(url, config))];
+
+    private DateTime _lastSweep;
+
     private readonly HttpClient _liveClient = new(new HttpClientHandler
     {
         // Same self-signed local cert as the Replay API (same port, in fact).
@@ -38,6 +43,10 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         Directory.CreateDirectory(RecordingsDir);
         FinalizeOrphans();
         Log.Info($"Game recorder on - live games land in {RecordingsDir} ({config.RecordFramerate}fps, NVENC cq {config.RecordQuality})");
+        _lastSweep = DateTime.UtcNow;
+        try { await SweepUnuploadedAsync(ct); }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex) { Log.Warn($"VOD upload sweep failed: {ex.Message}"); }
 
         while (!ct.IsCancellationRequested)
         {
@@ -58,6 +67,14 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                         while (!RenderAgent.StopRequested && await PhaseAsync(ct) == "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
                     }
                     continue;
+                }
+                // Idle moments double as upload retry windows: a VOD recorded
+                // before its match was imported (the poller lags the game by
+                // minutes) gets delivered on one of these passes.
+                if (!NearGamePhases.Contains(phase) && DateTime.UtcNow - _lastSweep > TimeSpan.FromMinutes(10))
+                {
+                    _lastSweep = DateTime.UtcNow;
+                    await SweepUnuploadedAsync(ct);
                 }
                 await Task.Delay(TimeSpan.FromSeconds(NearGamePhases.Contains(phase) ? 3 : 15), ct);
             }
@@ -123,7 +140,68 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         await FinalizeAsync(partPath, finalPath, ct);
         WriteSidecar(Path.Combine(RecordingsDir, $"{baseName}.json"), baseName, session, g, result!);
         Log.Info($"Recording complete: {baseName}.mp4 ({result!.Duration.TotalMinutes:0} min)");
+        if (matchId is not null) await TryUploadVodAsync(matchId, baseName, ct);
         return true;
+    }
+
+    /// Offers the VOD to each tracker until the one owning the match takes
+    /// it (one agent, several account instances). A .uploaded stamp next to
+    /// the mp4 keeps the startup sweep from re-sending gigabytes; failure
+    /// just leaves the stamp missing, and the next agent start retries.
+    private async Task TryUploadVodAsync(string matchId, string baseName, CancellationToken ct)
+    {
+        string P(string ext) => Path.Combine(RecordingsDir, baseName + ext);
+        foreach (var tracker in _trackers)
+        {
+            try
+            {
+                if (!await tracker.UploadVodAsync(matchId, P(".mp4"),
+                        File.Exists(P(".json")) ? P(".json") : null,
+                        File.Exists(P(".events.csv.gz")) ? P(".events.csv.gz") : null,
+                        File.Exists(P(".jpg")) ? P(".jpg") : null, ct))
+                {
+                    continue; // tracker doesn't know this match - not its account
+                }
+                File.WriteAllText(P(".uploaded"), tracker.ServerUrl);
+                Log.Info($"VOD {matchId} uploaded to {tracker.ServerUrl}");
+                return;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"VOD upload to {tracker.ServerUrl} failed: {ex.Message} (retried at next agent start)");
+            }
+        }
+        // No tracker knew the match: normal for a brand-new game - the
+        // poller imports it within minutes, and the startup sweep (or the
+        // post-game re-try below) delivers it then.
+        Log.Info($"VOD {matchId}: no tracker accepted it yet (match not imported) - will retry");
+    }
+
+    /// Recordings whose upload never landed (tracker down, match not yet
+    /// imported, agent killed): retried at startup, oldest first.
+    private async Task SweepUnuploadedAsync(CancellationToken ct)
+    {
+        foreach (var sidecar in Directory.EnumerateFiles(RecordingsDir, "*.json").OrderBy(f => f))
+        {
+            var baseName = Path.GetFileNameWithoutExtension(sidecar);
+            if (File.Exists(Path.Combine(RecordingsDir, baseName + ".uploaded"))) continue;
+            if (!File.Exists(Path.Combine(RecordingsDir, baseName + ".mp4"))) continue;
+            string? matchId = null;
+            try
+            {
+                using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(sidecar, ct));
+                matchId = doc.RootElement.TryGetProperty("matchId", out var id) ? id.GetString() : null;
+            }
+            catch
+            {
+                continue;
+            }
+            if (matchId is { Length: > 0 }) await TryUploadVodAsync(matchId, baseName, ct);
+        }
     }
 
     private sealed record GameWindowInfo(Process Process, (int X, int Y, int Width, int Height) Rect);

@@ -107,6 +107,37 @@ public sealed class TrackerClient
         resp.EnsureSuccessStatusCode();
     }
 
+    /// Offers a recorded live-game VOD to this tracker. False when the
+    /// tracker doesn't know the match (it belongs to another account's
+    /// instance) - the caller tries the next tracker. The sidecar pieces
+    /// only upload once the mp4 is accepted.
+    public async Task<bool> UploadVodAsync(string matchId, string mp4Path, string? metaPath, string? eventsPath, string? thumbPath, CancellationToken ct)
+    {
+        await using (var file = File.OpenRead(mp4Path))
+        {
+            using var content = new StreamContent(file);
+            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("video/mp4");
+            using var resp = await _http.PutAsync($"{ServerUrl}/api/vods/{matchId}", content, ct);
+            if (resp.StatusCode == HttpStatusCode.NotFound) return false;
+            resp.EnsureSuccessStatusCode();
+        }
+        foreach (var (name, path, type) in new[]
+        {
+            ("meta", metaPath, "application/json"),
+            ("events", eventsPath, "application/gzip"),
+            ("thumb", thumbPath, "image/jpeg"),
+        })
+        {
+            if (path is null || !File.Exists(path)) continue;
+            await using var side = File.OpenRead(path);
+            using var content = new StreamContent(side);
+            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(type);
+            using var resp = await _http.PutAsync($"{ServerUrl}/api/vods/{matchId}/{name}", content, ct);
+            resp.EnsureSuccessStatusCode();
+        }
+        return true;
+    }
+
     public async Task CompleteAsync(RenderJob job, CancellationToken ct)
     {
         using var resp = await _http.PostAsync($"{ServerUrl}/api/render/{job.MatchId}/complete?kind={job.Kind}", null, ct);
