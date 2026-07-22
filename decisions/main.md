@@ -571,3 +571,71 @@ consecutive polls AND the user is input-idle is an orphan and gets
 killed. Idle matters because API-launched replays leave gameflow at None
 (verified live) - so a replay watched via the tracker's links is
 indistinguishable from an orphan except by someone being at the keyboard.
+
+**Champion drill-down: every matchup, shown as widgets not a nested table.**
+The expanded champion row used to hard-filter lane matchups to `Count() >= 2`
+and cap at 10 (Reports.cs), so Ahri's 15 games collapsed to 3 visible
+opponents behind a "(2+ games)" label. It now returns every opponent faced
+(Take(50), a per-champ-per-window list is naturally bounded by games played),
+ordered games-desc so repeated laners still lead. Single-game rows are safe to
+show because WinrateBar only tints win rate at 5+ games - a 0/100% singleton
+never reads as a verdict. The drill body was re-skinned to the app's own
+tile/widget vocabulary: the six stat pills became a `mini-tile` band (the
+KPI-band eyebrow+hero-number treatment at drill scale), and the matchup table
+became a scrollable column of `matchup-row` widgets (icon + games + the same
+WinrateBar the champion rows use + G@10/KDA), max-height 236px so a champ with
+many distinct laners scrolls in place instead of blowing out the card. Empty
+state is now a dashed-border widget message. Rejected a responsive card grid
+for the matchups - the vertical scroll-list matches the "infinite scroll bar"
+ask and stays denser. The window filter already drives this data, so "All"
+works for free once the 2+ threshold is gone.
+
+**Trend charts: adaptive smoothing, date axis, verdict sentence.** A
+last-10 rolling win rate over 330 games is sample jitter (0-100%
+sawtooth), and "game 143" on the x-axis anchors nothing. The rolling
+window now scales with the data (10 games <=80, 20 <=200, 30 beyond;
+floored at half the window so tiny scopes still draw), partial ramp-in
+windows are dropped (the old opening 100%-after-one-game spike), and
+the axis speaks dates (~6 evenly spaced ticks; marks stay equally
+spaced per game). Both charts open with a computed verdict sentence -
+recent half vs earlier half of the selected window ("Trending up - 57%
+over your last 165 vs 49% the 165 before") - dead zones +-5 WR points /
++-75 gold so noise never gets narrated as a trend. Lane gold keeps the
+per-game diverging bars (disasters stay visible) but fades them past 80
+games under a bold rolling-average line in neutral ink - deliberately
+not blue/red, it summarizes the bars rather than reading as a second
+series. Rejected trend-line-only at large windows (hides outliers) and
+weekly bucketing (uneven buckets, gaps for non-play days).
+
+## 2026-07-22 — Q2 rebuilt as a personal question: "Did I leave my fights alive?"
+
+**The Fights verdict no longer folds team-state facts.** The old fold (kill-count
+record + conversion ratio + `conceded > converted`) graded the TEAM's fight war:
+a 12-game audit adjudicated by the player found 5/12 verdicts contradicting the
+personal record (7-6, 6-4, 7-6, 17-8 graded "no"; a perfect 9-0 graded "mixed"),
+and 90% of all losses graded "no" — unusable for the system's purpose of
+separating personal play from outcome.
+
+**New verdict = overstays only**: deaths post-8:00 with >=2 allies near and
+allies >= enemies, EXCUSED inside a participated fight with >=3 enemies
+committed (you can't solo-exit a committed teamfight — rule adjudicated from
+kill-log review of real games). 0/1/2+ overstays → yes/mixed/no. Validated over
+336 games: 52.5%/35.8%/0% win rate, 77% of losses score zero (earnable in
+defeat). Won/lost/converted/conceded stay in the detail payload as context.
+Paid absences (skipped fight + own building kill within ±90s) are listed as
+credit — the split-push case — but never drive the verdict (outcome-conditioned:
+20%→66% WR, same trap as bounty metrics).
+
+**Rejected:** deaths-inside-won/drawn-fights as the overstay definition (fight
+Result is a cluster-level team fact; no WR gradient — 44.8/51.8/51.5); paid
+absences as a verdict input; keeping any conceded/converted branch.
+
+**Discipline picks up what Q2 dropped:** fog picks (0 enemies near, post-laning,
+outside committed fights) and outnumbered steps (enemies >= allies+2, replacing
+the narrower `isolated` which required exactly 0 allies). Without this, a 0-9
+disaster game grades Q2 "yes" with nothing charging the repeated outnumbered
+deaths. Trade-off accepted: genuine run-over games now rely on
+Lane/Discipline/Stewardship + the context record to carry the "no"; frame
+proximity counts are known-unreliable inside fight clusters, so cluster context
+always wins over frame counts.
+
