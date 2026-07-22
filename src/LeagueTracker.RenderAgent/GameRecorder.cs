@@ -214,6 +214,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         [440] = "ranked-flex",
         [400] = "normal", [430] = "normal", [480] = "normal", [490] = "normal",
         [450] = "aram",
+        [2400] = "aram",     // ARAM: Mayhem (LCU reports gameMode "KIWI", Riot's internal codename - observed live 2026-07-22)
         [700] = "clash", [720] = "clash",
         [830] = "coop-ai", [840] = "coop-ai", [850] = "coop-ai",
         [870] = "coop-ai", [880] = "coop-ai", [890] = "coop-ai",
@@ -238,7 +239,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var category = QueueCategories.GetValueOrDefault(session.QueueId, "other");
         // Unmapped queue but a mode name that identifies it: trust the mode.
         if (category is "other" && session.GameMode is "PRACTICETOOL") category = "custom";
-        if (category is "other" && session.GameMode is "ARAM") category = "aram";
+        if (category is "other" && session.GameMode is "ARAM" or "KIWI") category = "aram";
         if (category is "other" && session.GameMode is "URF" or "ARURF") category = "urf";
         if (enabled.Contains(category)) return true;
         skipReason = $"queue {session.QueueId} ({category}, {session.GameMode ?? "?"}) is not in RecordQueues ({config.RecordQueues})";
