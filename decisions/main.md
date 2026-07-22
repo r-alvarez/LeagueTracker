@@ -527,3 +527,35 @@ games under a bold rolling-average line in neutral ink - deliberately
 not blue/red, it summarizes the bars rather than reading as a second
 series. Rejected trend-line-only at large windows (hides outliers) and
 weekly bucketing (uneven buckets, gaps for non-play days).
+
+## 2026-07-22 — Q2 rebuilt as a personal question: "Did I leave my fights alive?"
+
+**The Fights verdict no longer folds team-state facts.** The old fold (kill-count
+record + conversion ratio + `conceded > converted`) graded the TEAM's fight war:
+a 12-game audit adjudicated by the player found 5/12 verdicts contradicting the
+personal record (7-6, 6-4, 7-6, 17-8 graded "no"; a perfect 9-0 graded "mixed"),
+and 90% of all losses graded "no" — unusable for the system's purpose of
+separating personal play from outcome.
+
+**New verdict = overstays only**: deaths post-8:00 with >=2 allies near and
+allies >= enemies, EXCUSED inside a participated fight with >=3 enemies
+committed (you can't solo-exit a committed teamfight — rule adjudicated from
+kill-log review of real games). 0/1/2+ overstays → yes/mixed/no. Validated over
+336 games: 52.5%/35.8%/0% win rate, 77% of losses score zero (earnable in
+defeat). Won/lost/converted/conceded stay in the detail payload as context.
+Paid absences (skipped fight + own building kill within ±90s) are listed as
+credit — the split-push case — but never drive the verdict (outcome-conditioned:
+20%→66% WR, same trap as bounty metrics).
+
+**Rejected:** deaths-inside-won/drawn-fights as the overstay definition (fight
+Result is a cluster-level team fact; no WR gradient — 44.8/51.8/51.5); paid
+absences as a verdict input; keeping any conceded/converted branch.
+
+**Discipline picks up what Q2 dropped:** fog picks (0 enemies near, post-laning,
+outside committed fights) and outnumbered steps (enemies >= allies+2, replacing
+the narrower `isolated` which required exactly 0 allies). Without this, a 0-9
+disaster game grades Q2 "yes" with nothing charging the repeated outnumbered
+deaths. Trade-off accepted: genuine run-over games now rely on
+Lane/Discipline/Stewardship + the context record to carry the "no"; frame
+proximity counts are known-unreliable inside fight clusters, so cluster context
+always wins over frame counts.

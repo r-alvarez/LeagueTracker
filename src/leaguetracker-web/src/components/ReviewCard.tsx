@@ -114,16 +114,31 @@ export default function ReviewCard({ matchId }: { matchId: string }) {
 
         <div className="review-q">
           <div className="rv-head">
-            <span className="rv-question">Did my fights buy the map?</span>
+            <span className="rv-question">Did I leave my fights alive?</span>
             <Badge v={fights.verdict} />
           </div>
           <ul className="rv-evidence">
-            <li>Fights taken: <strong>{fights.detail.participated}</strong> — won {fights.detail.won}, lost {fights.detail.lost}</li>
-            <li>Won fights converted into objectives: <strong>{fights.detail.converted}/{fights.detail.won}</strong></li>
-            {fights.detail.conceded > 0 && (
-              <li className="loss">Lost fights the enemy converted: {fights.detail.conceded}</li>
+            {fights.detail.overstays.length === 0 && fights.verdict !== null && (
+              <li className="win">No overstays — every death had a reason the numbers can see</li>
             )}
-            {fights.verdict === null && <li className="mut">No decisive fights involved you.</li>}
+            {fights.detail.overstays.map((o, i) => (
+              <li key={`o${i}`} className="loss">
+                {mmss(o.timeSec)} — died to {o.killedBy} with the numbers present
+                ({o.alliesNear} all{o.alliesNear === 1 ? 'y' : 'ies'} vs {o.enemiesNear} enem{o.enemiesNear === 1 ? 'y' : 'ies'} near, no committed fight)
+              </li>
+            ))}
+            {fights.detail.paidAbsences.map((a, i) => (
+              <li key={`p${i}`} className="win">
+                {mmss(a.startSec)} — team {a.result === 'lost' ? 'gave' : a.result === 'won' ? 'won' : 'held'} a {a.size} without you;
+                your split took {a.paid.map(k => k.toLowerCase().replace('_', ' ')).join(' + ')} (paid)
+              </li>
+            ))}
+            <li className="mut">
+              Context: entered {fights.detail.participated} fights — won {fights.detail.won}, lost {fights.detail.lost}
+              {fights.detail.draw > 0 ? `, drew ${fights.detail.draw}` : ''} · converted {fights.detail.converted} · conceded {fights.detail.conceded}.
+              The team's fight war shows here; only overstays grade you.
+            </li>
+            {fights.verdict === null && <li className="mut">No fights and no late deaths — nothing to judge.</li>}
           </ul>
         </div>
 
@@ -139,7 +154,8 @@ export default function ReviewCard({ matchId }: { matchId: string }) {
                 <> — {disc.detail.ganked > 0 && <span className="loss">{disc.detail.ganked} ganked · </span>}
                   {disc.detail.followIns > 0 && <span className="loss">{disc.detail.followIns} follow-in · </span>}
                   {disc.detail.followInsTraded > 0 && <span>{disc.detail.followInsTraded} follow-in, traded · </span>}
-                  {disc.detail.isolated > 0 && <span className="loss">{disc.detail.isolated} caught alone · </span>}
+                  {disc.detail.fogPicks > 0 && <span className="loss">{disc.detail.fogPicks} picked from fog · </span>}
+                  {disc.detail.outnumbered > 0 && <span className="loss">{disc.detail.outnumbered} stepped outnumbered · </span>}
                   {disc.detail.withTeam} with the team</>
               )}
             </li>

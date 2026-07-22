@@ -486,7 +486,16 @@ export interface MatchReview {
   } | null
   fights: {
     verdict: ReviewVerdict
-    detail: { participated: number; won: number; lost: number; converted: number; conceded: number }
+    detail: {
+      participated: number
+      won: number
+      lost: number
+      draw: number
+      converted: number
+      conceded: number
+      overstays: { timeSec: number; alliesNear: number; enemiesNear: number; killedBy: string }[]
+      paidAbsences: { startSec: number; result: string; size: string; paid: string[] }[]
+    }
   }
   discipline: {
     verdict: ReviewVerdict
@@ -495,7 +504,8 @@ export interface MatchReview {
       ganked: number
       followIns: number
       followInsTraded: number
-      isolated: number
+      fogPicks: number
+      outnumbered: number
       withTeam: number
       flagged: number
       fightsStepped: number
