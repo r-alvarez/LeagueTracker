@@ -15,6 +15,7 @@ namespace LeagueTracker.RenderAgent;
 /// loopback only delivers packets while the process renders sound, but an
 /// audio track must be continuous or the mux drifts out of sync - so every
 /// gap becomes explicit silence, and total samples always track elapsed time.
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class ProcessAudioCapture : IDisposable
 {
     public const int SampleRate = 48000;
