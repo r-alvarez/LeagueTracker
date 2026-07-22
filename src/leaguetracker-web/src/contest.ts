@@ -34,7 +34,7 @@ export function contestSentence(r: MatchReview): string {
     else if (v === 'no') neg.push(no)
   }
   put(r.laneDuel?.verdict, 'you out-dueled your lane', 'your lane out-dueled you')
-  put(r.fights.verdict, 'your fights bought the map', 'your fights bought nothing')
+  put(r.fights.verdict, 'you left your fights alive', 'you overstayed and paid in bodies')
   put(r.discipline.verdict, 'you stepped with your eyes open', 'you stepped in blind')
   if (r.stewardship) {
     // The stewardship summary already carries its own direction ("lead grew",
