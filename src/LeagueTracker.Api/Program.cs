@@ -50,6 +50,7 @@ builder.Services.AddHttpClient<DpmLpBackfillService>(c =>
     c.DefaultRequestHeaders.Add("Referer", "https://dpm.lol/");
 });
 builder.Services.AddSingleton<RenderLeaseService>();
+builder.Services.AddSingleton<VodService>();
 builder.Services.AddSingleton<LiveGameState>();
 builder.Services.AddHostedService<MatchPollerService>();
 
@@ -277,6 +278,71 @@ app.MapGet("/api/matches/{id}/clips/{index:int}", (string id, int index, ClipSer
 app.MapDelete("/api/matches/{id}/clips/{index:int}", (string id, int index, ClipService clips) =>
     clips.DeleteClip(id, index) ? Results.Ok() : Results.NotFound());
 
+// --- Live-game VODs (recorded by the agent while the player was in game) ---------
+
+app.MapGet("/api/matches/{id}/vod/status", (string id, VodService vods) =>
+    Results.Ok(vods.Status(id)));
+
+app.MapGet("/api/matches/{id}/vod", (string id, VodService vods) =>
+    vods.VideoPath(id) is { } path
+        ? Results.File(path, "video/mp4", enableRangeProcessing: true)
+        : Results.NotFound());
+
+app.MapGet("/api/matches/{id}/vod/thumb", (string id, VodService vods) =>
+    vods.ThumbPath(id) is { } path
+        ? Results.File(path, "image/jpeg")
+        : Results.NotFound());
+
+app.MapDelete("/api/matches/{id}/vod", (string id, VodService vods) =>
+{
+    vods.Delete(id);
+    return Results.Ok();
+});
+
+// Agent-facing uploads. The mp4 is only accepted for a match this tracker
+// knows - the one agent serves several trackers and offers each VOD to all
+// of them; the owning tracker is the one whose db has the match.
+app.MapPut("/api/vods/{matchId}", async (string matchId, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+{
+    if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
+    if (vods.TargetPath(matchId, "vod.mp4") is not { } target) return Results.BadRequest();
+
+    // A 1440p60 game runs to ~3GB; lift the body cap accordingly.
+    request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
+        .MaxRequestBodySize = 8L * 1024 * 1024 * 1024;
+
+    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+    var temp = target + ".tmp";
+    await using (var file = File.Create(temp))
+    {
+        await request.Body.CopyToAsync(file, ct);
+    }
+    File.Move(temp, target, overwrite: true);
+    return Results.Ok(new { bytes = new FileInfo(target).Length });
+});
+
+// Sidecar pieces (small): recording metadata, input telemetry, thumbnail.
+// Only meaningful once the mp4 landed, hence the vod-dir requirement.
+app.MapPut("/api/vods/{matchId}/{file}", async (string matchId, string file, HttpRequest request, VodService vods, CancellationToken ct) =>
+{
+    var name = file switch
+    {
+        "meta" => "meta.json",
+        "events" => "events.csv.gz",
+        "thumb" => "thumb.jpg",
+        _ => null,
+    };
+    if (name is null || vods.VideoPath(matchId) is null) return Results.NotFound();
+    var target = vods.TargetPath(matchId, name)!;
+    var temp = target + ".tmp";
+    await using (var f = File.Create(temp))
+    {
+        await request.Body.CopyToAsync(f, ct);
+    }
+    File.Move(temp, target, overwrite: true);
+    return Results.Ok();
+});
+
 // --- Full-game renders (opt-in per match; retention-swept unless kept) ----------
 
 app.MapGet("/api/matches/{id}/fullgame/status", (string id, FullGameService full, RenderLeaseService leases) =>
@@ -316,6 +382,7 @@ app.MapGet("/api/storage", (DataPaths paths) =>
         ReplaysMb = DirMb(Path.Combine(paths.DataDir, "replays")),
         ClipsMb = DirMb(Path.Combine(paths.DataDir, "clips")),
         FullGamesMb = DirMb(Path.Combine(paths.DataDir, "fullgames")),
+        VodsMb = DirMb(Path.Combine(paths.DataDir, "vods")),
         DatabaseMb = File.Exists(Path.Combine(paths.DataDir, "leaguetracker.db"))
             ? Math.Round(new FileInfo(Path.Combine(paths.DataDir, "leaguetracker.db")).Length / 1024.0 / 1024.0, 1)
             : 0,
