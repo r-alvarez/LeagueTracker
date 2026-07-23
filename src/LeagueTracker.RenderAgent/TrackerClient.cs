@@ -111,7 +111,9 @@ public sealed class TrackerClient
     /// tracker doesn't know the match (it belongs to another account's
     /// instance) - the caller tries the next tracker. The sidecar pieces
     /// only upload once the mp4 is accepted.
-    public async Task<bool> UploadVodAsync(string matchId, string mp4Path, string? metaPath, string? eventsPath, string? thumbPath, CancellationToken ct)
+    /// includeVideo=false is the storage-free mode: only the sidecars land
+    /// on the tracker; the video goes to YouTube by hand.
+    public async Task<bool> UploadVodAsync(string matchId, string mp4Path, string? metaPath, string? eventsPath, string? thumbPath, bool includeVideo, CancellationToken ct)
     {
         // Byte-cheap probe before shipping chunks: a tracker without the VOD
         // endpoints (not yet redeployed) or an unreachable one fails here,
@@ -130,8 +132,9 @@ public sealed class TrackerClient
         // gigabytes. 64MB pieces + a size-checked commit; the first chunk
         // answering 404 means this tracker doesn't know the match.
         const int ChunkBytes = 64 * 1024 * 1024;
-        await using (var file = File.OpenRead(mp4Path))
+        if (includeVideo)
         {
+            await using var file = File.OpenRead(mp4Path);
             var buffer = new byte[ChunkBytes];
             long offset = 0;
             while (offset < file.Length)
@@ -170,6 +173,9 @@ public sealed class TrackerClient
             using var content = new StreamContent(side);
             content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(type);
             using var resp = await _http.PutAsync($"{ServerUrl}/api/vods/{matchId}/{name}", content, ct);
+            // In sidecars-only mode the first sidecar is also the ownership
+            // test: 404 = this tracker doesn't know the match.
+            if (resp.StatusCode == HttpStatusCode.NotFound) return false;
             resp.EnsureSuccessStatusCode();
         }
         return true;

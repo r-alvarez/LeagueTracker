@@ -32,6 +32,15 @@ export const api = {
   deleteClip: async (id: string, index: number) => { await fetch(`/api/matches/${id}/clips/${index}`, { method: 'DELETE' }) },
   renderQueue: () => get<RenderQueueRow[]>('/api/render/queue'),
   vodStatus: (id: string) => get<VodStatus>(`/api/matches/${id}/vod/status`),
+  setVodLink: async (id: string, url: string): Promise<VodStatus> => {
+    const r = await fetch(`/api/matches/${id}/vod/link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    })
+    if (!r.ok) throw new Error(`/api/matches/${id}/vod/link -> HTTP ${r.status}`)
+    return r.json()
+  },
   deleteVod: async (id: string) => { await fetch(`/api/matches/${id}/vod`, { method: 'DELETE' }) },
   fullGameStatus: (id: string) => get<FullGameStatus>(`/api/matches/${id}/fullgame/status`),
   requestFullGame: (id: string) => post<FullGameStatus>(`/api/matches/${id}/fullgame`),

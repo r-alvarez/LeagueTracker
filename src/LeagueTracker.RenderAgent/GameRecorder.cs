@@ -148,7 +148,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         Log.Info($"Recording complete: {baseName}.mp4 ({result!.Duration.TotalMinutes:0} min)");
         // Customs/Practice Tool have no Riot match for a tracker to own -
         // those recordings are local-only, not eternal upload retries.
-        if (config.UploadVods && matchId is not null && QueueCategories.GetValueOrDefault(session!.QueueId, "other") is not "custom")
+        if ((config.UploadVods || config.UploadVodSidecars) && matchId is not null
+            && QueueCategories.GetValueOrDefault(session!.QueueId, "other") is not "custom")
         {
             await TryUploadVodAsync(matchId, baseName, ct);
         }
@@ -193,7 +194,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 if (!await tracker.UploadVodAsync(matchId, Path.Combine(RecordingsDir, baseName + ".mp4"),
                         File.Exists(M(".json")) ? M(".json") : null,
                         File.Exists(M(".events.csv.gz")) ? M(".events.csv.gz") : null,
-                        File.Exists(M(".jpg")) ? M(".jpg") : null, ct))
+                        File.Exists(M(".jpg")) ? M(".jpg") : null,
+                        includeVideo: config.UploadVods, ct))
                 {
                     continue; // tracker doesn't know this match - not its account
                 }
@@ -220,19 +222,26 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// imported, agent killed): retried at startup, oldest first.
     private async Task SweepUnuploadedAsync(CancellationToken ct)
     {
-        if (!config.UploadVods) return;
+        if (!config.UploadVods && !config.UploadVodSidecars) return;
         string? resolvedPlatform = null;
         var platformProbed = false;
         foreach (var sidecar in Directory.EnumerateFiles(MetaDir, "*.json").OrderBy(f => f))
         {
             var baseName = Path.GetFileNameWithoutExtension(sidecar);
             if (File.Exists(Path.Combine(MetaDir, baseName + ".uploaded"))) continue;
-            if (!File.Exists(Path.Combine(RecordingsDir, baseName + ".mp4"))) continue;
+            // Sidecars upload even after the local mp4 is gone (published to
+            // YouTube and cleaned up); a full upload obviously cannot.
+            if (config.UploadVods && !File.Exists(Path.Combine(RecordingsDir, baseName + ".mp4"))) continue;
             string? matchId;
             try
             {
                 var root = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(sidecar, ct))!;
                 matchId = root["matchId"]?.GetValue<string>();
+                if (root["queueId"]?.GetValue<long>() is { } queueId
+                    && QueueCategories.GetValueOrDefault(queueId, "other") is "custom")
+                {
+                    continue; // no Riot match exists for customs - nothing to deliver to
+                }
                 // Sidecars recorded before the platform fallback existed have
                 // a gameId but no match id - repair them when the client can
                 // say which platform this PC plays on (once per sweep).

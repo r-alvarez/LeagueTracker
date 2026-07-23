@@ -52,6 +52,12 @@ public sealed class AgentConfig
     /// review player). Off = recordings stay local only.
     public bool UploadVods { get; set; } = true;
 
+    /// Send only the small review data (telemetry, metadata, thumbnail -
+    /// megabytes) while the video itself lives elsewhere (YouTube). The
+    /// match page then overlays markers/APM on the linked video. Moot when
+    /// UploadVods is on (full uploads already include the sidecars).
+    public bool UploadVodSidecars { get; set; } = true;
+
     /// Record the game's audio track (and ONLY the game's - captured from
     /// the game process via Windows process loopback, so Discord/music
     /// never enter the VOD). Needs Windows 10 2004+; falls back to

@@ -299,6 +299,22 @@ app.MapDelete("/api/matches/{id}/vod", (string id, VodService vods) =>
     return Results.Ok();
 });
 
+// The match's YouTube upload (storage-free review mode: the video lives on
+// YouTube, the tracker keeps only markers/APM data). Empty url = unlink.
+app.MapPost("/api/matches/{id}/vod/link", async (string id, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+{
+    if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == id, ct)) return Results.NotFound();
+    using var doc = await System.Text.Json.JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
+    var url = doc.RootElement.TryGetProperty("url", out var u) ? u.GetString()?.Trim() : null;
+    if (url is { Length: > 0 } && !System.Text.RegularExpressions.Regex.IsMatch(
+            url, @"^https://(www\.)?(youtube\.com/(watch\?|shorts/)|youtu\.be/)"))
+    {
+        return Results.BadRequest(new { error = "that does not look like a YouTube video link" });
+    }
+    vods.SaveLink(id, url);
+    return Results.Ok(vods.Status(id));
+});
+
 // Agent-facing uploads. The mp4 is only accepted for a match this tracker
 // knows - the one agent serves several trackers and offers each VOD to all
 // of them; the owning tracker is the one whose db has the match.
@@ -353,8 +369,9 @@ app.MapPost("/api/vods/{matchId}/commit", (string matchId, long size, VodService
 });
 
 // Sidecar pieces (small): recording metadata, input telemetry, thumbnail.
-// Only meaningful once the mp4 landed, hence the vod-dir requirement.
-app.MapPut("/api/vods/{matchId}/{file}", async (string matchId, string file, HttpRequest request, VodService vods, CancellationToken ct) =>
+// Accepted for any known match WITHOUT requiring the mp4 - in the
+// YouTube-hosted mode these are the only bytes the tracker ever stores.
+app.MapPut("/api/vods/{matchId}/{file}", async (string matchId, string file, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
 {
     var name = file switch
     {
@@ -363,14 +380,17 @@ app.MapPut("/api/vods/{matchId}/{file}", async (string matchId, string file, Htt
         "thumb" => "thumb.jpg",
         _ => null,
     };
-    if (name is null || vods.VideoPath(matchId) is null) return Results.NotFound();
+    if (name is null || !await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
     var target = vods.TargetPath(matchId, name)!;
+    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
     var temp = target + ".tmp";
     await using (var f = File.Create(temp))
     {
         await request.Body.CopyToAsync(f, ct);
     }
     File.Move(temp, target, overwrite: true);
+    // Telemetry replaced = derived series stale; recomputed on next read.
+    if (name is "events.csv.gz" && vods.TargetPath(matchId, "apm.json") is { } apm && File.Exists(apm)) File.Delete(apm);
     return Results.Ok();
 });
 
