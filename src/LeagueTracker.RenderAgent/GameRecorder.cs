@@ -375,7 +375,10 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var encode = nvenc
             ? $"-c:v h264_nvenc -preset p4 -rc vbr -cq {config.RecordQuality} -b:v 0 -maxrate 25M -bufsize 50M -g {fps * 4}"
             : "-vf hwdownload,format=bgra -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p";
-        var mapping = audio is null ? "" : "-map 0:v -map 1:a -c:a aac -b:a 160k";
+        // -shortest: if the video input dies (Desktop Duplication loses its
+        // session on a display mode switch), ffmpeg must exit - not keep
+        // muxing our never-ending audio pipe under a frozen last frame.
+        var mapping = audio is null ? "" : "-map 0:v -map 1:a -c:a aac -b:a 160k -shortest";
         // Fragmented mp4: every fragment is self-contained, so a crash or
         // power cut costs seconds, not the whole game. FinalizeAsync remuxes
         // to a normal faststart mp4 for clean browser playback.
@@ -397,6 +400,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var clockMap = new List<(double, double)>();
         string? activePlayer = null;
         var lastClockSample = DateTime.MinValue;
+        var lastGrowthCheck = DateTime.UtcNow;
+        long lastPartSize = 0;
 
         try
         {
@@ -415,6 +420,25 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 // ffmpeg dying this early is an encoder/capture init problem,
                 // not a game event - report it so the caller can fall back.
                 if (proc.HasExited && DateTime.UtcNow - startedUtc < TimeSpan.FromSeconds(8)) break;
+
+                // Even a static screen encodes at ~50MB/min at these settings;
+                // ~1.5MB/min means the video stream silently died (Game 3 of
+                // 23 Jul: a mode switch killed Desktop Duplication and 37
+                // minutes muxed as audio under one frozen frame). Break out -
+                // the game is still on, so the outer loop starts a fresh
+                // capture and the rest of the game survives as a second file.
+                if (DateTime.UtcNow - lastGrowthCheck > TimeSpan.FromSeconds(60))
+                {
+                    lastGrowthCheck = DateTime.UtcNow;
+                    var size = new FileInfo(partPath) is { Exists: true } part ? part.Length : 0;
+                    var grewBytes = size - lastPartSize;
+                    lastPartSize = size;
+                    if (grewBytes < 5_000_000 && DateTime.UtcNow - startedUtc > TimeSpan.FromSeconds(90))
+                    {
+                        Log.Warn($"Capture stalled ({grewBytes / 1024} KB in the last minute - video stream likely lost to a display mode switch); restarting the recording");
+                        break;
+                    }
+                }
 
                 if (DateTime.UtcNow - lastClockSample > TimeSpan.FromSeconds(30))
                 {
