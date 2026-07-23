@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
-import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts } from '../types'
+import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts, VodStatus } from '../types'
 import { sourceLabel, unitKind, useAbilityLabels, useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
 import { ItemIcon, PerkIcon, UnitGlyph } from '../components/GameIcons'
@@ -546,6 +546,7 @@ export default function MatchDetail() {
   })
   const [clips, setClips] = useState<ClipInfo[]>([])
   const [fullGame, setFullGame] = useState<FullGameStatus | null>(null)
+  const [vod, setVod] = useState<VodStatus | null>(null)
   const [recapAt, setRecapAt] = useState<number | null>(null)
   const clipRefs = useRef<Record<number, HTMLVideoElement | null>>({})
 
@@ -554,6 +555,7 @@ export default function MatchDetail() {
     api.match(id).then(setDetail).catch(e => setError(String(e)))
     api.clips(id).then(setClips).catch(() => setClips([]))
     api.fullGameStatus(id).then(setFullGame).catch(() => setFullGame(null))
+    api.vodStatus(id).then(setVod).catch(() => setVod(null))
   }, [id])
 
   // Jump the covering clip to ~5s before the moment and play it.
@@ -661,9 +663,12 @@ export default function MatchDetail() {
         </div>
       )}
 
-      <VodReview matchId={m.id} moments={clips.flatMap(c => c.events)} deaths={deaths} />
+      <VodReview matchId={m.id} vod={vod} onChange={setVod} moments={clips.flatMap(c => c.events)} deaths={deaths} />
 
-      {fullGame && (fullGame.state !== 'none' || m.hasReplay) && (
+      {/* The replay re-render is the fallback for matches with no live
+          recording (older games, other machines) - when recording data
+          exists, the VOD card above owns this slot. */}
+      {!(vod && (vod.exists || vod.youtubeUrl || vod.meta || vod.apm)) && fullGame && (fullGame.state !== 'none' || m.hasReplay) && (
         <div className="card" style={{ marginBottom: 14 }}>
           <h2>
             Full game <span className="mut" style={{ fontWeight: 400 }}>— the whole match as one video, camera on you</span>

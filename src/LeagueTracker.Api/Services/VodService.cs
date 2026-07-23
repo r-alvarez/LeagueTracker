@@ -36,20 +36,48 @@ public sealed class VodService(DataPaths paths)
     /// review player: the recording sidecar plus the derived APM series.
     public object Status(string matchId)
     {
-        if (VideoPath(matchId) is not { } videoPath) return new { exists = false };
+        var videoPath = VideoPath(matchId);
         object? meta = null;
         if (MetaPath(matchId) is { } metaPath)
         {
             try { meta = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(metaPath)); }
             catch { /* sidecar unreadable - the VOD still plays */ }
         }
+        var youtubeUrl = ReadLink(matchId);
+        var apm = ApmSeries(matchId);
+        // A match can have review data in three shapes: a hosted mp4, a
+        // YouTube link over sidecar data (the storage-free mode), or sidecars
+        // still waiting for their link. Nothing at all = no card.
+        if (videoPath is null && meta is null && youtubeUrl is null && apm is null) return new { exists = false };
         return new
         {
-            exists = true,
-            sizeMb = (int)(new FileInfo(videoPath).Length / 1024 / 1024),
+            exists = videoPath is not null,
+            sizeMb = videoPath is null ? (int?)null : (int)(new FileInfo(videoPath).Length / 1024 / 1024),
+            youtubeUrl,
             meta,
-            apm = ApmSeries(matchId),
+            apm,
         };
+    }
+
+    /// The player's own YouTube upload of this game - the video lives there,
+    /// the tracker only keeps the small review data around it.
+    public string? ReadLink(string matchId)
+    {
+        if (ExistingFile(matchId, "youtube.txt") is not { } path) return null;
+        var url = File.ReadAllText(path).Trim();
+        return url.Length > 0 ? url : null;
+    }
+
+    public void SaveLink(string matchId, string? url)
+    {
+        if (TargetPath(matchId, "youtube.txt") is not { } path) return;
+        if (url is not { Length: > 0 })
+        {
+            if (File.Exists(path)) File.Delete(path);
+            return;
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, url);
     }
 
     /// Actions-per-minute over the game in 10s buckets, derived from the

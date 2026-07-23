@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api'
 import type { ClipEvent, DeathEvent, VodStatus } from '../types'
 
 const fmtClock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
+
+const youtubeId = (url: string) => /(?:youtu\.be\/|[?&]v=|shorts\/)([A-Za-z0-9_-]{11})/.exec(url)?.[1] ?? null
 
 interface ApmTooltipProps {
   active?: boolean
@@ -21,22 +23,23 @@ function ApmTooltip({ active, payload }: ApmTooltipProps) {
   )
 }
 
-/// The live-recorded VOD of this game (what was on the monitor, recorded by
-/// the agent while playing), with the game's kill/death moments as jump
-/// markers and the input telemetry as an APM line - both seek the video.
-/// Renders nothing when no VOD exists for the match.
-export default function VodReview({ matchId, moments, deaths = [] }: { matchId: string; moments: ClipEvent[]; deaths?: DeathEvent[] }) {
-  const [vod, setVod] = useState<VodStatus | null>(null)
+/// The game as it was played, reviewed in place: video (tracker-hosted mp4
+/// OR the player's own YouTube upload - the storage-free mode), kill/death
+/// jump markers mapped through the recording's clock map, and the input
+/// telemetry as a clickable APM line. Renders nothing when the match has no
+/// recording data at all.
+export default function VodReview({ matchId, vod, onChange, moments, deaths = [] }: {
+  matchId: string
+  vod: VodStatus | null
+  onChange: (v: VodStatus) => void
+  moments: ClipEvent[]
+  deaths?: DeathEvent[]
+}) {
   const [duration, setDuration] = useState<number | null>(null)
+  const [linkDraft, setLinkDraft] = useState('')
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const youtubeRef = useRef<HTMLIFrameElement | null>(null)
 
-  useEffect(() => {
-    api.vodStatus(matchId).then(setVod).catch(() => setVod(null))
-  }, [matchId])
-
-  // The recording starts at the loading screen, so video time and the game
-  // clock differ by a constant the sidecar sampled while recording. Median
-  // over the samples shrugs off any one bad read.
   const gameToVideoOffset = useMemo(() => {
     const pairs = vod?.meta?.clockMap ?? []
     if (pairs.length === 0) return null
@@ -44,17 +47,35 @@ export default function VodReview({ matchId, moments, deaths = [] }: { matchId: 
     return offsets[Math.floor(offsets.length / 2)]
   }, [vod])
 
-  if (!vod?.exists) return null
+  if (!vod || (!vod.exists && !vod.youtubeUrl && !vod.meta && !vod.apm)) return null
+
+  const ytId = vod.youtubeUrl ? youtubeId(vod.youtubeUrl) : null
+  const hasHostedVideo = vod.exists
+
+  // Without a loaded <video> element (YouTube mode) the recording length
+  // comes from the sidecar's own start/end stamps.
+  const metaDuration = vod.meta
+    ? (new Date(vod.meta.recordingEndUtc).getTime() - new Date(vod.meta.recordingStartUtc).getTime()) / 1000
+    : null
+  const effectiveDuration = duration ?? metaDuration
+
+  const seekTo = (videoSec: number) => {
+    if (hasHostedVideo && videoRef.current) {
+      videoRef.current.currentTime = videoSec
+      void videoRef.current.play()
+      return
+    }
+    // YouTube's iframe accepts player commands over postMessage when the
+    // embed src carries enablejsapi=1 - no SDK script needed for seek/play.
+    const target = youtubeRef.current?.contentWindow
+    if (!target) return
+    for (const func of [['seekTo', [videoSec, true]], ['playVideo', []]] as Array<[string, unknown[]]>) {
+      target.postMessage(JSON.stringify({ event: 'command', func: func[0], args: func[1] }), 'https://www.youtube.com')
+    }
+  }
 
   const videoFor = (gameSec: number) =>
     gameToVideoOffset === null ? null : Math.max(0, gameSec - gameToVideoOffset)
-
-  const seekTo = (videoSec: number) => {
-    const el = videoRef.current
-    if (!el) return
-    el.currentTime = videoSec
-    void el.play()
-  }
 
   const jumpToMoment = (gameSec: number) => {
     const v = videoFor(gameSec)
@@ -70,34 +91,69 @@ export default function VodReview({ matchId, moments, deaths = [] }: { matchId: 
     }
   })
 
-  // Clip windows carry my kills AND deaths; matches without a clip plan
-  // still have the death analytics to mark.
   const allMoments: ClipEvent[] = moments.length > 0
     ? moments
     : deaths.map(d => ({ kind: 'death', timeSec: d.timeSec }))
 
-  const markers = duration === null || gameToVideoOffset === null
+  const markers = effectiveDuration === null || gameToVideoOffset === null
     ? []
     : allMoments
         .map(e => ({ ...e, videoSec: videoFor(e.timeSec) }))
-        .filter((e): e is ClipEvent & { videoSec: number } => e.videoSec !== null && e.videoSec <= duration)
+        .filter((e): e is ClipEvent & { videoSec: number } => e.videoSec !== null && e.videoSec <= effectiveDuration)
+
+  const saveLink = (url: string) => {
+    void api.setVodLink(matchId, url).then(status => { onChange(status); setLinkDraft('') })
+  }
 
   return (
     <div className="card" style={{ marginBottom: 14 }}>
       <h2>
         Your VOD <span className="mut" style={{ fontWeight: 400 }}>— the game as you played it, recorded live with your inputs</span>
       </h2>
-      <video
-        ref={videoRef}
-        src={`/api/matches/${matchId}/vod`}
-        poster={`/api/matches/${matchId}/vod/thumb`}
-        controls
-        preload="metadata"
-        onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
-        style={{ width: '100%', maxWidth: 960, borderRadius: 8, background: '#000' }}
-      />
 
-      {markers.length > 0 && duration !== null && (
+      {hasHostedVideo ? (
+        <video
+          ref={videoRef}
+          src={`/api/matches/${matchId}/vod`}
+          poster={`/api/matches/${matchId}/vod/thumb`}
+          controls
+          preload="metadata"
+          onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
+          style={{ width: '100%', maxWidth: 960, borderRadius: 8, background: '#000' }}
+        />
+      ) : ytId ? (
+        <iframe
+          ref={youtubeRef}
+          src={`https://www.youtube.com/embed/${ytId}?enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`}
+          title="Game VOD on YouTube"
+          allow="autoplay; encrypted-media; picture-in-picture"
+          allowFullScreen
+          style={{ width: '100%', maxWidth: 960, aspectRatio: '16 / 9', border: 0, borderRadius: 8, background: '#000' }}
+        />
+      ) : (
+        <p className="mut" style={{ margin: 0 }}>
+          This game was recorded (telemetry below) — paste its YouTube link to review the video here with jump markers.
+        </p>
+      )}
+
+      {!hasHostedVideo && (
+        <p style={{ margin: '8px 0 0', display: 'flex', gap: 8, maxWidth: 960 }}>
+          <input
+            value={linkDraft}
+            onChange={e => setLinkDraft(e.target.value)}
+            placeholder={vod.youtubeUrl ? 'Replace the YouTube link…' : 'https://youtu.be/…'}
+            style={{ flex: 1 }}
+          />
+          <button className="action" disabled={!linkDraft.trim()} onClick={() => saveLink(linkDraft.trim())}>
+            {vod.youtubeUrl ? 'replace' : 'link video'}
+          </button>
+          {vod.youtubeUrl && (
+            <button className="action" onClick={() => saveLink('')}>unlink</button>
+          )}
+        </p>
+      )}
+
+      {markers.length > 0 && effectiveDuration !== null && (ytId || hasHostedVideo) && (
         <div style={{ position: 'relative', height: 22, maxWidth: 960, margin: '6px 0 0' }} aria-label="Moments">
           {markers.map((e, i) => (
             <button
@@ -107,7 +163,7 @@ export default function VodReview({ matchId, moments, deaths = [] }: { matchId: 
               onClick={() => jumpToMoment(e.timeSec)}
               style={{
                 position: 'absolute',
-                left: `${(e.videoSec / duration) * 100}%`,
+                left: `${(e.videoSec / effectiveDuration) * 100}%`,
                 transform: 'translateX(-50%)',
                 padding: '0 4px',
                 lineHeight: '20px',
@@ -152,20 +208,25 @@ export default function VodReview({ matchId, moments, deaths = [] }: { matchId: 
       )}
 
       <p className="mut sm-text" style={{ margin: '8px 0 0' }}>
-        {vod.sizeMb} MB · {vod.meta?.width}×{vod.meta?.height}@{vod.meta?.fps} ({vod.meta?.encoder})
+        {vod.meta && <>{vod.meta.width}×{vod.meta.height}@{vod.meta.fps} ({vod.meta.encoder})</>}
+        {vod.sizeMb !== null && vod.sizeMb !== undefined && <> · {vod.sizeMb} MB on the tracker</>}
         {vod.meta?.activePlayer && <> · played as {vod.meta.activePlayer}</>}
-        {' · '}
-        <button
-          className="action"
-          style={{ padding: '0 8px' }}
-          onClick={() => {
-            if (window.confirm('Delete this VOD from the tracker? The recording on the gaming PC is kept.')) {
-              void api.deleteVod(matchId).then(() => setVod({ exists: false, sizeMb: null, meta: null, apm: null }))
-            }
-          }}
-        >
-          delete
-        </button>
+        {hasHostedVideo && (
+          <>
+            {' · '}
+            <button
+              className="action"
+              style={{ padding: '0 8px' }}
+              onClick={() => {
+                if (window.confirm('Delete this VOD from the tracker? The recording on the gaming PC is kept.')) {
+                  void api.deleteVod(matchId).then(() => api.vodStatus(matchId).then(onChange))
+                }
+              }}
+            >
+              delete
+            </button>
+          </>
+        )}
       </p>
     </div>
   )

@@ -434,6 +434,7 @@ export interface VodApm {
 export interface VodStatus {
   exists: boolean
   sizeMb: number | null
+  youtubeUrl: string | null
   meta: VodMeta | null
   apm: VodApm | null
 }
