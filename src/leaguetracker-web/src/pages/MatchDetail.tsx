@@ -709,6 +709,8 @@ export default function MatchDetail() {
               <button className="action" onClick={() => id && api.requestFullGame(id).then(setFullGame)}>Render full game</button>
               {' '}~500 MB and a real-time render on the gaming PC — worth it for games you want to study start to finish.
               Unkept renders are deleted automatically after the retention window; the clips below stay forever.
+              {' '}<strong>Just played this game on the gaming PC?</strong> Its recorded VOD card replaces this tile
+              within a few minutes — no render needed.
             </p>
           )}
         </div>
