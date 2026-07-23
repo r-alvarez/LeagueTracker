@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api'
 import type { ClipEvent, DeathEvent, VodStatus } from '../types'
@@ -39,6 +39,7 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
   const [linkDraft, setLinkDraft] = useState('')
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const youtubeRef = useRef<HTMLIFrameElement | null>(null)
+  const ytPlayerRef = useRef<{ seekTo: (s: number, allowAhead: boolean) => void; playVideo: () => void } | null>(null)
 
   const gameToVideoOffset = useMemo(() => {
     const pairs = vod?.meta?.clockMap ?? []
@@ -47,10 +48,35 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
     return offsets[Math.floor(offsets.length / 2)]
   }, [vod])
 
-  if (!vod || (!vod.exists && !vod.youtubeUrl && !vod.meta && !vod.apm)) return null
+  const ytId = vod?.youtubeUrl ? youtubeId(vod.youtubeUrl) : null
+  const hasHostedVideo = vod?.exists ?? false
 
-  const ytId = vod.youtubeUrl ? youtubeId(vod.youtubeUrl) : null
-  const hasHostedVideo = vod.exists
+  // Raw postMessage commands are ignored until YouTube's API handshake has
+  // happened - the official iframe_api script does it and hands back a
+  // player whose seekTo/playVideo actually work.
+  useEffect(() => {
+    if (!ytId || hasHostedVideo) return
+    let cancelled = false
+    const w = window as unknown as { YT?: { Player: new (el: HTMLIFrameElement) => unknown }; onYouTubeIframeAPIReady?: () => void }
+    const create = () => {
+      if (cancelled || !youtubeRef.current || !w.YT) return
+      ytPlayerRef.current = new w.YT.Player(youtubeRef.current) as typeof ytPlayerRef.current
+    }
+    if (w.YT?.Player) {
+      create()
+    } else {
+      const previous = w.onYouTubeIframeAPIReady
+      w.onYouTubeIframeAPIReady = () => { previous?.(); create() }
+      if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+        const script = document.createElement('script')
+        script.src = 'https://www.youtube.com/iframe_api'
+        document.head.appendChild(script)
+      }
+    }
+    return () => { cancelled = true; ytPlayerRef.current = null }
+  }, [ytId, hasHostedVideo])
+
+  if (!vod || (!vod.exists && !vod.youtubeUrl && !vod.meta && !vod.apm)) return null
 
   // Without a loaded <video> element (YouTube mode) the recording length
   // comes from the sidecar's own start/end stamps.
@@ -65,12 +91,10 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
       void videoRef.current.play()
       return
     }
-    // YouTube's iframe accepts player commands over postMessage when the
-    // embed src carries enablejsapi=1 - no SDK script needed for seek/play.
-    const target = youtubeRef.current?.contentWindow
-    if (!target) return
-    for (const func of [['seekTo', [videoSec, true]], ['playVideo', []]] as Array<[string, unknown[]]>) {
-      target.postMessage(JSON.stringify({ event: 'command', func: func[0], args: func[1] }), 'https://www.youtube.com')
+    const player = ytPlayerRef.current
+    if (player?.seekTo) {
+      player.seekTo(videoSec, true)
+      player.playVideo()
     }
   }
 
@@ -129,7 +153,7 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
           ) : ytId ? (
             <iframe
               ref={youtubeRef}
-              src={`https://www.youtube.com/embed/${ytId}?enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`}
+              src={`https://www.youtube.com/embed/${ytId}?enablejsapi=1&rel=0&playsinline=1&origin=${encodeURIComponent(window.location.origin)}`}
               title="Game VOD on YouTube"
               allow="autoplay; encrypted-media; picture-in-picture"
               allowFullScreen
