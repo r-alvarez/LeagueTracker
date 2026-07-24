@@ -120,7 +120,21 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var game = await WaitForGameWindowAsync(ct);
         if (game is not { } g) return true; // no window (yet) - not a capture defect, retry next pass
 
+        // Wait out the loading screen before capturing. The game flips display
+        // mode when it goes from load to live, and that switch destroys the
+        // Desktop Duplication session mid-recording (every game seamed at
+        // ~30s otherwise). liveclientdata/gamestats only answers once the
+        // world is up - i.e. AFTER the switch - so it's the "safe to capture"
+        // signal. A couple of seconds' settle on top, then one clean capture.
+        await WaitForGameLiveAsync(ct);
+
         using var process = g.Process;
+        // The mode switch may have changed the client size since load - read
+        // the rect now, post-switch, so the crop matches what's on screen.
+        if (GameWindow.ClientRectOf(g.Process.MainWindowHandle) is { Width: >= 320, Height: >= 200 } liveRect)
+        {
+            g = g with { Rect = liveRect };
+        }
         var matchId = session is { PlatformId.Length: > 0 } s ? $"{s.PlatformId}_{s.GameId}" : null;
         var baseName = BuildBaseName(matchId);
         var partPath = Path.Combine(RecordingsDir, $"{baseName}.part.mp4");
@@ -357,6 +371,31 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         {
             try { return p.StartTime; } catch { return DateTime.MinValue; }
         }
+    }
+
+    /// Blocks until the game world is live (the loading-screen display-mode
+    /// switch is done) or a timeout. Signalled by liveclientdata/gamestats
+    /// answering with a game time - it stays silent through the whole load.
+    /// The timeout is a backstop: if the API never answers (disabled, odd
+    /// mode) we record anyway rather than miss the game.
+    private async Task WaitForGameLiveAsync(CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(2);
+        var everSaw = false;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (RenderAgent.StopRequested) return;
+            if (await PhaseAsync(ct) is not "InProgress") return; // game vanished (dodge, crash)
+            if (await GameTimeAsync(ct) is { } t)
+            {
+                everSaw = true;
+                // Answering AND advancing = simulation running, mode settled.
+                await Task.Delay(TimeSpan.FromSeconds(2), ct);
+                if (await GameTimeAsync(ct) is { } t2 && t2 >= t) { Log.Info($"Game world live at {t2:0}s - starting capture"); return; }
+            }
+            await Task.Delay(TimeSpan.FromSeconds(2), ct);
+        }
+        Log.Warn($"Game-live signal not seen within the wait window ({(everSaw ? "clock stalled" : "no Live Client response")}) - capturing anyway");
     }
 
     private async Task<CaptureResult?> CaptureAsync(string partPath, string eventsPath, GameWindowInfo g, bool nvenc, CancellationToken ct)
