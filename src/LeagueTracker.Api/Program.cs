@@ -604,6 +604,16 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, ReplayArch
     if (match is null) return Results.NotFound();
 
     var champByPid = match.Participants.ToDictionary(p => p.ParticipantId, p => p.Champion);
+    // The player's killing blows. DeathEvents carry the analytics; kills only
+    // need to exist as review moments (the VOD card jumps to them), so
+    // timestamp + victim is the whole story.
+    var myPid = match.Participants.FirstOrDefault(p => p.IsMe)?.ParticipantId;
+    var myKills = myPid is not { } pid
+        ? []
+        : await db.KillEvents.AsNoTracking()
+            .Where(k => k.MatchId == id && k.KillerParticipantId == pid)
+            .OrderBy(k => k.TimeSec)
+            .ToListAsync(ct);
     object TeamObjectives(bool mine) => new
     {
         Towers = match.ObjectiveEvents.Count(o => o.Kind == "TOWER" && o.ByMyTeam == mine),
@@ -669,6 +679,11 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, ReplayArch
             d.FollowTeammate, d.FollowTeammateRole, d.FollowTeammateCaughtBy, d.FollowSecondsAfter,
             d.FollowDistance, d.FollowAlliesDownBefore, d.FollowPureLoss, d.FollowTeamGoldDiff,
             DamageInstances = d.DamageInstances.Select(i => new { i.Source, i.SpellName, i.Physical, i.Magic, i.TrueDamage, i.Total }),
+        }),
+        Kills = myKills.Select(k => new
+        {
+            k.TimeSec, GameTime = $"{k.TimeSec / 60:00}:{k.TimeSec % 60:00}",
+            Victim = champByPid.GetValueOrDefault(k.VictimParticipantId),
         }),
         Objectives = match.ObjectiveEvents.Select(o => new
         {

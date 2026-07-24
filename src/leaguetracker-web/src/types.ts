@@ -192,6 +192,12 @@ export interface TeamObjectiveCounts {
   atakhan: number
 }
 
+export interface KillMoment {
+  timeSec: number
+  gameTime: string
+  victim: string | null
+}
+
 export interface DeathEvent {
   timeSec: number
   gameTime: string
@@ -280,6 +286,7 @@ export interface MatchDetail {
   wards: { wardsPlaced: number; wardsKilled: number; controlWards: number }
   participants: Participant[]
   deaths: DeathEvent[]
+  kills: KillMoment[]
   objectives: ObjectiveEventDto[]
   itemEvents: { timeSec: number; kind: string; itemId: number }[]
 }

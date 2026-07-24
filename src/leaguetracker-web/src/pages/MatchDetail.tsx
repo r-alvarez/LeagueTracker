@@ -573,11 +573,20 @@ export default function MatchDetail() {
   if (error) return <div className="empty">Failed to load match: {error}</div>
   if (!detail) return <div className="empty">Loading…</div>
 
-  const { summary: m, participants, deaths } = detail
+  const { summary: m, participants, deaths, kills = [] } = detail
   const allies = participants.filter(p => p.isAlly)
   const enemies = participants.filter(p => !p.isAlly)
   const maxDamage = Math.max(...participants.map(p => p.damageToChampions))
   const enemySide = detail.mySide === 'Blue' ? 'Red' : 'Blue'
+  // Recording data present = the VOD card owns the review slot; the replay
+  // tiles (full game + clips) only surface when there is nothing recorded.
+  const hasVodCard = !!(vod && (vod.exists || vod.youtubeUrl || vod.meta || vod.apm))
+  // Moments come straight from the match timeline, not from the clip plan -
+  // clips may never render for a recorded game, and kills belong here too.
+  const vodMoments = [
+    ...kills.map(k => ({ kind: 'kill' as const, timeSec: k.timeSec })),
+    ...deaths.map(d => ({ kind: 'death' as const, timeSec: d.timeSec })),
+  ].sort((a, b) => a.timeSec - b.timeSec)
 
   return (
     <>
@@ -663,12 +672,12 @@ export default function MatchDetail() {
         </div>
       )}
 
-      <VodReview matchId={m.id} vod={vod} onChange={setVod} moments={clips.flatMap(c => c.events)} deaths={deaths} />
+      <VodReview matchId={m.id} vod={vod} onChange={setVod} moments={vodMoments} deaths={deaths} />
 
       {/* The replay re-render is the fallback for matches with no live
           recording (older games, other machines) - when recording data
           exists, the VOD card above owns this slot. */}
-      {!(vod && (vod.exists || vod.youtubeUrl || vod.meta || vod.apm)) && fullGame && (fullGame.state !== 'none' || m.hasReplay) && (
+      {!hasVodCard && fullGame && (fullGame.state !== 'none' || m.hasReplay) && (
         <div className="card" style={{ marginBottom: 14 }}>
           <h2>
             Full game <span className="mut" style={{ fontWeight: 400 }}>— the whole match as one video, camera on you</span>
@@ -716,7 +725,10 @@ export default function MatchDetail() {
         </div>
       )}
 
-      {clips.length > 0 && (
+      {/* Clips keep rendering and stay on disk as the backup copy, but once a
+          recording (or its YouTube link) exists, the VOD covers the same
+          moments - showing both would just be clutter. */}
+      {!hasVodCard && clips.length > 0 && (
         <div className="card" style={{ marginBottom: 14 }}>
           <h2>
             Clips <span className="mut" style={{ fontWeight: 400 }}>— your kills & deaths, rendered from the official replay</span>
@@ -831,7 +843,7 @@ export default function MatchDetail() {
                         <td style={{ whiteSpace: 'nowrap' }}>
                           <span className="disclosure">{recapAt === d.timeSec ? '▾' : '▸'}</span>
                           {d.gameTime}
-                          {clipFor(d.timeSec) && (
+                          {!hasVodCard && clipFor(d.timeSec) && (
                             <button className="action" style={{ marginLeft: 6, padding: '0 6px' }}
                               title="Watch this death" onClick={e => { e.stopPropagation(); playMoment(d.timeSec) }}>▶</button>
                           )}
