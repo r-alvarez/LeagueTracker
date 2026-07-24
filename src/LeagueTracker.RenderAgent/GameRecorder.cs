@@ -526,7 +526,13 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     {
         try
         {
-            await RunFfmpegAsync($"-y -i \"{partPath}\" -c copy -movflags +faststart \"{finalPath}\"", ct);
+            // NVENC stamps the stream with an sRGB transfer tag; YouTube
+            // honors it and gamma-converts to BT.709, which plays back ~20%
+            // darker than the desktop looked (measured on Game 6 of 24 Jul).
+            // Retagging transfer/primaries to BT.709 at remux time - pixels
+            // untouched - makes YouTube leave the levels alone. The matrix
+            // tag stays as written (the encoder really does convert BT.601).
+            await RunFfmpegAsync($"-y -i \"{partPath}\" -c copy -bsf:v h264_metadata=colour_primaries=1:transfer_characteristics=1 -movflags +faststart \"{finalPath}\"", ct);
             File.Delete(partPath);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
