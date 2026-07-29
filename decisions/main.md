@@ -639,3 +639,24 @@ Lane/Discipline/Stewardship + the context record to carry the "no"; frame
 proximity counts are known-unreliable inside fight clusters, so cluster context
 always wins over frame counts.
 
+
+## 2026-07-29 — DDragon variant sets; YouTube links for any game
+
+**Champion lookups treat underscore DDragon ids ("Jade_Ezreal") as variants
+that never shadow the real champion.** Patch 26.15's champion.json ships ~60
+alternate-mode entries (Jade_*, keys 60xxx) whose display name equals the
+real champion's; the name-keyed icon/id maps let whichever entry iterated
+last win, so Ezreal and Garen rendered the Jade set's retro art everywhere.
+Canonical ids never contain "_" and variant sets always do (Jade_*, the old
+Swarm Strawberry_*), so variants may fill an empty name slot but never
+overwrite a canonical entry — one rule in the shared loader (champions.ts),
+no per-set denylist to maintain.
+
+**Any game can hold a YouTube VOD link, not just agent-recorded ones.** The
+VOD card hid itself without recording data, leaving nowhere to paste a link
+for games played elsewhere or recorded by hand — while the API accepted
+links for any known match. Unrecorded games now get a compact link box; once
+linked, the full review card takes over. Without a recording clock map,
+moment-jumps assume the video starts at game clock 0:00 and say so
+(approximate jumps beat dead buttons).
+>>>>>>> 1841464 (Decisions: variant champion sets never shadow real ones; link-any-game VODs)
