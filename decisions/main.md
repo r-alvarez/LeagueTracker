@@ -639,3 +639,50 @@ Lane/Discipline/Stewardship + the context record to carry the "no"; frame
 proximity counts are known-unreliable inside fight clusters, so cluster context
 always wins over frame counts.
 
+
+## 2026-07-29 — One game, one file: the recorder survives capture death
+
+**Diagnosis of a week of split/lost VODs** (agent.log, 23-28 Jul): every
+failure was ffmpeg ending on its own 6-38s into the game, then the restarted
+capture minting "Game N+1" for the tail of game N. Two mechanisms:
+
+1. `-shortest` made ffmpeg stop when EITHER input ended - so the audio pipe
+   dying ended the whole video recording with exit code 0, which the
+   "failed early" check (exit != 0) waved through as a complete 0-minute
+   game. Desktop Duplication (ddagrab) also cannot survive the display mode
+   switch of alt-tabbing an exclusive-fullscreen game, which is exactly what
+   happens in the first minute of most games.
+2. Game numbers were counted from the mp4s in the folder, so recycling or
+   renaming files between sessions made a later game reuse - and OVERWRITE -
+   an earlier number (happened 25 and 27 Jul).
+
+**The fix is supervision plus segments, not a sturdier capture**: ddagrab's
+session loss is a Windows fact (OBS-class recorders own a capture engine to
+get around it; not worth it for this). Instead each capture attempt is a
+numbered segment ({name}.segNN.part.mp4) of ONE game whose name is allocated
+once per LCU match id; when the game ends the segments are remuxed and
+concatenated (stream copy, seconds) into a single mp4, with clock-map and
+input-telemetry timestamps offset onto the joined timeline. A seam of a few
+seconds replaces a lost half-game.
+
+- `-shortest` is gone; a dead video stream is detected by ffmpeg's own
+  `-progress` frame counter stalling (~12s, vs ~60s of the old file-growth
+  heuristic), and a dying audio writer pads silence forever rather than
+  EOF-ing the pipe (audio must never end a video recording).
+- Game numbers come from max(folder scan, per-day ledger in
+  metadata/game-numbers.json); a game that never produced footage hands its
+  number back so days stay gapless.
+- {name}.inflight.json persists per-game state after every segment: a crash,
+  deploy or agent restart resumes the SAME game - even appending onto an
+  already-finalized mp4 (it re-enters as segment 1 and re-concatenates, and
+  the stale .uploaded stamp is dropped so trackers get the full version).
+- Startup failures retry 4x with backoff before the recorder sits a game out
+  (transient mode-switch windows heal; deterministic breakage still
+  hard-fails per the no-postpone-loop rule).
+- LT_RECORD_TEST=seg smoke-tests the segment/concat/merge path end to end
+  without a game.
+
+**Rejected:** appending to the open mp4 (no such thing mid-write without a
+recorder-owned muxer); gdigrab as a mode-switch-proof fallback (BitBlt of a
+D3D game is black); trimming frozen tails at the seam (complexity for
+seconds of dead video the join already bounds).

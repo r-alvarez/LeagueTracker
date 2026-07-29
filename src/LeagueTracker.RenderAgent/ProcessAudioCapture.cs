@@ -111,14 +111,15 @@ public sealed class ProcessAudioCapture : IDisposable
     /// byte count, so pacing here IS the sync.
     private void WriterLoop()
     {
-        try
+        try { _pipe.WaitForConnection(); } // ffmpeg opening its -i argument
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException) { return; }
+        var clock = Stopwatch.StartNew();
+        long framesWritten = 0;
+        byte[]? partial = null;
+        var partialOffset = 0;
+        while (!_cts.IsCancellationRequested)
         {
-            _pipe.WaitForConnection(); // ffmpeg opening its -i argument
-            var clock = Stopwatch.StartNew();
-            long framesWritten = 0;
-            byte[]? partial = null;
-            var partialOffset = 0;
-            while (!_cts.IsCancellationRequested)
+            try
             {
                 Thread.Sleep(20);
                 var targetFrames = clock.ElapsedMilliseconds * SampleRate / 1000;
@@ -139,12 +140,24 @@ public sealed class ProcessAudioCapture : IDisposable
                     if (partialOffset >= partial.Length) { partial = null; partialOffset = 0; }
                 }
             }
-            _pipe.Flush();
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+            {
+                // ffmpeg closed its end (recording stopped) - normal shutdown.
+                return;
+            }
+            catch (Exception ex)
+            {
+                // Anything else must NOT end this thread: the pipe going quiet
+                // is an EOF on ffmpeg's audio input, and an audio EOF must
+                // never be what stops a video recording. Skip the beat and
+                // keep pacing silence.
+                Log.Warn($"Audio writer hiccup: {ex.Message}");
+                partial = null;
+                partialOffset = 0;
+            }
         }
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-        {
-            // ffmpeg closed its end (recording stopped) - normal shutdown.
-        }
+        try { _pipe.Flush(); }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
     }
 
     public void Dispose()

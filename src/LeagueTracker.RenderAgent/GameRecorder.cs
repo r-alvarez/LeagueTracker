@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace LeagueTracker.RenderAgent;
 
@@ -8,8 +9,22 @@ namespace LeagueTracker.RenderAgent;
 /// (LCU gameflow "InProgress" - replay renders are "WatchInProgress" and never
 /// trigger this), the desktop is captured cropped to the game window and
 /// encoded on the GPU (NVENC), so playing cost is a video encode the graphics
-/// card does on the side. Recording runs to a fragmented .part.mp4 - playable
-/// even if the agent dies mid-game - and is remuxed to a faststart .mp4 when
+/// card does on the side.
+///
+/// One GAME is one FILE, no matter how many times the capture dies underneath
+/// it. Desktop Duplication does not survive the display mode switches an
+/// exclusive-fullscreen game makes (alt-tab at game start killed a capture in
+/// its first minute on four of the five days it ran), so each capture attempt
+/// is a numbered segment ({name}.segNN.part.mp4) and the game's segments are
+/// concatenated into a single mp4 when it ends. The game's name and number are
+/// allocated once per match id and held in a {name}.inflight.json state file,
+/// so capture restarts, agent restarts and deploys all append to the same
+/// game rather than minting "Game N+1" for the tail of game N. Day numbers
+/// come from a ledger as well as the folder, so files being renamed or
+/// recycled can never make a later game overwrite an earlier one.
+///
+/// Recording runs to fragmented .part.mp4 segments - playable even if the
+/// agent dies mid-game - and is remuxed/concatenated to a faststart .mp4 when
 /// the game ends. A sidecar .json carries what the review UI needs: the match
 /// id, queue, who played, and a video-time -> game-clock map sampled from the
 /// Live Client API while recording.
@@ -43,11 +58,47 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// list of publishable mp4s.
     public string MetaDir => Path.Combine(RecordingsDir, "metadata");
 
+    /// Everything the recorder must remember about a game while it is still
+    /// being played: identity, the allocated name, and each capture segment
+    /// so far. Persisted as {BaseName}.inflight.json after every segment -
+    /// this is what lets a restarted agent keep appending to the same game.
+    private sealed class RecordingState
+    {
+        public string BaseName { get; set; } = "";
+        public string? MatchId { get; set; }
+        public long? GameId { get; set; }
+        public string? PlatformId { get; set; }
+        public long? QueueId { get; set; }
+        public string? GameMode { get; set; }
+        public string? ActivePlayer { get; set; }
+        public List<SegmentState> Segments { get; set; } = [];
+    }
+
+    private sealed class SegmentState
+    {
+        public string File { get; set; } = "";      // file name within RecordingsDir
+        public string? EventsFile { get; set; }     // file name within MetaDir
+        public DateTime StartedUtc { get; set; }
+        public double WallSec { get; set; }
+        public double VideoSec { get; set; }
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public bool HasAudio { get; set; }
+        public string Encoder { get; set; } = "";
+        /// An already-finalized faststart mp4 (the game resumed after its
+        /// first chunk was finalized - agent restart) rather than a raw
+        /// fragmented .part segment.
+        public bool Preexisting { get; set; }
+        public List<double[]> ClockMap { get; set; } = []; // [videoSec, gameSec]
+    }
+
     public async Task RunAsync(CancellationToken ct)
     {
         Directory.CreateDirectory(RecordingsDir);
         Directory.CreateDirectory(MetaDir);
-        FinalizeOrphans();
+        try { await FinalizeOrphansAsync(ct); }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex) { Log.Warn($"Orphan finalize failed: {ex.Message}"); }
         Log.Info($"Game recorder on - live games land in {RecordingsDir} ({config.RecordFramerate}fps, NVENC cq {config.RecordQuality})");
         _lastSweep = DateTime.UtcNow;
         try { await SweepUnuploadedAsync(ct); }
@@ -96,8 +147,9 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         }
     }
 
-    /// One game, start to finish. False = capture could not be made to work
-    /// for this game (as opposed to the game simply ending).
+    /// One game, start to finish, as many capture segments as it takes.
+    /// False = capture could not be made to work for this game (as opposed
+    /// to the game simply ending).
     private async Task<bool> RecordGameAsync(CancellationToken ct)
     {
         // Match identity first: the gameflow session knows the game id before
@@ -117,63 +169,253 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             return true;
         }
 
-        var game = await WaitForGameWindowAsync(ct);
-        if (game is not { } g) return true; // no window (yet) - not a capture defect, retry next pass
-
-        // Wait out the loading screen before capturing. The game flips display
-        // mode when it goes from load to live, and that switch destroys the
-        // Desktop Duplication session mid-recording (every game seamed at
-        // ~30s otherwise). liveclientdata/gamestats only answers once the
-        // world is up - i.e. AFTER the switch - so it's the "safe to capture"
-        // signal. A couple of seconds' settle on top, then one clean capture.
-        await WaitForGameLiveAsync(ct);
-
-        using var process = g.Process;
-        // The mode switch may have changed the client size since load - read
-        // the rect now, post-switch, so the crop matches what's on screen.
-        if (GameWindow.ClientRectOf(g.Process.MainWindowHandle) is { Width: >= 320, Height: >= 200 } liveRect)
-        {
-            g = g with { Rect = liveRect };
-        }
         var matchId = session is { PlatformId.Length: > 0 } s ? $"{s.PlatformId}_{s.GameId}" : null;
-        var baseName = BuildBaseName(matchId);
-        var partPath = Path.Combine(RecordingsDir, $"{baseName}.part.mp4");
-        Log.Info($"Recording game {matchId ?? "(id unknown)"}: {g.Rect.Width}x{g.Rect.Height} -> {baseName}.mp4");
-
-        // NVENC first; if ffmpeg dies straight away (driver/session limit),
-        // fall back to CPU x264 rather than losing the VOD.
-        var eventsPath = Path.Combine(MetaDir, $"{baseName}.events.csv.gz");
-        var result = await CaptureAsync(partPath, eventsPath, g, nvenc: true, ct);
-        if (result is { FfmpegFailedEarly: true })
+        var state = TryResumeState(matchId);
+        if (state is null)
         {
-            Log.Warn("NVENC capture failed at startup - falling back to CPU encoding");
-            result = await CaptureAsync(partPath, eventsPath, g, nvenc: false, ct);
+            state = new RecordingState
+            {
+                BaseName = AllocateBaseName(matchId),
+                MatchId = matchId,
+                GameId = session?.GameId,
+                PlatformId = session?.PlatformId,
+                QueueId = session?.QueueId,
+                GameMode = session?.GameMode,
+            };
         }
-        if (result is { FfmpegFailedEarly: true })
+        else
         {
-            Log.Error($"Capture would not start: {result.StderrTail}");
-            try { if (File.Exists(eventsPath)) File.Delete(eventsPath); } catch { /* telemetry without video is noise */ }
-            return false;
+            Log.Info($"Resuming recording {state.BaseName} at segment {state.Segments.Count + 1}");
         }
 
-        var finalPath = Path.Combine(RecordingsDir, $"{baseName}.mp4");
-        await FinalizeAsync(partPath, finalPath, ct);
-        WriteSidecar(Path.Combine(MetaDir, $"{baseName}.json"), baseName, session, g, result!);
-        Log.Info($"Recording complete: {baseName}.mp4 ({result!.Duration.TotalMinutes:0} min)");
-        // Customs/Practice Tool have no Riot match for a tracker to own -
-        // those recordings are local-only, not eternal upload retries.
-        if ((config.UploadVods || config.UploadVodSidecars) && matchId is not null
-            && QueueCategories.GetValueOrDefault(session!.QueueId, "other") is not "custom")
+        var earlyFailures = 0;
+        var gaveUp = false;
+        while (true)
         {
-            await TryUploadVodAsync(matchId, baseName, ct);
+            if (RenderAgent.StopRequested)
+            {
+                // Deploy stop mid-game: leave the segments and state on disk
+                // for the next agent run to resume - finalizing here would
+                // split the game across two numbers.
+                if (state.Segments.Count > 0 && await PhaseSafeAsync() == "InProgress")
+                {
+                    SaveInflight(state);
+                    Log.Info($"Stop requested mid-game - {state.BaseName} will resume after restart");
+                    return true;
+                }
+                break;
+            }
+            if (await PhaseAsync(ct) is not "InProgress") break;
+
+            var game = await WaitForGameWindowAsync(ct);
+            if (game is not { } g) break; // game over, or the window never came - finalize what exists
+            using var gameProcess = g.Process;
+
+            // Wait out the loading screen before capturing. The game flips
+            // display mode when it goes from load to live, and that switch
+            // destroys the Desktop Duplication session mid-recording (every
+            // game seamed at ~30s otherwise). liveclientdata/gamestats only
+            // answers once the world is up - i.e. AFTER the switch - so it's
+            // the "safe to capture" signal. On a mid-game segment restart it
+            // answers immediately.
+            await WaitForGameLiveAsync(ct);
+
+            // The mode switch may have changed the client size since load -
+            // read the rect now, post-switch, so the crop matches the screen.
+            if (GameWindow.ClientRectOf(g.Process.MainWindowHandle) is { Width: >= 320, Height: >= 200 } liveRect)
+            {
+                g = g with { Rect = liveRect };
+            }
+
+            var segNo = state.Segments.Count + 1;
+            var segBase = $"{state.BaseName}.seg{segNo:00}";
+            var partPath = Path.Combine(RecordingsDir, $"{segBase}.part.mp4");
+            var eventsPath = Path.Combine(MetaDir, $"{segBase}.events.csv.gz");
+            Log.Info($"Recording {state.BaseName} segment {segNo} ({state.MatchId ?? "id unknown"}): {g.Rect.Width}x{g.Rect.Height}");
+
+            // NVENC first; if ffmpeg dies straight away (driver/session
+            // limit), fall back to CPU x264 rather than losing the VOD.
+            var result = await CaptureAsync(partPath, eventsPath, g, nvenc: true, ct);
+            if (result is { FfmpegFailedEarly: true })
+            {
+                Log.Warn("NVENC capture failed at startup - falling back to CPU encoding");
+                result = await CaptureAsync(partPath, eventsPath, g, nvenc: false, ct);
+            }
+
+            // "Failed early" (nonzero exit within seconds) and "ran but wrote
+            // nothing" (a mode switch killing ddagrab before the first real
+            // frames - ffmpeg exits CLEANLY, which is why these used to be
+            // finalized as 0-minute games) are the same case here: no usable
+            // video, so retry after a beat rather than minting a junk file.
+            var partSize = new FileInfo(partPath) is { Exists: true } part ? part.Length : 0;
+            if (result!.FfmpegFailedEarly || (result.VideoSec < 2 && result.Frames < 30 && partSize < 20_000_000))
+            {
+                TryDelete(partPath);
+                TryDelete(eventsPath);
+                if (++earlyFailures >= 4)
+                {
+                    Log.Error($"Capture keeps dying at startup ({earlyFailures} attempts) - giving up on this game: {result.StderrTail}");
+                    gaveUp = true;
+                    break;
+                }
+                Log.Warn($"Capture produced no usable video (attempt {earlyFailures}/4) - retrying: {result.StderrTail}");
+                await Task.Delay(TimeSpan.FromSeconds(10), ct);
+                continue;
+            }
+            earlyFailures = 0;
+
+            state.Segments.Add(new SegmentState
+            {
+                File = Path.GetFileName(partPath),
+                EventsFile = File.Exists(eventsPath) ? Path.GetFileName(eventsPath) : null,
+                StartedUtc = result.StartedUtc,
+                WallSec = result.Duration.TotalSeconds,
+                VideoSec = result.VideoSec,
+                Width = g.Rect.Width & ~1,
+                Height = g.Rect.Height & ~1,
+                HasAudio = result.HasAudio,
+                Encoder = result.Encoder,
+                ClockMap = [.. result.ClockMap.Select(p => new[] { p.VideoSec, p.GameSec })],
+            });
+            state.ActivePlayer ??= result.ActivePlayer;
+            SaveInflight(state);
+            // Loop: if the game is still on, the next pass opens segment N+1
+            // (a seam of a few seconds); if it ended, the phase check exits.
         }
-        return true;
+
+        if (state.Segments.Count == 0)
+        {
+            CleanupInflight(state);
+            ReleaseBaseName(state.BaseName);
+            return !gaveUp;
+        }
+
+        if (state.Segments.Any(seg => !seg.Preexisting))
+        {
+            await FinalizeGameAsync(state, ct);
+            Log.Info($"Recording complete: {state.BaseName}.mp4 ({state.Segments.Sum(seg => seg.VideoSec) / 60:0} min, {state.Segments.Count} segment(s))");
+            // Customs/Practice Tool have no Riot match for a tracker to own -
+            // those recordings are local-only, not eternal upload retries.
+            // A deploy stop skips the upload; the startup sweep delivers it.
+            if ((config.UploadVods || config.UploadVodSidecars) && state.MatchId is not null && !RenderAgent.StopRequested
+                && QueueCategories.GetValueOrDefault(state.QueueId ?? -1, "other") is not "custom")
+            {
+                await TryUploadVodAsync(state.MatchId, state.BaseName, ct);
+            }
+        }
+        else
+        {
+            CleanupInflight(state); // resumed, but the game ended before any new footage
+        }
+        return !gaveUp;
     }
 
-    /// "Road to Platinum - 22 Jul 2026 - Game 2": the day's next number,
-    /// counted from what is already on disk so restarts never reuse one.
+    /// The in-flight state for this match id, if this game was already being
+    /// recorded (capture restart survives in-process; agent restart finds the
+    /// .inflight.json; a game whose first chunk was already FINALIZED comes
+    /// back as a Preexisting segment so the tail concatenates onto it).
+    private RecordingState? TryResumeState(string? matchId)
+    {
+        if (matchId is not { Length: > 0 }) return null;
+        foreach (var path in Directory.EnumerateFiles(MetaDir, "*.inflight.json"))
+        {
+            if (TryLoadInflight(path) is not { } state || state.MatchId != matchId) continue;
+            state.Segments.RemoveAll(seg => !File.Exists(Path.Combine(RecordingsDir, seg.File)));
+            return state;
+        }
+        foreach (var sidecar in Directory.EnumerateFiles(MetaDir, "*.json"))
+        {
+            if (sidecar.EndsWith(".inflight.json", StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(sidecar));
+                if (root?["matchId"]?.GetValue<string>() != matchId) continue;
+                var baseName = Path.GetFileNameWithoutExtension(sidecar);
+                if (!File.Exists(Path.Combine(RecordingsDir, baseName + ".mp4"))) continue;
+                Log.Info($"Game {matchId} already has a finalized recording - appending to {baseName}.mp4");
+                var startUtc = root["recordingStartUtc"]?.GetValue<DateTime>() ?? DateTime.UtcNow;
+                var endUtc = root["recordingEndUtc"]?.GetValue<DateTime>() ?? startUtc;
+                return new RecordingState
+                {
+                    BaseName = baseName,
+                    MatchId = matchId,
+                    GameId = root["gameId"]?.GetValue<long>(),
+                    PlatformId = root["platformId"]?.GetValue<string>(),
+                    QueueId = root["queueId"]?.GetValue<long>(),
+                    GameMode = root["gameMode"]?.GetValue<string>(),
+                    ActivePlayer = root["activePlayer"]?.GetValue<string>(),
+                    Segments =
+                    [
+                        new SegmentState
+                        {
+                            File = baseName + ".mp4",
+                            EventsFile = File.Exists(Path.Combine(MetaDir, baseName + ".events.csv.gz")) ? baseName + ".events.csv.gz" : null,
+                            StartedUtc = startUtc,
+                            WallSec = Math.Max(0, (endUtc - startUtc).TotalSeconds),
+                            Width = (int)(root["width"]?.GetValue<long>() ?? 0),
+                            Height = (int)(root["height"]?.GetValue<long>() ?? 0),
+                            Preexisting = true,
+                            ClockMap = [.. (root["clockMap"]?.AsArray() ?? []).OfType<System.Text.Json.Nodes.JsonNode>()
+                                .Select(n => new[] { n["videoSec"]?.GetValue<double>() ?? 0, n["gameSec"]?.GetValue<double>() ?? 0 })],
+                        },
+                    ],
+                };
+            }
+            catch
+            {
+                // not a sidecar (numbers ledger, corrupt file) - skip
+            }
+        }
+        return null;
+    }
+
+    private string InflightPath(RecordingState state) => Path.Combine(MetaDir, state.BaseName + ".inflight.json");
+
+    private void SaveInflight(RecordingState state)
+    {
+        try { File.WriteAllText(InflightPath(state), JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true })); }
+        catch (Exception ex) { Log.Warn($"Could not save recording state: {ex.Message}"); }
+    }
+
+    private static RecordingState? TryLoadInflight(string path)
+    {
+        try { return JsonSerializer.Deserialize<RecordingState>(File.ReadAllText(path)); }
+        catch { return null; }
+    }
+
+    private void CleanupInflight(RecordingState state) => TryDelete(InflightPath(state));
+
+    private static void TryDelete(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); } catch { /* best effort */ }
+    }
+
+    private string NumbersPath => Path.Combine(MetaDir, "game-numbers.json");
+
+    private Dictionary<string, int> LoadNumbers()
+    {
+        try
+        {
+            return File.Exists(NumbersPath)
+                ? JsonSerializer.Deserialize<Dictionary<string, int>>(File.ReadAllText(NumbersPath)) ?? []
+                : [];
+        }
+        catch { return []; }
+    }
+
+    private void SaveNumbers(Dictionary<string, int> numbers)
+    {
+        try { File.WriteAllText(NumbersPath, JsonSerializer.Serialize(numbers, new JsonSerializerOptions { WriteIndented = true })); }
+        catch (Exception ex) { Log.Warn($"Could not save the game-number ledger: {ex.Message}"); }
+    }
+
+    /// "Road to Platinum - 22 Jul 2026 - Game 2": the day's next number. The
+    /// number is the max of what's in the folder AND a ledger of what was
+    /// ever handed out - the folder alone is not enough, because files get
+    /// recycled/renamed between sessions, and a reused number OVERWRITES the
+    /// game that had it (it happened twice, 25 and 27 Jul).
     /// Blank prefix keeps the sortable timestamp + match id scheme.
-    private string BuildBaseName(string? matchId)
+    private string AllocateBaseName(string? matchId)
     {
         if (config.RecordNamePrefix is not { Length: > 0 } rawPrefix)
         {
@@ -181,8 +423,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         }
         var prefix = string.Concat(rawPrefix.Where(ch => !Path.GetInvalidFileNameChars().Contains(ch))).Trim();
         var day = DateTime.Now.ToString("dd MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
-        var pattern = new System.Text.RegularExpressions.Regex(
-            $@"^{System.Text.RegularExpressions.Regex.Escape($"{prefix} - {day} - Game ")}(\d+)");
+        var stem = $"{prefix} - {day}";
+        var pattern = new Regex($@"^{Regex.Escape($"{stem} - Game ")}(\d+)");
         var next = 1;
         foreach (var file in Directory.EnumerateFiles(RecordingsDir, "*.mp4"))
         {
@@ -191,7 +433,24 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 next = Math.Max(next, n + 1);
             }
         }
-        return $"{prefix} - {day} - Game {next}";
+        var numbers = LoadNumbers();
+        if (numbers.TryGetValue(stem, out var used)) next = Math.Max(next, used + 1);
+        numbers[stem] = next;
+        SaveNumbers(numbers);
+        return $"{stem} - Game {next}";
+    }
+
+    /// A game that produced no footage gives its number back (if it is still
+    /// the day's latest) so gapless Game 1, 2, 3... survives a false start.
+    private void ReleaseBaseName(string baseName)
+    {
+        if (Regex.Match(baseName, @"^(.*) - Game (\d+)$") is not { Success: true } m) return;
+        var numbers = LoadNumbers();
+        if (numbers.TryGetValue(m.Groups[1].Value, out var used) && used == int.Parse(m.Groups[2].Value))
+        {
+            numbers[m.Groups[1].Value] = used - 1;
+            SaveNumbers(numbers);
+        }
     }
 
     /// Offers the VOD to each tracker until the one owning the match takes
@@ -241,6 +500,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var platformProbed = false;
         foreach (var sidecar in Directory.EnumerateFiles(MetaDir, "*.json").OrderBy(f => f))
         {
+            if (sidecar.EndsWith(".inflight.json", StringComparison.OrdinalIgnoreCase)) continue;
             var baseName = Path.GetFileNameWithoutExtension(sidecar);
             if (File.Exists(Path.Combine(MetaDir, baseName + ".uploaded"))) continue;
             // Sidecars upload even after the local mp4 is gone (published to
@@ -331,7 +591,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
     private sealed record CaptureResult(
         bool FfmpegFailedEarly, string StderrTail, DateTime StartedUtc, TimeSpan Duration,
-        string Encoder, List<(double VideoSec, double GameSec)> ClockMap, string? ActivePlayer);
+        double VideoSec, long Frames, bool HasAudio, string Encoder,
+        List<(double VideoSec, double GameSec)> ClockMap, string? ActivePlayer);
 
     /// The client starts the game on its own schedule; the window exists from
     /// the loading screen on. When a replay render happens to overlap a live
@@ -414,24 +675,54 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var encode = nvenc
             ? $"-c:v h264_nvenc -preset p4 -rc vbr -cq {config.RecordQuality} -b:v 0 -maxrate 25M -bufsize 50M -g {fps * 4}"
             : "-vf hwdownload,format=bgra -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p";
-        // -shortest: if the video input dies (Desktop Duplication loses its
-        // session on a display mode switch), ffmpeg must exit - not keep
-        // muxing our never-ending audio pipe under a frozen last frame.
-        var mapping = audio is null ? "" : "-map 0:v -map 1:a -c:a aac -b:a 160k -shortest";
+        // No -shortest here, deliberately: it made ffmpeg stop the moment
+        // EITHER input ended, so a dying audio pipe cleanly killed the whole
+        // video recording seconds into a game (the string of 0-minute "games"
+        // of 24-27 Jul). A dead VIDEO stream is the monitor loop's job now:
+        // -progress exposes the encoder's frame counter, and frames that stop
+        // advancing end the capture within seconds so a fresh segment starts.
+        var mapping = audio is null ? "" : "-map 0:v -map 1:a -c:a aac -b:a 160k";
         // Fragmented mp4: every fragment is self-contained, so a crash or
-        // power cut costs seconds, not the whole game. FinalizeAsync remuxes
-        // to a normal faststart mp4 for clean browser playback.
-        var args = $"{input} {encode} {mapping} -movflags +frag_keyframe+empty_moov -f mp4 \"{partPath}\"";
+        // power cut costs seconds, not the whole game. Finalize remuxes to a
+        // normal faststart mp4 for clean browser playback.
+        var args = $"{input} {encode} {mapping} -nostats -progress pipe:1 -movflags +frag_keyframe+empty_moov -f mp4 \"{partPath}\"";
 
         using var proc = Process.Start(new ProcessStartInfo(ffmpeg, args)
         {
             UseShellExecute = false,
             RedirectStandardInput = true,   // 'q' on stdin = ffmpeg's graceful stop, which flushes the muxer
+            RedirectStandardOutput = true,  // -progress key=value stream
             RedirectStandardError = true,
             CreateNoWindow = true,
         }) ?? throw new InvalidOperationException("could not start ffmpeg");
 
         var stderrTail = DrainStderrAsync(proc.StandardError);
+
+        // The -progress stream is the capture's pulse: "frame=" only advances
+        // while ddagrab is really delivering (it duplicates frames on a static
+        // screen, so a healthy capture advances even when nothing moves).
+        var progressGate = new object();
+        long frames = 0;
+        var lastFrameAdvance = DateTime.UtcNow;
+        double videoUs = 0; // out_time_ms is microseconds despite the name (ffmpeg quirk)
+        var progressPump = Task.Run(async () =>
+        {
+            while (await proc.StandardOutput.ReadLineAsync() is { } line)
+            {
+                var eq = line.IndexOf('=');
+                if (eq <= 0) continue;
+                var key = line[..eq];
+                if (key is "frame" && long.TryParse(line[(eq + 1)..], out var f))
+                {
+                    lock (progressGate) { if (f > frames) { frames = f; lastFrameAdvance = DateTime.UtcNow; } }
+                }
+                else if (key is "out_time_us" or "out_time_ms" && long.TryParse(line[(eq + 1)..], out var us))
+                {
+                    lock (progressGate) videoUs = Math.Max(videoUs, us);
+                }
+            }
+        });
+
         // Hooks live exactly as long as the capture, so event t_ms and video
         // time share a zero point (within ffmpeg's first-frame latency).
         using var inputLogger = config.RecordInputs ? InputLogger.TryStart(eventsPath, g.Process.MainWindowHandle) : null;
@@ -439,8 +730,6 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var clockMap = new List<(double, double)>();
         string? activePlayer = null;
         var lastClockSample = DateTime.MinValue;
-        var lastGrowthCheck = DateTime.UtcNow;
-        long lastPartSize = 0;
 
         var exitedAlone = false;
         try
@@ -458,23 +747,18 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 // up to here survives) rather than orphaning the capture.
                 if (RenderAgent.StopRequested) break;
 
-                // Even a static screen encodes at ~50MB/min at these settings;
-                // ~1.5MB/min means the video stream silently died (Game 3 of
-                // 23 Jul: a mode switch killed Desktop Duplication and 37
-                // minutes muxed as audio under one frozen frame). Break out -
-                // the game is still on, so the outer loop starts a fresh
-                // capture and the rest of the game survives as a second file.
-                if (DateTime.UtcNow - lastGrowthCheck > TimeSpan.FromSeconds(60))
+                // Frames stopped coming = the video stream is dead (a display
+                // mode switch tearing down the Desktop Duplication session)
+                // even though ffmpeg may sit there muxing audio under one
+                // frozen frame. End this segment; the game is still on, so
+                // the caller immediately opens the next one.
+                DateTime frameAdvance;
+                long framesSeen;
+                lock (progressGate) { frameAdvance = lastFrameAdvance; framesSeen = frames; }
+                if (DateTime.UtcNow - startedUtc > TimeSpan.FromSeconds(20) && DateTime.UtcNow - frameAdvance > TimeSpan.FromSeconds(12))
                 {
-                    lastGrowthCheck = DateTime.UtcNow;
-                    var size = new FileInfo(partPath) is { Exists: true } part ? part.Length : 0;
-                    var grewBytes = size - lastPartSize;
-                    lastPartSize = size;
-                    if (grewBytes < 5_000_000 && DateTime.UtcNow - startedUtc > TimeSpan.FromSeconds(90))
-                    {
-                        Log.Warn($"Capture stalled ({grewBytes / 1024} KB in the last minute - video stream likely lost to a display mode switch); restarting the recording");
-                        break;
-                    }
+                    Log.Warn($"Video frames stopped at {framesSeen} ({(DateTime.UtcNow - frameAdvance).TotalSeconds:0}s without progress - display mode switch likely); restarting the capture");
+                    break;
                 }
 
                 if (DateTime.UtcNow - lastClockSample > TimeSpan.FromSeconds(30))
@@ -506,7 +790,11 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             }
         }
 
+        await Task.WhenAny(progressPump, Task.Delay(3000));
         var duration = DateTime.UtcNow - startedUtc;
+        double videoSec;
+        long frameCount;
+        lock (progressGate) { videoSec = videoUs / 1e6; frameCount = frames; }
         var failedEarly = duration < TimeSpan.FromSeconds(8) && proc.ExitCode != 0;
         if (!failedEarly && exitedAlone)
         {
@@ -516,22 +804,263 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             Log.Warn($"ffmpeg ended on its own after {duration.TotalSeconds:0}s: {Tail(await stderrTail)}");
         }
         return new CaptureResult(failedEarly, Tail(await stderrTail), startedUtc, duration,
-            nvenc ? "h264_nvenc" : "libx264", clockMap, activePlayer);
+            videoSec, frameCount, audio is not null, nvenc ? "h264_nvenc" : "libx264", clockMap, activePlayer);
     }
 
-    /// Remux the fragmented recording into a normal faststart mp4 (stream
-    /// copy - milliseconds per gigabyte, no re-encode), plus a mid-game
-    /// thumbnail for the library view.
+    /// Turns a finished game's segments into the one file that game IS:
+    /// each raw segment is remuxed to faststart (stream copy, milliseconds
+    /// per gigabyte) with the BT.709 retag, multi-segment games are then
+    /// concatenated (stream copy again), telemetry and clock maps are merged
+    /// on the concatenated timeline, and the sidecar + thumbnail are written.
+    private async Task FinalizeGameAsync(RecordingState state, CancellationToken ct)
+    {
+        var finalPath = Path.Combine(RecordingsDir, state.BaseName + ".mp4");
+        var ready = new List<(SegmentState Seg, string Path)>();
+        foreach (var seg in state.Segments)
+        {
+            var src = Path.Combine(RecordingsDir, seg.File);
+            if (!File.Exists(src)) continue;
+            var usable = src;
+            if (!seg.Preexisting)
+            {
+                // NVENC stamps the stream with an sRGB transfer tag; YouTube
+                // honors it and gamma-converts to BT.709, which plays back
+                // ~20% darker than the desktop looked (measured on Game 6 of
+                // 24 Jul). Retagging transfer/primaries to BT.709 at remux
+                // time - pixels untouched - makes YouTube leave the levels
+                // alone. The matrix tag stays as written (the encoder really
+                // does convert BT.601).
+                var tmp = Path.Combine(RecordingsDir, seg.File[..^".part.mp4".Length] + ".remux.mp4");
+                try
+                {
+                    await RunFfmpegAsync($"-y -i \"{src}\" -c copy -bsf:v h264_metadata=colour_primaries=1:transfer_characteristics=1 -movflags +faststart \"{tmp}\"", ct);
+                    usable = tmp;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // The fragmented original is still playable - use it as is.
+                    Log.Warn($"Segment remux failed ({ex.Message}) - keeping the fragmented copy of {seg.File}");
+                    TryDelete(tmp);
+                }
+            }
+            // The muxer knows durations better than our wall clock does, and
+            // the offsets that align telemetry across segments must be exact.
+            var probe = await ProbeAsync(usable, ct);
+            if (ParseDurationSec(probe) is { } sec) seg.VideoSec = sec;
+            seg.HasAudio = probe.Contains("Audio:");
+            ready.Add((seg, usable));
+        }
+        if (ready.Count == 0)
+        {
+            Log.Warn($"Nothing to finalize for {state.BaseName} - all segments are gone");
+            CleanupInflight(state);
+            return;
+        }
+
+        // The concat demuxer needs every piece to have the same streams; a
+        // segment whose audio capture failed gets a silent track (audio-only
+        // encode, video untouched) rather than breaking the whole join.
+        if (ready.Any(r => r.Seg.HasAudio) && ready.Any(r => !r.Seg.HasAudio))
+        {
+            for (var i = 0; i < ready.Count; i++)
+            {
+                if (ready[i].Seg.HasAudio) continue;
+                var padded = ready[i].Path + ".pad.mp4";
+                try
+                {
+                    await RunFfmpegAsync($"-y -i \"{ready[i].Path}\" -f lavfi -i anullsrc=r={ProcessAudioCapture.SampleRate}:cl=stereo -map 0:v -map 1:a -c:v copy -c:a aac -b:a 160k -shortest -movflags +faststart \"{padded}\"", ct);
+                    if (!ready[i].Path.Equals(Path.Combine(RecordingsDir, ready[i].Seg.File), StringComparison.OrdinalIgnoreCase)) TryDelete(ready[i].Path);
+                    ready[i] = (ready[i].Seg, padded);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Log.Warn($"Silent-track pad failed for {ready[i].Seg.File}: {ex.Message}");
+                }
+            }
+        }
+
+        var salvaged = false;
+        if (ready.Count == 1)
+        {
+            if (!ready[0].Path.Equals(finalPath, StringComparison.OrdinalIgnoreCase)) File.Move(ready[0].Path, finalPath, overwrite: true);
+        }
+        else
+        {
+            var listPath = Path.Combine(MetaDir, state.BaseName + ".concat.txt");
+            var concatTmp = Path.Combine(RecordingsDir, state.BaseName + ".concat.mp4");
+            try
+            {
+                // Forward slashes: the concat demuxer treats backslashes as
+                // escapes inside its list file.
+                File.WriteAllLines(listPath, ready.Select(r => $"file '{Path.GetFullPath(r.Path).Replace('\\', '/').Replace("'", "'\\''")}'"));
+                await RunFfmpegAsync($"-y -f concat -safe 0 -i \"{listPath}\" -c copy -movflags +faststart \"{concatTmp}\"", ct);
+                File.Move(concatTmp, finalPath, overwrite: true);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Never lose footage to a failed join (codec-parameter drift
+                // between segments, say): the pieces become their own files.
+                Log.Warn($"Segment concat failed ({ex.Message}) - keeping the segments as separate files");
+                salvaged = true;
+                var n = 0;
+                foreach (var (seg, path) in ready)
+                {
+                    n++;
+                    var dst = n == 1 ? finalPath : Path.Combine(RecordingsDir, $"{state.BaseName} (part {n}).mp4");
+                    if (!path.Equals(dst, StringComparison.OrdinalIgnoreCase)) File.Move(path, dst, overwrite: true);
+                }
+            }
+            finally
+            {
+                TryDelete(listPath);
+                TryDelete(concatTmp);
+            }
+        }
+
+        // The final mp4 now holds everything - the raw segments and remux
+        // intermediates are redundant.
+        foreach (var (seg, path) in ready)
+        {
+            foreach (var leftover in new[] { Path.Combine(RecordingsDir, seg.File), path })
+            {
+                if (!leftover.Equals(finalPath, StringComparison.OrdinalIgnoreCase)) TryDelete(leftover);
+            }
+        }
+
+        // Video offsets of each segment within the final file - the merge key
+        // for telemetry and clock maps. Meaningless if the join fell apart
+        // into separate files, so telemetry merging is skipped there (each
+        // segment's events file stays behind for manual rescue).
+        var offsets = new List<(SegmentState Seg, double OffsetSec)>();
+        var cumulative = 0.0;
+        foreach (var (seg, _) in ready)
+        {
+            offsets.Add((seg, cumulative));
+            cumulative += seg.VideoSec;
+        }
+        if (!salvaged) MergeEvents(offsets, Path.Combine(MetaDir, state.BaseName + ".events.csv.gz"));
+
+        await WriteThumbnailAsync(finalPath, Path.Combine(MetaDir, state.BaseName + ".jpg"), ct);
+        WriteSidecar(state, offsets);
+        // The content changed (or is brand new) - any earlier upload of this
+        // game's first chunk is stale now.
+        TryDelete(Path.Combine(MetaDir, state.BaseName + ".uploaded"));
+        CleanupInflight(state);
+    }
+
+    /// One events.csv.gz for the whole game: each segment's telemetry with
+    /// its video offset added, so t_ms lines up with the concatenated video
+    /// exactly like a single uninterrupted recording's would.
+    private void MergeEvents(List<(SegmentState Seg, double OffsetSec)> segments, string outPath)
+    {
+        var sources = segments.Where(s => s.Seg.EventsFile is { Length: > 0 } f && File.Exists(Path.Combine(MetaDir, f))).ToList();
+        if (sources.Count == 0) return;
+        try
+        {
+            // Read everything first: the resumed-game case has the merged
+            // output file itself as segment 1's source.
+            var merged = new List<string>();
+            foreach (var (seg, offsetSec) in sources)
+            {
+                var offsetMs = (long)(offsetSec * 1000);
+                using var file = File.OpenRead(Path.Combine(MetaDir, seg.EventsFile!));
+                using var gzip = new System.IO.Compression.GZipStream(file, System.IO.Compression.CompressionMode.Decompress);
+                using var reader = new StreamReader(gzip, Encoding.ASCII);
+                reader.ReadLine(); // header
+                while (reader.ReadLine() is { Length: > 0 } line)
+                {
+                    var comma = line.IndexOf(',');
+                    if (comma <= 0 || !long.TryParse(line[..comma], out var t)) continue;
+                    merged.Add($"{t + offsetMs}{line[comma..]}");
+                }
+            }
+            using (var file = File.Create(outPath))
+            using (var gzip = new System.IO.Compression.GZipStream(file, System.IO.Compression.CompressionLevel.Fastest))
+            using (var writer = new StreamWriter(gzip, Encoding.ASCII))
+            {
+                writer.WriteLine("t_ms,event_type,input_name,value_a,value_b");
+                foreach (var line in merged) writer.WriteLine(line);
+            }
+            foreach (var (seg, _) in sources)
+            {
+                var path = Path.Combine(MetaDir, seg.EventsFile!);
+                if (!path.Equals(outPath, StringComparison.OrdinalIgnoreCase)) TryDelete(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Input telemetry merge failed: {ex.Message}");
+        }
+    }
+
+    private async Task WriteThumbnailAsync(string videoPath, string thumbPath, CancellationToken ct)
+    {
+        foreach (var seek in new[] { 600, 60, 2 })  // mid-game if it lasted, else whatever exists
+        {
+            try
+            {
+                await RunFfmpegAsync($"-y -ss {seek} -i \"{videoPath}\" -frames:v 1 -vf scale=640:-1 \"{thumbPath}\"", ct);
+                if (new FileInfo(thumbPath) is { Exists: true, Length: > 0 }) return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+            }
+        }
+    }
+
+    private void WriteSidecar(RecordingState state, List<(SegmentState Seg, double OffsetSec)> segments)
+    {
+        try
+        {
+            var last = segments[^1].Seg;
+            var sized = segments.LastOrDefault(s => s.Seg.Width > 0).Seg ?? last;
+            var json = JsonSerializer.Serialize(new
+            {
+                schemaVersion = 1,
+                videoFile = $"{state.BaseName}.mp4",
+                matchId = state.MatchId,
+                eventsFile = File.Exists(Path.Combine(MetaDir, $"{state.BaseName}.events.csv.gz")) ? $"{state.BaseName}.events.csv.gz" : null,
+                gameId = state.GameId,
+                platformId = state.PlatformId,
+                queueId = state.QueueId,
+                gameMode = state.GameMode,
+                activePlayer = state.ActivePlayer,
+                recordingStartUtc = segments[0].Seg.StartedUtc,
+                recordingEndUtc = last.StartedUtc.AddSeconds(last.WallSec),
+                width = sized.Width,
+                height = sized.Height,
+                fps = Math.Clamp(config.RecordFramerate, 15, 120),
+                encoder = string.Join("+", segments.Select(s => s.Seg.Encoder).Where(e => e.Length > 0).Distinct()),
+                // Capture seams (each entry is one uninterrupted capture) -
+                // lets the review UI mark where footage gaps are.
+                segments = segments.Select(s => new
+                {
+                    startUtc = s.Seg.StartedUtc,
+                    videoOffsetSec = Math.Round(s.OffsetSec, 1),
+                    videoSec = Math.Round(s.Seg.VideoSec, 1),
+                }),
+                // videoSec -> gameSec samples; the review UI maps timeline
+                // events onto the video with these (one pair would do, but
+                // samples over the whole game absorb any drift).
+                clockMap = segments
+                    .SelectMany(s => s.Seg.ClockMap.Select(p => new { videoSec = Math.Round(p[0] + s.OffsetSec, 1), gameSec = Math.Round(p[1], 1) })),
+            }, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(Path.Combine(MetaDir, state.BaseName + ".json"), json);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Could not write recording metadata: {ex.Message}");
+        }
+    }
+
+    /// Remux a single fragmented recording into a normal faststart mp4
+    /// (stream copy - milliseconds per gigabyte, no re-encode), plus a
+    /// mid-game thumbnail. The legacy single-file path: the record test and
+    /// stray .part.mp4 files from before segmented recording use it.
     private async Task FinalizeAsync(string partPath, string finalPath, CancellationToken ct)
     {
         try
         {
-            // NVENC stamps the stream with an sRGB transfer tag; YouTube
-            // honors it and gamma-converts to BT.709, which plays back ~20%
-            // darker than the desktop looked (measured on Game 6 of 24 Jul).
-            // Retagging transfer/primaries to BT.709 at remux time - pixels
-            // untouched - makes YouTube leave the levels alone. The matrix
-            // tag stays as written (the encoder really does convert BT.601).
             await RunFfmpegAsync($"-y -i \"{partPath}\" -c copy -bsf:v h264_metadata=colour_primaries=1:transfer_characteristics=1 -movflags +faststart \"{finalPath}\"", ct);
             File.Delete(partPath);
         }
@@ -542,72 +1071,118 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             if (File.Exists(finalPath)) File.Delete(finalPath);
             File.Move(partPath, finalPath);
         }
-
-        var thumb = Path.Combine(MetaDir, Path.GetFileNameWithoutExtension(finalPath) + ".jpg");
-        foreach (var seek in new[] { 600, 60, 2 })  // mid-game if it lasted, else whatever exists
-        {
-            try
-            {
-                await RunFfmpegAsync($"-y -ss {seek} -i \"{finalPath}\" -frames:v 1 -vf scale=640:-1 \"{thumb}\"", ct);
-                if (new FileInfo(thumb) is { Exists: true, Length: > 0 }) return;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-            }
-        }
+        await WriteThumbnailAsync(finalPath, Path.Combine(MetaDir, Path.GetFileNameWithoutExtension(finalPath) + ".jpg"), ct);
     }
 
-    private void WriteSidecar(string path, string baseName, LcuClient.GameSession? session, GameWindowInfo g, CaptureResult result)
+    /// Recordings interrupted by a crash/power cut/deploy leave segments and
+    /// an .inflight.json behind. If their game is STILL being played (a
+    /// deploy restarted the agent mid-game), leave everything for the
+    /// recorder loop to resume; otherwise finalize into the game's one file.
+    private async Task FinalizeOrphansAsync(CancellationToken ct)
     {
+        string? liveMatchId = null;
         try
         {
-            var json = JsonSerializer.Serialize(new
+            if (await PhaseAsync(ct) == "InProgress" && LcuClient.TryConnect(leagueRoot) is { } lcu)
             {
-                schemaVersion = 1,
-                videoFile = $"{baseName}.mp4",
-                matchId = session is { PlatformId.Length: > 0 } ? $"{session.PlatformId}_{session.GameId}" : null,
-                eventsFile = File.Exists(Path.Combine(MetaDir, $"{baseName}.events.csv.gz")) ? $"{baseName}.events.csv.gz" : null,
-                gameId = session?.GameId,
-                platformId = session?.PlatformId,
-                queueId = session?.QueueId,
-                gameMode = session?.GameMode,
-                activePlayer = result.ActivePlayer,
-                recordingStartUtc = result.StartedUtc,
-                recordingEndUtc = result.StartedUtc + result.Duration,
-                width = g.Rect.Width & ~1,
-                height = g.Rect.Height & ~1,
-                fps = Math.Clamp(config.RecordFramerate, 15, 120),
-                encoder = result.Encoder,
-                // videoSec -> gameSec samples; the review UI maps timeline
-                // events onto the video with these (one pair would do, but
-                // samples over the whole game absorb any drift).
-                clockMap = result.ClockMap.Select(p => new { videoSec = Math.Round(p.VideoSec, 1), gameSec = Math.Round(p.GameSec, 1) }),
-            }, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(path, json);
+                using (lcu)
+                {
+                    liveMatchId = await lcu.GetGameSessionAsync(ct) is { PlatformId.Length: > 0 } s ? $"{s.PlatformId}_{s.GameId}" : null;
+                }
+            }
         }
-        catch (Exception ex)
-        {
-            Log.Warn($"Could not write recording metadata: {ex.Message}");
-        }
-    }
+        catch { /* no client, no live game */ }
 
-    /// Recordings interrupted by a crash/power cut leave a .part.mp4 behind;
-    /// fragments up to the cut are intact, so finalize them at startup.
-    private void FinalizeOrphans()
-    {
-        foreach (var part in Directory.EnumerateFiles(RecordingsDir, "*.part.mp4"))
+        var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in Directory.EnumerateFiles(MetaDir, "*.inflight.json"))
         {
-            var final = part[..^".part.mp4".Length] + ".mp4";
-            Log.Warn($"Finalizing interrupted recording: {Path.GetFileName(part)}");
+            if (TryLoadInflight(path) is not { } state) { TryDelete(path); continue; }
+            foreach (var seg in state.Segments) claimed.Add(seg.File);
+            if (state.MatchId is { Length: > 0 } && state.MatchId == liveMatchId)
+            {
+                Log.Info($"Recording {state.BaseName} belongs to the game still in progress - resuming it");
+                continue;
+            }
+            state.Segments.RemoveAll(seg => !File.Exists(Path.Combine(RecordingsDir, seg.File)));
+            if (state.Segments.Count == 0 || state.Segments.All(seg => seg.Preexisting)) { TryDelete(path); continue; }
+            Log.Warn($"Finalizing interrupted recording: {state.BaseName} ({state.Segments.Count} segment(s))");
             try
             {
-                FinalizeAsync(part, final, CancellationToken.None).GetAwaiter().GetResult();
+                await FinalizeGameAsync(state, ct);
             }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Log.Warn($"Could not finalize {state.BaseName}: {ex.Message}");
+            }
+        }
+
+        // Stray parts with no state file (recordings from before segmented
+        // capture, or a lost .inflight.json): finalized one-to-one so the
+        // footage survives, even if under a .segNN name.
+        foreach (var part in Directory.EnumerateFiles(RecordingsDir, "*.part.mp4"))
+        {
+            if (claimed.Contains(Path.GetFileName(part))) continue;
+            var final = part[..^".part.mp4".Length] + ".mp4";
+            Log.Warn($"Finalizing stray recording: {Path.GetFileName(part)}");
+            try
+            {
+                await FinalizeAsync(part, final, ct);
+            }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 Log.Warn($"Could not finalize {Path.GetFileName(part)}: {ex.Message}");
             }
         }
+    }
+
+    /// Segmented-pipeline smoke test without a game (LT_RECORD_TEST=seg):
+    /// two 6s desktop captures become segments of one RecordingState, and
+    /// FinalizeGameAsync - the exact live path - must join them into a single
+    /// mp4 with merged telemetry and a sidecar that knows both segments.
+    public static async Task SegmentTestAsync(AgentConfig config, string ffmpeg, CancellationToken ct)
+    {
+        var recorder = new GameRecorder(config, ffmpeg, leagueRoot: "");
+        Directory.CreateDirectory(recorder.RecordingsDir);
+        Directory.CreateDirectory(recorder.MetaDir);
+        var fps = Math.Clamp(config.RecordFramerate, 15, 120);
+        var state = new RecordingState { BaseName = $"segment-test-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}" };
+        Log.Info($"Segment test: 2x 6s of the primary desktop at {fps}fps, then the one-file finalize...");
+        for (var i = 1; i <= 2; i++)
+        {
+            var segBase = $"{state.BaseName}.seg{i:00}";
+            var part = Path.Combine(recorder.RecordingsDir, $"{segBase}.part.mp4");
+            var events = Path.Combine(recorder.MetaDir, $"{segBase}.events.csv.gz");
+            var startedUtc = DateTime.UtcNow;
+            using (config.RecordInputs ? InputLogger.TryStart(events) : null)
+            {
+                await recorder.RunFfmpegAsync(
+                    $"-y -f lavfi -i ddagrab=framerate={fps} -t 6 " +
+                    $"-c:v h264_nvenc -preset p4 -rc vbr -cq {config.RecordQuality} -b:v 0 -maxrate 25M -bufsize 50M -g {fps * 4} " +
+                    $"-movflags +frag_keyframe+empty_moov -f mp4 \"{part}\"", ct);
+            }
+            state.Segments.Add(new SegmentState
+            {
+                File = Path.GetFileName(part),
+                EventsFile = File.Exists(events) ? Path.GetFileName(events) : null,
+                StartedUtc = startedUtc,
+                WallSec = (DateTime.UtcNow - startedUtc).TotalSeconds,
+                Encoder = "h264_nvenc",
+                ClockMap = [[1.0, 100.0 + i]],
+            });
+            recorder.SaveInflight(state);
+        }
+        await recorder.FinalizeGameAsync(state, ct);
+        var final = Path.Combine(recorder.RecordingsDir, $"{state.BaseName}.mp4");
+        var probe = await recorder.ProbeAsync(final, ct);
+        var duration = ParseDurationSec(probe);
+        var stray = Directory.EnumerateFiles(recorder.RecordingsDir, $"{state.BaseName}.seg*").Count();
+        Log.Info($"Segment test: {final} duration {duration ?? -1:0.0}s (want ~12), leftover segment files {stray} (want 0), " +
+                 $"merged telemetry {(File.Exists(Path.Combine(recorder.MetaDir, state.BaseName + ".events.csv.gz")) ? "present" : "MISSING")}, " +
+                 $"inflight {(File.Exists(recorder.InflightPath(state)) ? "STILL PRESENT" : "cleaned")}");
+        if (duration is null or < 11 or > 14 || stray != 0) throw new InvalidOperationException("segment test failed the checks above");
+        Log.Info("Segment test complete");
     }
 
     /// Pipeline smoke test without a game: record the primary desktop for 10s
@@ -661,6 +1236,13 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         using (lcu) return await lcu.GetGameflowPhaseAsync(ct);
     }
 
+    /// Phase for decisions made while shutting down - must not throw.
+    private async Task<string?> PhaseSafeAsync()
+    {
+        try { return await PhaseAsync(CancellationToken.None); }
+        catch { return null; }
+    }
+
     /// In-game clock from the Live Client API (same 2999 endpoint family the
     /// Replay API uses; live games serve it without any game.cfg flag).
     private async Task<double?> GameTimeAsync(CancellationToken ct)
@@ -705,6 +1287,29 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     });
 
     private static string Tail(string s) => s.Length > 400 ? s[^400..] : s;
+
+    /// ffmpeg -i with no output exits nonzero by design; the interesting
+    /// bits (Duration, the stream list) are on stderr regardless.
+    private async Task<string> ProbeAsync(string path, CancellationToken ct)
+    {
+        using var proc = Process.Start(new ProcessStartInfo(ffmpeg, $"-hide_banner -i \"{path}\"")
+        {
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        }) ?? throw new InvalidOperationException("could not start ffmpeg");
+        var stderr = await proc.StandardError.ReadToEndAsync(ct);
+        await proc.WaitForExitAsync(ct);
+        return stderr;
+    }
+
+    private static double? ParseDurationSec(string probe)
+    {
+        var m = Regex.Match(probe, @"Duration: (\d+):(\d\d):(\d\d(?:\.\d+)?)");
+        if (!m.Success) return null;
+        return int.Parse(m.Groups[1].Value) * 3600 + int.Parse(m.Groups[2].Value) * 60
+            + double.Parse(m.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
+    }
 
     private async Task RunFfmpegAsync(string args, CancellationToken ct)
     {
