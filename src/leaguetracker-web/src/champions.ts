@@ -46,10 +46,18 @@ async function load(): Promise<Assets> {
   const champIds: Record<string, string> = {}
   for (const c of Object.values(champ.data)) {
     const url = `${cdn}/img/champion/${c.id}.png`
-    champs[norm(c.name)] = url // display name, e.g. "Nunu & Willump"
+    // Alternate-mode variant sets ("Jade_Ezreal", "Strawberry_Briar") share
+    // the real champion's display name; canonical ids never contain "_".
+    // Variants may fill an empty slot but never overwrite the real champion.
+    const variant = c.id.includes('_')
+    if (!variant || champs[norm(c.name)] === undefined) {
+      champs[norm(c.name)] = url // display name, e.g. "Nunu & Willump"
+      champIds[norm(c.name)] = c.id // display name -> DDragon id, for per-champion data fetches
+    }
+    if (!variant || champNames[parseInt(c.key, 10)] === undefined) {
+      champNames[parseInt(c.key, 10)] = c.name // numeric id (spectator only sends these)
+    }
     champs[norm(c.id)] = url // image id, e.g. "MonkeyKing" (Wukong)
-    champNames[parseInt(c.key, 10)] = c.name // numeric id (spectator only sends these)
-    champIds[norm(c.name)] = c.id // display name -> DDragon id, for per-champion data fetches
     champIds[norm(c.id)] = c.id
   }
 
