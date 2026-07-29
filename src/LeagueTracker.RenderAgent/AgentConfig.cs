@@ -64,6 +64,15 @@ public sealed class AgentConfig
     /// video-only when unavailable.
     public bool RecordAudio { get; set; } = true;
 
+    /// Capture engine for live-game recording. "ddagrab": ffmpeg's Desktop
+    /// Duplication capture, zero-copy into NVENC - but the duplication
+    /// session dies on exclusive-fullscreen display mode switches, which the
+    /// segment supervisor absorbs as a seam. "wgc": Windows Graphics Capture
+    /// (ScreenRecorderLib + Media Foundation hardware H264) - DWM-composited
+    /// capture that mode switches and alt-tab cannot interrupt; falls back
+    /// to ddagrab per segment if it won't start.
+    public string CaptureBackend { get; set; } = "ddagrab";
+
     /// Which queue kinds get recorded, comma-separated: ranked-solo,
     /// ranked-flex, normal (draft/blind/swiftplay/quickplay), aram, clash,
     /// coop-ai, urf, nexus-blitz, arena, brawl, doom-bots, custom (customs +
@@ -102,6 +111,7 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_RECORD_INPUTS") is { Length: > 0 } inputs) config.RecordInputs = inputs is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_RECORD_QUEUES") is { Length: > 0 } queues) config.RecordQueues = queues;
         if (Environment.GetEnvironmentVariable("LT_RECORD_AUDIO") is { Length: > 0 } audio) config.RecordAudio = audio is not ("0" or "false");
+        if (Environment.GetEnvironmentVariable("LT_CAPTURE_BACKEND") is { Length: > 0 } backend) config.CaptureBackend = backend;
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_ID") is { Length: > 0 } cfId) config.CfAccessClientId = cfId;
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_SECRET") is { Length: > 0 } cfSecret) config.CfAccessClientSecret = cfSecret;
 

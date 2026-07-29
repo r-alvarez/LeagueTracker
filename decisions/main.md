@@ -706,3 +706,34 @@ links for any known match. Unrecorded games now get a compact link box; once
 linked, the full review card takes over. Without a recording clock map,
 moment-jumps assume the video starts at game clock 0:00 and say so
 (approximate jumps beat dead buttons).
+
+## 2026-07-29 — Plan B capture engine: WGC behind a config flag
+
+**Why a second engine exists**: ddagrab's fragility is structural - Desktop
+Duplication sessions die on exclusive-fullscreen display switches, and ffmpeg
+has no recovery. Ascent never breaks because it bundles OBS (ascent-obs.exe =
+rebranded libobs), whose capture is composition/hook based. Segments make
+ddagrab's deaths cosmetic, but Ruben's trust needs an engine where they don't
+happen at all - available BEFORE the next failure, not engineered after it.
+
+**`CaptureBackend` config ("ddagrab" default | "wgc")**: the wgc path records
+through ScreenRecorderLib 6.6 (Windows Graphics Capture -> Media Foundation
+hardware H264, fragmented mp4) - DWM-composited capture that mode switches and
+alt-tab cannot interrupt. Video only: game-process-only audio stays ours
+(ProcessAudioCapture), paced PCM written beside the segment and muxed to AAC
+at finalize - whole-desktop loopback (Ascent included) can't promise
+Discord-free audio. Everything downstream (segments, naming ledger, inflight
+resume, telemetry merge, uploads) is engine-agnostic and unchanged; WGC
+startup failure falls back to ddagrab per segment. MF quality = 96 - cq
+(cq 26 -> 70; ~7Mbps static desktop 1440p60, bt709 tagged). Supervision stays
+on for wgc too (growth watchdog) - engines can die quietly regardless.
+LT_RECORD_TEST=wgc smoke-tests the whole path; LT_CAPTURE_BACKEND overrides
+per run. Gotchas burned in: ScreenRecorderLib is C++/CLI, so the csproj pins
+Platform x64 and the dll must ship LOOSE next to the single-file exe
+(BadImageFormatException from inside the bundle) - deploys copy exe + pdb +
+ScreenRecorderLib.dll.
+
+**Rejected:** replacing ddagrab outright (a week-hardened path traded for an
+unsoaked one); WGC frames piped raw into ffmpeg (~900MB/s memcpy tax at
+1440p60 vs ScreenRecorderLib's all-GPU pipeline); bundling headless OBS like
+Ascent (heaviest dependency for the same capture class WGC provides).

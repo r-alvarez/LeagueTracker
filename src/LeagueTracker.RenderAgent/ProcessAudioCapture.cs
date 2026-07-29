@@ -30,15 +30,24 @@ public sealed class ProcessAudioCapture : IDisposable
 
     private readonly ConcurrentQueue<byte[]> _captured = new();
     private readonly CancellationTokenSource _cts = new();
-    private readonly NamedPipeServerStream _pipe;
+    private readonly NamedPipeServerStream? _pipe;
+    private readonly FileStream? _file;
+    private Stream Output => (Stream?)_pipe ?? _file!;
     private readonly Thread _captureThread;
     private readonly Thread _writerThread;
     private IAudioClient? _client;
 
-    private ProcessAudioCapture(int processId)
+    private ProcessAudioCapture(int processId, string? pcmPath)
     {
-        _pipe = new NamedPipeServerStream(PipeName, PipeDirection.Out, 1,
-            PipeTransmissionMode.Byte, PipeOptions.None, 0, 1024 * 1024);
+        if (pcmPath is null)
+        {
+            _pipe = new NamedPipeServerStream(PipeName, PipeDirection.Out, 1,
+                PipeTransmissionMode.Byte, PipeOptions.None, 0, 1024 * 1024);
+        }
+        else
+        {
+            _file = File.Create(pcmPath);
+        }
         _captureThread = new Thread(() => CaptureLoop(processId)) { IsBackground = true, Name = "audio-capture" };
         _writerThread = new Thread(WriterLoop) { IsBackground = true, Name = "audio-writer" };
         _captureThread.Start();
@@ -47,11 +56,18 @@ public sealed class ProcessAudioCapture : IDisposable
 
     /// Null when process loopback isn't available - the recording proceeds
     /// without an audio track rather than failing.
-    public static ProcessAudioCapture? TryStart(int processId)
+    public static ProcessAudioCapture? TryStart(int processId) => TryStart(processId, null);
+
+    /// Same capture, but the paced PCM lands in a file instead of the ffmpeg
+    /// pipe - for capture engines that record video only (WGC), where the
+    /// audio is muxed in at finalize.
+    public static ProcessAudioCapture? TryStartToFile(int processId, string pcmPath) => TryStart(processId, pcmPath);
+
+    private static ProcessAudioCapture? TryStart(int processId, string? pcmPath)
     {
         try
         {
-            return new ProcessAudioCapture(processId);
+            return new ProcessAudioCapture(processId, pcmPath);
         }
         catch (Exception ex)
         {
@@ -111,8 +127,11 @@ public sealed class ProcessAudioCapture : IDisposable
     /// byte count, so pacing here IS the sync.
     private void WriterLoop()
     {
-        try { _pipe.WaitForConnection(); } // ffmpeg opening its -i argument
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException) { return; }
+        if (_pipe is not null)
+        {
+            try { _pipe.WaitForConnection(); } // ffmpeg opening its -i argument
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException) { return; }
+        }
         var clock = Stopwatch.StartNew();
         long framesWritten = 0;
         byte[]? partial = null;
@@ -129,12 +148,12 @@ public sealed class ProcessAudioCapture : IDisposable
                     if (partial is null && !_captured.TryDequeue(out partial))
                     {
                         var silence = new byte[needBytes];
-                        _pipe.Write(silence, 0, silence.Length);
+                        Output.Write(silence, 0, silence.Length);
                         framesWritten = targetFrames;
                         break;
                     }
                     var take = Math.Min(needBytes, partial!.Length - partialOffset);
-                    _pipe.Write(partial, partialOffset, take);
+                    Output.Write(partial, partialOffset, take);
                     framesWritten += take / BytesPerFrame;
                     partialOffset += take;
                     if (partialOffset >= partial.Length) { partial = null; partialOffset = 0; }
@@ -156,7 +175,7 @@ public sealed class ProcessAudioCapture : IDisposable
                 partialOffset = 0;
             }
         }
-        try { _pipe.Flush(); }
+        try { Output.Flush(); }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
     }
 
@@ -165,7 +184,8 @@ public sealed class ProcessAudioCapture : IDisposable
         _cts.Cancel();
         _captureThread.Join(TimeSpan.FromSeconds(2));
         _writerThread.Join(TimeSpan.FromSeconds(2));
-        _pipe.Dispose();
+        _pipe?.Dispose();
+        _file?.Dispose();
         if (_client is not null) Marshal.ReleaseComObject(_client);
         _cts.Dispose();
     }

@@ -12,10 +12,30 @@
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- ScreenRecorderLib (WGC capture backend) is C++/CLI - AnyCPU can't
+         load it; the agent is win-x64-only regardless. -->
+    <Platform>x64</Platform>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
 
   <ItemGroup>
     <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ScreenRecorderLib" Version="6.6.0" />
+  </ItemGroup>
+
+  <!-- ScreenRecorderLib is a mixed-mode (C++/CLI) image: it cannot load out
+       of a single-file bundle (BadImageFormatException) and must ship as a
+       loose dll next to the exe - deploys copy it alongside. -->
+  <Target Name="KeepMixedModeAssembliesLoose" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Condition="'%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'ScreenRecorderLib.dll'">
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
 
 </Project>

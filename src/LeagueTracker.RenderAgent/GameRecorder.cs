@@ -99,7 +99,10 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         try { await FinalizeOrphansAsync(ct); }
         catch (OperationCanceledException) { return; }
         catch (Exception ex) { Log.Warn($"Orphan finalize failed: {ex.Message}"); }
-        Log.Info($"Game recorder on - live games land in {RecordingsDir} ({config.RecordFramerate}fps, NVENC cq {config.RecordQuality})");
+        Log.Info($"Game recorder on - live games land in {RecordingsDir} ({config.RecordFramerate}fps, " +
+                 (config.CaptureBackend.Trim().Equals("wgc", StringComparison.OrdinalIgnoreCase)
+                     ? $"WGC + MF quality {Math.Clamp(96 - config.RecordQuality, 40, 95)})"
+                     : $"ddagrab + NVENC cq {config.RecordQuality})"));
         _lastSweep = DateTime.UtcNow;
         try { await SweepUnuploadedAsync(ct); }
         catch (OperationCanceledException) { return; }
@@ -233,13 +236,20 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             var eventsPath = Path.Combine(MetaDir, $"{segBase}.events.csv.gz");
             Log.Info($"Recording {state.BaseName} segment {segNo} ({state.MatchId ?? "id unknown"}): {g.Rect.Width}x{g.Rect.Height}");
 
-            // NVENC first; if ffmpeg dies straight away (driver/session
-            // limit), fall back to CPU x264 rather than losing the VOD.
-            var result = await CaptureAsync(partPath, eventsPath, g, nvenc: true, ct);
+            // Backend order: wgc tries Windows Graphics Capture and falls
+            // back to ffmpeg ddagrab+NVENC; ddagrab tries NVENC and falls
+            // back to CPU x264 (driver/session limit). Either way a startup
+            // failure gets one different-engine retry before counting.
+            var useWgc = config.CaptureBackend.Trim().Equals("wgc", StringComparison.OrdinalIgnoreCase);
+            var result = useWgc
+                ? await CaptureWgcAsync(partPath, eventsPath, g, ct)
+                : await CaptureAsync(partPath, eventsPath, g, nvenc: true, ct);
             if (result is { FfmpegFailedEarly: true })
             {
-                Log.Warn("NVENC capture failed at startup - falling back to CPU encoding");
-                result = await CaptureAsync(partPath, eventsPath, g, nvenc: false, ct);
+                Log.Warn(useWgc
+                    ? "WGC capture failed at startup - falling back to ffmpeg ddagrab"
+                    : "NVENC capture failed at startup - falling back to CPU encoding");
+                result = await CaptureAsync(partPath, eventsPath, g, nvenc: useWgc, ct);
             }
 
             // "Failed early" (nonzero exit within seconds) and "ran but wrote
@@ -252,6 +262,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             {
                 TryDelete(partPath);
                 TryDelete(eventsPath);
+                TryDelete(Path.ChangeExtension(partPath, ".pcm"));
                 if (++earlyFailures >= 4)
                 {
                     Log.Error($"Capture keeps dying at startup ({earlyFailures} attempts) - giving up on this game: {result.StderrTail}");
@@ -807,6 +818,94 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             videoSec, frameCount, audio is not null, nvenc ? "h264_nvenc" : "libx264", clockMap, activePlayer);
     }
 
+    /// One capture segment through Windows Graphics Capture instead of
+    /// ffmpeg/ddagrab (CaptureBackend "wgc"). Same contract as CaptureAsync:
+    /// runs until the game ends, the capture dies, or a stop is requested,
+    /// and hands back the segment's vitals. Game audio lands beside the
+    /// video as paced PCM ({part}.pcm) and is muxed in at finalize.
+    private async Task<CaptureResult?> CaptureWgcAsync(string partPath, string eventsPath, GameWindowInfo g, CancellationToken ct)
+    {
+        var fps = Math.Clamp(config.RecordFramerate, 15, 120);
+        // Media Foundation's Quality knob is 1-100 (higher = better); NVENC
+        // cq is inverted (lower = better). 96 - cq maps the default cq 26 to
+        // 70 - adjust after comparing real game bitrates if needed.
+        var quality = Math.Clamp(96 - config.RecordQuality, 40, 95);
+        var rect = (Math.Max(0, g.Rect.X), Math.Max(0, g.Rect.Y), g.Rect.Width & ~1, g.Rect.Height & ~1);
+        var startedUtc = DateTime.UtcNow;
+        using var recorder = WgcRecorder.TryStart(partPath, rect, fps, quality);
+        if (recorder is null)
+        {
+            return new CaptureResult(true, "WGC recorder would not construct", startedUtc, TimeSpan.Zero, 0, 0, false, "h264_mf_wgc", [], null);
+        }
+        if (!await recorder.WaitForRecordingAsync(TimeSpan.FromSeconds(10)))
+        {
+            var startError = await recorder.StopAsync(TimeSpan.FromSeconds(5));
+            return new CaptureResult(true, recorder.Error ?? startError ?? "WGC recording did not start", startedUtc,
+                DateTime.UtcNow - startedUtc, 0, 0, false, "h264_mf_wgc", [], null);
+        }
+        startedUtc = DateTime.UtcNow; // zero point = frames actually flowing
+        using var audio = config.RecordAudio ? ProcessAudioCapture.TryStartToFile(g.Process.Id, Path.ChangeExtension(partPath, ".pcm")) : null;
+        using var inputLogger = config.RecordInputs ? InputLogger.TryStart(eventsPath, g.Process.MainWindowHandle) : null;
+
+        var clockMap = new List<(double, double)>();
+        string? activePlayer = null;
+        var lastClockSample = DateTime.MinValue;
+        // WGC surviving mode switches makes the growth watchdog mostly
+        // vestigial, but engines can still die quietly - same belt and
+        // braces as the ffmpeg path, just measured on the output file.
+        var lastGrowthCheck = DateTime.UtcNow;
+        long lastPartSize = 0;
+
+        while (!recorder.HasEnded)
+        {
+            try { await Task.Delay(TimeSpan.FromSeconds(2), ct); }
+            catch (OperationCanceledException) { break; } // agent shutdown - stop cleanly below
+
+            g.Process.Refresh();
+            if (g.Process.HasExited) break;
+            if (RenderAgent.StopRequested) break;
+
+            if (DateTime.UtcNow - lastGrowthCheck > TimeSpan.FromSeconds(60))
+            {
+                lastGrowthCheck = DateTime.UtcNow;
+                var size = new FileInfo(partPath) is { Exists: true } part ? part.Length : 0;
+                var grewBytes = size - lastPartSize;
+                lastPartSize = size;
+                if (grewBytes < 5_000_000 && DateTime.UtcNow - startedUtc > TimeSpan.FromSeconds(90))
+                {
+                    Log.Warn($"WGC capture stalled ({grewBytes / 1024} KB in the last minute); restarting the capture");
+                    break;
+                }
+            }
+
+            if (DateTime.UtcNow - lastClockSample > TimeSpan.FromSeconds(30))
+            {
+                lastClockSample = DateTime.UtcNow;
+                if (await GameTimeAsync(ct) is { } gameSec)
+                {
+                    clockMap.Add(((DateTime.UtcNow - startedUtc).TotalSeconds, gameSec));
+                }
+                activePlayer ??= await ActivePlayerAsync(ct);
+                if (clockMap.Count % 3 == 0 && await PhaseAsync(CancellationToken.None) is not "InProgress" and not null) break;
+            }
+        }
+
+        var endedAlone = recorder.HasEnded;
+        var error = await recorder.StopAsync(TimeSpan.FromSeconds(15));
+        var duration = DateTime.UtcNow - startedUtc;
+        var failedEarly = duration < TimeSpan.FromSeconds(8) && error is not null;
+        if (!failedEarly && endedAlone)
+        {
+            Log.Warn($"WGC capture ended on its own after {duration.TotalSeconds:0}s: {error ?? "no error reported"}");
+        }
+        // The muxer's exact video duration comes from the finalize probe;
+        // WGC output is wall-continuous, so the wall clock is a fair stand-in
+        // until then. Frames aren't observable here (-1): the junk check
+        // falls back to duration + file size.
+        return new CaptureResult(failedEarly, error ?? "", startedUtc, duration,
+            duration.TotalSeconds, -1, audio is not null, "h264_mf_wgc", clockMap, activePlayer);
+    }
+
     /// Turns a finished game's segments into the one file that game IS:
     /// each raw segment is remuxed to faststart (stream copy, milliseconds
     /// per gigabyte) with the BT.709 retag, multi-segment games are then
@@ -823,17 +922,10 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             var usable = src;
             if (!seg.Preexisting)
             {
-                // NVENC stamps the stream with an sRGB transfer tag; YouTube
-                // honors it and gamma-converts to BT.709, which plays back
-                // ~20% darker than the desktop looked (measured on Game 6 of
-                // 24 Jul). Retagging transfer/primaries to BT.709 at remux
-                // time - pixels untouched - makes YouTube leave the levels
-                // alone. The matrix tag stays as written (the encoder really
-                // does convert BT.601).
                 var tmp = Path.Combine(RecordingsDir, seg.File[..^".part.mp4".Length] + ".remux.mp4");
                 try
                 {
-                    await RunFfmpegAsync($"-y -i \"{src}\" -c copy -bsf:v h264_metadata=colour_primaries=1:transfer_characteristics=1 -movflags +faststart \"{tmp}\"", ct);
+                    await RunFfmpegAsync(RemuxArgs(src, tmp), ct);
                     usable = tmp;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -917,11 +1009,12 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             }
         }
 
-        // The final mp4 now holds everything - the raw segments and remux
-        // intermediates are redundant.
+        // The final mp4 now holds everything - the raw segments, WGC audio
+        // sidecars and remux intermediates are redundant.
         foreach (var (seg, path) in ready)
         {
-            foreach (var leftover in new[] { Path.Combine(RecordingsDir, seg.File), path })
+            var orig = Path.Combine(RecordingsDir, seg.File);
+            foreach (var leftover in new[] { orig, Path.ChangeExtension(orig, ".pcm"), path })
             {
                 if (!leftover.Equals(finalPath, StringComparison.OrdinalIgnoreCase)) TryDelete(leftover);
             }
@@ -1061,8 +1154,9 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     {
         try
         {
-            await RunFfmpegAsync($"-y -i \"{partPath}\" -c copy -bsf:v h264_metadata=colour_primaries=1:transfer_characteristics=1 -movflags +faststart \"{finalPath}\"", ct);
+            await RunFfmpegAsync(RemuxArgs(partPath, finalPath), ct);
             File.Delete(partPath);
+            TryDelete(Path.ChangeExtension(partPath, ".pcm"));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1185,6 +1279,74 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         Log.Info("Segment test complete");
     }
 
+    /// WGC-pipeline smoke test (LT_RECORD_TEST=wgc): 10s of the primary
+    /// desktop through WgcRecorder + file-target audio capture +
+    /// FinalizeGameAsync - proves the plan-B engine loads, encodes and muxes
+    /// before it is ever flipped on for real games.
+    public static async Task WgcTestAsync(AgentConfig config, string ffmpeg, CancellationToken ct)
+    {
+        var recorder = new GameRecorder(config, ffmpeg, leagueRoot: "");
+        Directory.CreateDirectory(recorder.RecordingsDir);
+        Directory.CreateDirectory(recorder.MetaDir);
+        var fps = Math.Clamp(config.RecordFramerate, 15, 120);
+        var quality = Math.Clamp(96 - config.RecordQuality, 40, 95);
+        var state = new RecordingState { BaseName = $"wgc-test-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}" };
+        var part = Path.Combine(recorder.RecordingsDir, $"{state.BaseName}.seg01.part.mp4");
+        var events = Path.Combine(recorder.MetaDir, $"{state.BaseName}.seg01.events.csv.gz");
+        Log.Info($"WGC test: 10s of the primary desktop at {fps}fps (MF quality {quality})...");
+        Process? noise = null;
+        if (config.RecordAudio)
+        {
+            noise = Process.Start(new ProcessStartInfo("powershell",
+                "-NoProfile -c \"$p = New-Object Media.SoundPlayer 'C:\\Windows\\Media\\Alarm01.wav'; $p.PlayLooping(); Start-Sleep 14\"")
+            { UseShellExecute = false, CreateNoWindow = true });
+        }
+        var startedUtc = DateTime.UtcNow;
+        try
+        {
+            using var wgc = WgcRecorder.TryStart(part, null, fps, quality)
+                ?? throw new InvalidOperationException("WGC recorder would not construct");
+            if (!await wgc.WaitForRecordingAsync(TimeSpan.FromSeconds(10)))
+            {
+                throw new InvalidOperationException($"WGC did not start: {wgc.Error ?? "timeout"}");
+            }
+            using (noise is null ? null : ProcessAudioCapture.TryStartToFile(noise.Id, Path.ChangeExtension(part, ".pcm")))
+            using (config.RecordInputs ? InputLogger.TryStart(events) : null)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), ct);
+            }
+            if (await wgc.StopAsync(TimeSpan.FromSeconds(15)) is { } err)
+            {
+                throw new InvalidOperationException($"WGC recording failed: {err}");
+            }
+        }
+        finally
+        {
+            try { if (noise is { HasExited: false }) noise.Kill(); } catch { /* already gone */ }
+            noise?.Dispose();
+        }
+        state.Segments.Add(new SegmentState
+        {
+            File = Path.GetFileName(part),
+            EventsFile = File.Exists(events) ? Path.GetFileName(events) : null,
+            StartedUtc = startedUtc,
+            WallSec = (DateTime.UtcNow - startedUtc).TotalSeconds,
+            Encoder = "h264_mf_wgc",
+        });
+        await recorder.FinalizeGameAsync(state, ct);
+        var final = Path.Combine(recorder.RecordingsDir, state.BaseName + ".mp4");
+        var probe = await recorder.ProbeAsync(final, ct);
+        var duration = ParseDurationSec(probe);
+        var hasAudio = probe.Contains("Audio:");
+        Log.Info($"WGC test: {final} duration {duration ?? -1:0.0}s (want ~10), audio {(hasAudio ? "present" : "MISSING")}, " +
+                 $"telemetry {(File.Exists(Path.Combine(recorder.MetaDir, state.BaseName + ".events.csv.gz")) ? "present" : "MISSING")}");
+        if (duration is null or < 8 or > 14 || (config.RecordAudio && !hasAudio))
+        {
+            throw new InvalidOperationException("WGC test failed the checks above");
+        }
+        Log.Info("WGC test complete");
+    }
+
     /// Pipeline smoke test without a game: record the primary desktop for 10s
     /// through the exact capture/encode/finalize path (LT_RECORD_TEST=1).
     public static async Task RecordTestAsync(AgentConfig config, string ffmpeg, CancellationToken ct)
@@ -1287,6 +1449,21 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     });
 
     private static string Tail(string s) => s.Length > 400 ? s[^400..] : s;
+
+    /// Stream-copy remux of a raw segment to faststart, with the BT.709
+    /// retag (NVENC's sRGB transfer tag made YouTube gamma-convert every
+    /// upload ~20% darker - measured on Game 6 of 24 Jul; pixels untouched,
+    /// the matrix tag stays as written since the encoders really do convert
+    /// BT.601). A {segment}.pcm beside the video (the WGC path's game audio)
+    /// becomes the AAC track here.
+    private string RemuxArgs(string src, string dst)
+    {
+        var pcm = Path.ChangeExtension(src, ".pcm");
+        const string bsf = "-bsf:v h264_metadata=colour_primaries=1:transfer_characteristics=1";
+        return File.Exists(pcm)
+            ? $"-y -i \"{src}\" -f s16le -ar {ProcessAudioCapture.SampleRate} -ch_layout stereo -i \"{pcm}\" -map 0:v -map 1:a -c:v copy -c:a aac -b:a 160k -shortest {bsf} -movflags +faststart \"{dst}\""
+            : $"-y -i \"{src}\" -c copy {bsf} -movflags +faststart \"{dst}\"";
+    }
 
     /// ffmpeg -i with no output exits nonzero by design; the interesting
     /// bits (Duration, the stream list) are on stderr regardless.
