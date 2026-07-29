@@ -76,7 +76,11 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
     return () => { cancelled = true; ytPlayerRef.current = null }
   }, [ytId, hasHostedVideo])
 
-  if (!vod || (!vod.exists && !vod.youtubeUrl && !vod.meta && !vod.apm)) return null
+  if (!vod) return null
+  // No recording data at all: the game can still have a YouTube upload (played
+  // on another machine, recorded by hand) - offer just the link box, and the
+  // full review card takes over once a link is saved.
+  const hasAnyData = vod.exists || !!vod.youtubeUrl || !!vod.meta || !!vod.apm
 
   // Without a loaded <video> element (YouTube mode) the recording length
   // comes from the sidecar's own start/end stamps.
@@ -98,13 +102,11 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
     }
   }
 
-  const videoFor = (gameSec: number) =>
-    gameToVideoOffset === null ? null : Math.max(0, gameSec - gameToVideoOffset)
+  // Without a recording clock map (hand-linked YouTube upload) assume the
+  // video starts at game clock 0:00 - approximate jumps beat dead buttons.
+  const videoFor = (gameSec: number) => Math.max(0, gameSec - (gameToVideoOffset ?? 0))
 
-  const jumpToMoment = (gameSec: number) => {
-    const v = videoFor(gameSec)
-    if (v !== null) seekTo(Math.max(0, v - 5)) // 5s of approach context
-  }
+  const jumpToMoment = (gameSec: number) => seekTo(Math.max(0, videoFor(gameSec) - 5)) // 5s of approach context
 
   const apmData = (vod.apm?.apm ?? []).map((apm, i) => {
     const videoSec = i * (vod.apm?.bucketSec ?? 10)
@@ -119,17 +121,36 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
     ? moments
     : deaths.map(d => ({ kind: 'death', timeSec: d.timeSec }))
 
-  const markers = effectiveDuration === null || gameToVideoOffset === null
+  const markers = effectiveDuration === null
     ? []
     : allMoments
         .map(e => ({ ...e, videoSec: videoFor(e.timeSec) }))
-        .filter((e): e is ClipEvent & { videoSec: number } => e.videoSec !== null && e.videoSec <= effectiveDuration)
+        .filter(e => e.videoSec <= effectiveDuration)
 
   const saveLink = (url: string) => {
     void api.setVodLink(matchId, url).then(status => { onChange(status); setLinkDraft('') })
   }
 
   const sortedMoments = [...allMoments].sort((a, b) => a.timeSec - b.timeSec)
+
+  if (!hasAnyData) {
+    return (
+      <div className="card" style={{ marginBottom: 14 }}>
+        <h2>
+          Your VOD <span className="mut" style={{ fontWeight: 400 }}>— have this game on YouTube? Link it to review it here</span>
+        </h2>
+        <div style={{ display: 'flex', gap: 6, maxWidth: 480 }}>
+          <input
+            value={linkDraft}
+            onChange={e => setLinkDraft(e.target.value)}
+            placeholder="https://youtu.be/…"
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          <button className="action" disabled={!linkDraft.trim()} onClick={() => saveLink(linkDraft.trim())}>link</button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="card" style={{ marginBottom: 14 }}>
@@ -259,6 +280,11 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
                   </button>
                 ))}
               </div>
+              {gameToVideoOffset === null && (
+                <p className="mut sm-text" style={{ margin: '6px 0 0' }}>
+                  No recording clock map for this game — jumps assume the video starts at the game's 0:00.
+                </p>
+              )}
             </div>
           )}
 
