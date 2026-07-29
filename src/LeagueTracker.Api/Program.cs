@@ -108,8 +108,18 @@ var hideLp = riotOptions.HideLp;
 
 app.UseCors();
 app.UseResponseCompression();
+// Hashed bundles never change; everything else (index.html above all) must
+// revalidate every load - without an explicit Cache-Control, browsers apply
+// heuristic freshness and keep serving a pre-deploy bundle for days.
+var staticFiles = new StaticFileOptions
+{
+    OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl =
+        ctx.Context.Request.Path.StartsWithSegments("/assets")
+            ? "public,max-age=31536000,immutable"
+            : "no-cache",
+};
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(staticFiles);
 
 // --- Status ---------------------------------------------------------------------
 
@@ -981,7 +991,7 @@ app.MapGet("/api/export/all.zip", async (LeagueDbContext db, ReviewService revie
     }
     return Results.File(ms.ToArray(), "application/zip", $"leaguetracker-export-{DateTime.Now:yyyyMMdd-HHmm}.zip");
 });
-app.MapFallbackToFile("index.html");
+app.MapFallbackToFile("index.html", staticFiles);
 
 app.Run();
 
