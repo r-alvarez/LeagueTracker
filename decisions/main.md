@@ -801,3 +801,23 @@ deliberately excluded: my own duels already exist as kill/death markers, and
 other lanes' solo trades are noise at review time. The card also drops the
 resolution/encoder line and "played as" - single-account trackers state the
 obvious, and the encoder is agent.log material.
+
+## 2026-08-04 — Team fights the player skipped become automatic replay clips
+
+**Non-participated skirmishes/teamfights auto-render as clips filmed from a
+surviving fighter's POV** - Ruben's point: a "without you" fight marker on
+his own VOD can only show his minimap; the replay is the only camera that
+was there. The analyzer now keeps the fight's camera pick
+(CameraParticipantId: involved ally alive through the fight, else surviving
+enemy, else the last-dying fighter - a dead champion's camera parks at its
+fountain), fresh clip plans append "fight" windows (significance gate:
+teamfights always, skirmishes only at 2+ kills; duels never - solo trades
+elsewhere are noise), and the agent resolves dropdown slot + verified
+selection PER WINDOW instead of per job (an unknown fight target skips the
+window, not the job). VOD-covered matches flip from "no automatic renders"
+(this morning's rule) to "fight windows only"; agentless trackers render
+everything, so Ben gains fight clips too. The match page shows a "Team
+fights" card next to the VOD (kill/death clips stay hidden behind it).
+Backfill needs one /api/analytics/reprocess per tracker (CameraParticipantId
+defaults to 0 = unclippable on old rows). Replay patch-lock still applies:
+fights only clip while the match's replay runs on the installed client.

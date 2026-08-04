@@ -581,6 +581,9 @@ export default function MatchDetail() {
   // Recording data present = the VOD card owns the review slot; the replay
   // tiles (full game + clips) only surface when there is nothing recorded.
   const hasVodCard = !!(vod && (vod.exists || vod.youtubeUrl || vod.meta || vod.apm))
+  // With a VOD, my own kill/death clips are redundant (the real footage is a
+  // click away) - but fight clips show what the VOD's POV never could.
+  const visibleClips = hasVodCard ? clips.filter(c => c.kind === 'fight') : clips
   // Moments come straight from the match timeline, not from the clip plan -
   // clips may never render for a recorded game, and kills belong here too.
   // Fights ride along so the parts of the game the player never touched
@@ -740,22 +743,26 @@ export default function MatchDetail() {
       {/* Clips keep rendering and stay on disk as the backup copy, but once a
           recording (or its YouTube link) exists, the VOD covers the same
           moments - showing both would just be clutter. */}
-      {!hasVodCard && clips.length > 0 && (
+      {visibleClips.length > 0 && (
         <div className="card" style={{ marginBottom: 14 }}>
           <h2>
-            Clips <span className="mut" style={{ fontWeight: 400 }}>— your kills & deaths, rendered from the official replay</span>
+            {hasVodCard
+              ? <>Team fights <span className="mut" style={{ fontWeight: 400 }}>— the fights you weren't in, rendered from the replay (your VOD never saw them)</span></>
+              : <>Clips <span className="mut" style={{ fontWeight: 400 }}>— your kills & deaths, rendered from the official replay</span></>}
           </h2>
-          {clips.every(c => !c.ready) ? (
+          {visibleClips.every(c => !c.ready) ? (
             <p className="mut" style={{ margin: 0 }}>
-              {clips.length} fight window{clips.length === 1 ? '' : 's'} planned — waiting for the render agent on the gaming PC.
+              {visibleClips.length} fight window{visibleClips.length === 1 ? '' : 's'} planned — waiting for the render agent on the gaming PC.
             </p>
           ) : (
             <div className="grid two-col">
-              {clips.map(c => (
+              {visibleClips.map(c => (
                 <div key={c.index}>
                   <div className="sub-h" style={{ marginTop: 0 }}>
                     {c.label} · {fmtClock(c.startSec)}–{fmtClock(c.endSec)}
-                    <span className="mut"> · {c.events.map(e => `${e.kind} ${fmtClock(e.timeSec)}`).join(', ')}</span>
+                    {c.kind === 'fight' && c.cameraChampion
+                      ? <span className="mut"> · from {c.cameraChampion}'s view</span>
+                      : <span className="mut"> · {c.events.map(e => `${e.kind} ${fmtClock(e.timeSec)}`).join(', ')}</span>}
                     {c.ready && (
                       <button className="action" style={{ padding: '0 8px', marginLeft: 8 }}
                         title="Delete this clip and queue just this window for a fresh render on the gaming PC"

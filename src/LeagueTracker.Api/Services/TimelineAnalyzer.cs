@@ -108,10 +108,12 @@ public static class TimelineAnalyzer
     /// One detected fight. Kind: duel (1v1) / skirmish / teamfight (3+ a side).
     /// Result is from my team's perspective; GoldSwing is the team-gold-diff
     /// change across the fight (frame-coarse); ConvertedObjective = the winner
-    /// took an objective within 45s.
+    /// took an objective within 45s. CameraParticipantId is the fighter a
+    /// replay clip should film from (0 on rows serialized before it existed).
     public sealed record Fight(
         int StartSec, int EndSec, string Kind, string Result, bool Participated,
-        int Allies, int Enemies, int AllyKills, int EnemyKills, int GoldSwing, bool ConvertedObjective);
+        int Allies, int Enemies, int AllyKills, int EnemyKills, int GoldSwing, bool ConvertedObjective,
+        int CameraParticipantId = 0);
 
     private sealed record Frame(int TimeSec, Dictionary<int, (int X, int Y)> Positions, Dictionary<int, FrameStats> Stats);
 
@@ -550,7 +552,20 @@ public static class TimelineAnalyzer
             _ => false,
         };
 
-        return new Fight(start, end, kind, result, participated, allies, enemies, allyKills, enemyKills, goldSwing, converted);
+        // The replay camera for this fight: a fighter who outlives it films it
+        // best (a dead champion's camera parks at their fountain). Ally POV
+        // preferred, busiest fighter first; the last-dying victim is the
+        // fallback when nobody survives - an ace still films until the
+        // camera-holder drops.
+        var victims = cluster.Select(k => k.VictimParticipantId).ToHashSet();
+        int KillsBy(int pid) => cluster.Count(k => k.KillerParticipantId == pid);
+        var cameraPid = involved.Where(p => (p == myPid || allyPids.Contains(p)) && !victims.Contains(p))
+                .OrderByDescending(KillsBy).ThenBy(p => p).Cast<int?>().FirstOrDefault()
+            ?? involved.Where(p => enemyPids.Contains(p) && !victims.Contains(p))
+                .OrderByDescending(KillsBy).ThenBy(p => p).Cast<int?>().FirstOrDefault()
+            ?? cluster[^1].VictimParticipantId;
+
+        return new Fight(start, end, kind, result, participated, allies, enemies, allyKills, enemyKills, goldSwing, converted, cameraPid);
     }
 
     /// My team's total-gold lead at the last frame at or before the given second

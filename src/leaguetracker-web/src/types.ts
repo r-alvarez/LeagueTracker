@@ -419,6 +419,10 @@ export interface ClipInfo {
   startSec: number
   endSec: number
   events: ClipEvent[]
+  /** "moment" = my kills/deaths (camera on me); "fight" = a team fight I
+   *  was not in, filmed from cameraChampion's POV. */
+  kind: 'moment' | 'fight'
+  cameraChampion: string | null
   url: string
   ready: boolean
 }

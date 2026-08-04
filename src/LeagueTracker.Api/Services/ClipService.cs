@@ -6,7 +6,12 @@ namespace LeagueTracker.Api.Services;
 
 public sealed record ClipEvent(string Kind, int TimeSec);
 
-public sealed record ClipWindow(int Index, int StartSec, int EndSec, string Label, List<ClipEvent> Events);
+/// Kind "moment" = the player's own kills/deaths (camera on them); "fight" =
+/// a team fight they were not part of, filmed from CameraName's POV so the
+/// replay shows footage the player's own screen never had. Defaults keep
+/// pre-existing plan manifests deserializable.
+public sealed record ClipWindow(int Index, int StartSec, int EndSec, string Label, List<ClipEvent> Events,
+    string Kind = "moment", string? CameraName = null, string? CameraChampion = null);
 
 public sealed record ClipPlan(string MatchId, string GameVersion, double DurationSec, List<ClipWindow> Windows);
 
@@ -46,25 +51,75 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
             .OrderBy(k => k.TimeSec)
             .Select(k => new ClipEvent(k.VictimParticipantId == myPid ? "death" : "kill", k.TimeSec))
             .ToListAsync(ct);
-        if (events is not { Count: > 0 }) return null;
 
         var windows = new List<ClipWindow>();
-        var group = new List<ClipEvent> { events[0] };
-        foreach (var e in events.Skip(1))
+        if (events is { Count: > 0 })
         {
-            if (e.TimeSec - PreRollSec <= group[^1].TimeSec + PostRollSec)
+            var group = new List<ClipEvent> { events[0] };
+            foreach (var e in events.Skip(1))
             {
-                group.Add(e);
+                if (e.TimeSec - PreRollSec <= group[^1].TimeSec + PostRollSec)
+                {
+                    group.Add(e);
+                }
+                else
+                {
+                    windows.Add(ToWindow(windows.Count, group, match.DurationSec));
+                    group = [e];
+                }
             }
-            else
-            {
-                windows.Add(ToWindow(windows.Count, group, match.DurationSec));
-                group = [e];
-            }
+            windows.Add(ToWindow(windows.Count, group, match.DurationSec));
         }
-        windows.Add(ToWindow(windows.Count, group, match.DurationSec));
+        windows.AddRange(await FightWindowsAsync(match, myPid.Value, windows.Count, ct));
 
-        return new ClipPlan(matchId, match.GameVersion, match.DurationSec, windows);
+        return windows.Count > 0 ? new ClipPlan(matchId, match.GameVersion, match.DurationSec, windows) : null;
+    }
+
+    /// The team's skirmishes/teamfights the player was NOT in, filmed from a
+    /// surviving fighter's POV (the analyzer picks who). The player's own
+    /// screen never showed these - a replay clip is the only footage of them.
+    /// Duels elsewhere stay unclipped: solo trades are noise at review time.
+    private async Task<List<ClipWindow>> FightWindowsAsync(Data.Match match, int myPid, int nextIndex, CancellationToken ct)
+    {
+        if (match.FightsJson is not { Length: > 0 }) return [];
+        List<TimelineAnalyzer.Fight>? fights;
+        try
+        {
+            fights = JsonSerializer.Deserialize<List<TimelineAnalyzer.Fight>>(match.FightsJson, Json);
+        }
+        catch
+        {
+            return [];
+        }
+        // Significance gate: teamfights always; skirmishes only when 2+ kills
+        // changed hands - a lone jungle gank elsewhere is a marker, not a clip.
+        var wanted = (fights ?? [])
+            .Where(f => !f.Participated && f.CameraParticipantId > 0
+                && (f.Kind is "teamfight" || (f.Kind is "skirmish" && f.AllyKills + f.EnemyKills >= 2)))
+            .ToList();
+        if (wanted.Count == 0) return [];
+
+        var fighters = await db.Participants.AsNoTracking()
+            .Where(p => p.MatchId == match.Id)
+            .Select(p => new { p.ParticipantId, p.RiotId, p.Champion })
+            .ToListAsync(ct);
+
+        var windows = new List<ClipWindow>();
+        foreach (var f in wanted)
+        {
+            var camera = fighters.FirstOrDefault(p => p.ParticipantId == f.CameraParticipantId);
+            if (camera is null) continue;
+            windows.Add(new ClipWindow(
+                nextIndex + windows.Count,
+                Math.Max(0, f.StartSec - PreRollSec),
+                (int)Math.Min(match.DurationSec, f.EndSec + PostRollSec),
+                $"{f.Kind} {f.Allies}v{f.Enemies} · {f.Result}",
+                [new ClipEvent("fight", f.StartSec)],
+                Kind: "fight",
+                CameraName: camera.RiotId is { Length: > 0 } riotId ? riotId.Split('#')[0] : null,
+                CameraChampion: camera.Champion));
+        }
+        return windows;
     }
 
     private static ClipWindow ToWindow(int index, List<ClipEvent> events, double durationSec)

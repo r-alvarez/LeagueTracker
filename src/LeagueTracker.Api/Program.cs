@@ -271,7 +271,7 @@ app.MapGet("/api/matches/{id}/clips", async (string id, ClipService clips, Cance
         ? []
         : plan.Windows.Select(w => new
         {
-            w.Index, w.Label, w.StartSec, w.EndSec, w.Events,
+            w.Index, w.Label, w.StartSec, w.EndSec, w.Events, w.Kind, w.CameraChampion,
             Url = $"/api/matches/{id}/clips/{w.Index}",
             Ready = clips.ClipPath(id, w.Index) is not null,
         }));
@@ -481,20 +481,22 @@ app.MapPost("/api/render/next", async (ClipService clips, FullGameService full, 
 
     foreach (var matchId in candidates)
     {
-        // A match with VOD review data (recorded mp4 or a YouTube link) earns
-        // no automatic clip renders - the real game is already watchable and
-        // the review UI hides clips behind it. Matches without VOD data
-        // (agentless trackers, unrecorded queues, failed captures) still
-        // render, and explicit full-game requests below are always honored.
-        if (vods.HasVod(matchId) || vods.ReadLink(matchId) is not null) continue;
         if (clips.FailReason(matchId) is not null || leases.IsLeased($"clips:{matchId}")) continue;
+        // A match with VOD review data (recorded mp4 or a YouTube link) earns
+        // only its "fight" windows - the team fights the player was NOT in,
+        // which the VOD's own POV can never show. Their kill/death windows
+        // would duplicate footage already on YouTube. Matches without VOD
+        // data (agentless trackers, unrecorded queues, failed captures)
+        // render everything, and explicit full-game requests below always run.
+        var vodCovered = vods.HasVod(matchId) || vods.ReadLink(matchId) is not null;
         // The saved plan is the manifest existing clips were rendered against
         // - recomputing could renumber windows and mislabel surviving files.
         var plan = await clips.LoadPlanAsync(matchId, ct) ?? await clips.PlanAsync(matchId, ct);
         if (plan is not { Windows.Count: > 0 }) continue;
         // Only windows without an mp4: deleting a single bad clip on the match
         // page re-renders just that window, keeping the good ones.
-        var missing = plan.Windows.Where(w => clips.ClipPath(matchId, w.Index) is null).ToList();
+        var missing = plan.Windows.Where(w => clips.ClipPath(matchId, w.Index) is null
+            && (!vodCovered || w.Kind is "fight")).ToList();
         if (missing.Count == 0) continue;
         if (!leases.TryClaim($"clips:{matchId}", agent)) continue;
         await clips.SavePlanAsync(plan, ct);
