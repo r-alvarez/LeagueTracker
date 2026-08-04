@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
-import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts, VodStatus } from '../types'
+import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts, VodMoment, VodStatus } from '../types'
 import { sourceLabel, unitKind, useAbilityLabels, useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
 import { ItemIcon, PerkIcon, UnitGlyph } from '../components/GameIcons'
@@ -583,9 +583,21 @@ export default function MatchDetail() {
   const hasVodCard = !!(vod && (vod.exists || vod.youtubeUrl || vod.meta || vod.apm))
   // Moments come straight from the match timeline, not from the clip plan -
   // clips may never render for a recorded game, and kills belong here too.
-  const vodMoments = [
+  // Fights ride along so the parts of the game the player never touched
+  // (the team's 3v3 across the map) are still one click away; duels are
+  // left out - my own duels are already the kill/death markers, and other
+  // lanes' solo trades are noise at review time.
+  const vodMoments: VodMoment[] = [
     ...kills.map(k => ({ kind: 'kill' as const, timeSec: k.timeSec })),
     ...deaths.map(d => ({ kind: 'death' as const, timeSec: d.timeSec })),
+    ...(detail.fights ?? [])
+      .filter(f => f.kind !== 'duel')
+      .map(f => ({
+        kind: 'fight' as const,
+        timeSec: f.startSec,
+        label: `${f.kind} ${f.allies}v${f.enemies} · ${f.result}${f.convertedObjective ? ' · converted' : ''}${f.participated ? '' : ' · without you'}`,
+        tone: (f.result === 'won' ? 'win' : f.result === 'lost' ? 'loss' : 'neutral') as VodMoment['tone'],
+      })),
   ].sort((a, b) => a.timeSec - b.timeSec)
 
   return (

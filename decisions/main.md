@@ -787,3 +787,17 @@ and unlinking a match's VOD makes its renders eligible again while its
 replay is still archived. Explicit full-game render requests stay honored:
 user intent outranks the heuristic, and the UI already hides that button
 where a VOD exists.
+
+## 2026-08-04 — Fights become VOD jump markers; VOD card sheds debug chrome
+
+**The analyzer's fight clusters ride the match detail payload** (a FightsJson
+pass-through - no analyzer change, no reprocess) **and the VOD card marks
+every skirmish and teamfight as a jump point**, participated or not: the
+review question "what was the team's 3v3 doing while I split?" is now one
+click instead of scrubbing. Labels carry size/result/conversion ("teamfight
+4v5 · lost · without you"); marker tone follows the fight's result (drawn
+fights are neutral - a green glyph on a lost fight would lie). Duels are
+deliberately excluded: my own duels already exist as kill/death markers, and
+other lanes' solo trades are noise at review time. The card also drops the
+resolution/encoder line and "played as" - single-account trackers state the
+obvious, and the encoder is agent.log material.

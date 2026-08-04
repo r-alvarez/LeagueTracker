@@ -287,8 +287,25 @@ export interface MatchDetail {
   participants: Participant[]
   deaths: DeathEvent[]
   kills: KillMoment[]
+  fights: FightCluster[] | null
   objectives: ObjectiveEventDto[]
   itemEvents: { timeSec: number; kind: string; itemId: number }[]
+}
+
+/** The analyzer's fight clusters - either team's, whether or not I was in
+ *  them - as persisted per match (camelCase FightsJson pass-through). */
+export interface FightCluster {
+  startSec: number
+  endSec: number
+  kind: 'duel' | 'skirmish' | 'teamfight'
+  result: 'won' | 'lost' | 'draw'
+  participated: boolean
+  allies: number
+  enemies: number
+  allyKills: number
+  enemyKills: number
+  goldSwing: number
+  convertedObjective: boolean
 }
 
 export interface AnalyticsSummary {
@@ -385,6 +402,15 @@ export interface ChallengeBenchmark {
 export interface ClipEvent {
   kind: 'kill' | 'death'
   timeSec: number
+}
+
+/** A jump point on the VOD review card. Fights carry a label ("teamfight
+ *  4v5 · lost") and a tone so the marker can say more than kill/death. */
+export interface VodMoment {
+  kind: 'kill' | 'death' | 'fight'
+  timeSec: number
+  label?: string
+  tone?: 'win' | 'loss' | 'neutral'
 }
 
 export interface ClipInfo {

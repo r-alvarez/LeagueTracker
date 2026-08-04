@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api'
-import type { ClipEvent, DeathEvent, VodStatus } from '../types'
+import type { DeathEvent, VodMoment, VodStatus } from '../types'
 
 const fmtClock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
+
+const momentGlyph = (e: VodMoment) => (e.kind === 'death' ? '✖' : e.kind === 'fight' ? '⚡' : '⚔')
+
+// Kills read as wins, deaths as losses; fights carry their own tone (a drawn
+// 3v3 is neither) so the strip stays honest about how each fight went.
+const momentColor = (e: VodMoment) =>
+  e.kind === 'death' || e.tone === 'loss' ? 'var(--loss, #e5484d)'
+  : e.tone === 'neutral' ? 'var(--muted, #9aa4af)'
+  : 'var(--win, #30a46c)'
 
 const youtubeId = (url: string) => /(?:youtu\.be\/|[?&]v=|shorts\/)([A-Za-z0-9_-]{11})/.exec(url)?.[1] ?? null
 
@@ -24,15 +33,15 @@ function ApmTooltip({ active, payload }: ApmTooltipProps) {
 }
 
 /// The game as it was played, reviewed in place: video (tracker-hosted mp4
-/// OR the player's own YouTube upload - the storage-free mode), kill/death
-/// jump markers mapped through the recording's clock map, and the input
-/// telemetry as a clickable APM line. Renders nothing when the match has no
-/// recording data at all.
+/// OR the player's own YouTube upload - the storage-free mode), kill/death/
+/// fight jump markers mapped through the recording's clock map, and the
+/// input telemetry as a clickable APM line. Renders nothing when the match
+/// has no recording data at all.
 export default function VodReview({ matchId, vod, onChange, moments, deaths = [] }: {
   matchId: string
   vod: VodStatus | null
   onChange: (v: VodStatus) => void
-  moments: ClipEvent[]
+  moments: VodMoment[]
   deaths?: DeathEvent[]
 }) {
   const [duration, setDuration] = useState<number | null>(null)
@@ -117,7 +126,7 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
     }
   })
 
-  const allMoments: ClipEvent[] = moments.length > 0
+  const allMoments: VodMoment[] = moments.length > 0
     ? moments
     : deaths.map(d => ({ kind: 'death', timeSec: d.timeSec }))
 
@@ -194,7 +203,7 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
                 <button
                   key={i}
                   className="action"
-                  title={`${e.kind} at ${fmtClock(e.timeSec)} — click to watch`}
+                  title={`${e.label ?? e.kind} at ${fmtClock(e.timeSec)} — click to watch`}
                   onClick={() => jumpToMoment(e.timeSec)}
                   style={{
                     position: 'absolute',
@@ -202,10 +211,10 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
                     transform: 'translateX(-50%)',
                     padding: '0 4px',
                     lineHeight: '20px',
-                    color: e.kind === 'death' ? 'var(--loss, #e5484d)' : 'var(--win, #30a46c)',
+                    color: momentColor(e),
                   }}
                 >
-                  {e.kind === 'death' ? '✖' : '⚔'}
+                  {momentGlyph(e)}
                 </button>
               ))}
             </div>
@@ -273,8 +282,8 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
                     onClick={() => jumpToMoment(e.timeSec)}
                     style={{ display: 'flex', justifyContent: 'space-between', gap: 8, textAlign: 'left', padding: '2px 8px' }}
                   >
-                    <span style={{ color: e.kind === 'death' ? 'var(--loss, #e5484d)' : 'var(--win, #30a46c)' }}>
-                      {e.kind === 'death' ? '✖ death' : `⚔ ${e.kind}`}
+                    <span style={{ color: momentColor(e) }}>
+                      {momentGlyph(e)} {e.label ?? e.kind}
                     </span>
                     <span className="mut">{fmtClock(e.timeSec)}</span>
                   </button>
@@ -288,11 +297,9 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
             </div>
           )}
 
-          <p className="mut sm-text" style={{ margin: 0 }}>
-            {vod.meta && <>{vod.meta.width}×{vod.meta.height}@{vod.meta.fps} ({vod.meta.encoder})<br /></>}
-            {vod.sizeMb !== null && vod.sizeMb !== undefined && <>{vod.sizeMb} MB on the tracker<br /></>}
-            {vod.meta?.activePlayer && <>played as {vod.meta.activePlayer}</>}
-          </p>
+          {vod.sizeMb !== null && vod.sizeMb !== undefined && (
+            <p className="mut sm-text" style={{ margin: 0 }}>{vod.sizeMb} MB on the tracker</p>
+          )}
           {hasHostedVideo && (
             <button
               className="action"

@@ -701,6 +701,12 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, ReplayArch
             k.TimeSec, GameTime = $"{k.TimeSec / 60:00}:{k.TimeSec % 60:00}",
             Victim = champByPid.GetValueOrDefault(k.VictimParticipantId),
         }),
+        // The analyzer's fight clusters (duel/skirmish/teamfight, either
+        // team's, participated or not) - the VOD card marks them as jump
+        // points so fights the player never touched are still reviewable.
+        Fights = match.FightsJson is { Length: > 0 }
+            ? System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(match.FightsJson)
+            : (object?)null,
         Objectives = match.ObjectiveEvents.Select(o => new
         {
             o.TimeSec, GameTime = $"{o.TimeSec / 60:00}:{o.TimeSec % 60:00}",
