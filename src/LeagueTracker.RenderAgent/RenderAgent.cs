@@ -298,8 +298,18 @@ public sealed class RenderAgent(AgentConfig config)
         await tracker.DownloadReplayAsync(job, roflPath, ct);
 
         Process? game = null;
-        string? cameraName = null;
+        // Verified selection names per follow target, valid for one game
+        // process (the verification writes against the live process). Fight
+        // windows follow other fighters, so a job can hold several targets.
+        var verifiedNames = new Dictionary<string, string?>();
         using var replayApi = new ReplayApiClient();
+
+        async Task<string?> CameraNameForAsync(string? name, string? champion)
+        {
+            var key = $"{name}|{champion}";
+            if (verifiedNames.TryGetValue(key, out var cached)) return cached;
+            return verifiedNames[key] = await ResolveCameraNameAsync(replayApi, name, champion, ct);
+        }
 
         async Task<Process> StartReplayAsync()
         {
@@ -313,7 +323,8 @@ public sealed class RenderAgent(AgentConfig config)
             // UI assert (target frame, no side frames, fog flag) - once per
             // game process; a relaunch redoes it because the fresh process
             // starts from the persisted UI state again.
-            cameraName = await ResolveCameraNameAsync(replayApi, job, ct);
+            verifiedNames.Clear();
+            await CameraNameForAsync(job.MyName, job.MyChampion);
             return proc;
         }
 
@@ -386,6 +397,25 @@ public sealed class RenderAgent(AgentConfig config)
                     throw new RenderPostponedException($"player entered {playerPhase} mid-render");
                 }
 
+                // A "fight" window films from another fighter's POV - resolve
+                // its own dropdown slot and selection name. A fight target the
+                // replay list doesn't know is bad data, not a transient: skip
+                // the window, keep the job (the player's own windows already
+                // validated their slot above).
+                var targetChampion = window.CameraChampion is { Length: > 0 } wc ? wc : myChampion;
+                var targetSlotIndex = window.CameraChampion is { Length: > 0 }
+                    ? players.FindIndex(p => ReplayApiClient.ChampionMatches(p.Champion, targetChampion))
+                    : slot.Index;
+                if (targetSlotIndex < 0)
+                {
+                    Log.Warn($"Window {window.Index} ({window.Label}): camera target \"{targetChampion}\" is not in the replay's player list - skipping this window");
+                    skippedWindows.Add(window.Index);
+                    continue;
+                }
+                var windowSlot = (Index: targetSlotIndex, Blue: players[targetSlotIndex].Blue);
+                var windowCameraName = await CameraNameForAsync(
+                    window.CameraName is { Length: > 0 } wn ? wn : job.MyName, targetChampion);
+
                 var output = Path.Combine(_workDir, $"{job.MatchId}-w{window.Index:00}.mp4");
                 var duration = Math.Max(2, window.EndSec - window.StartSec);
                 var preRoll = Math.Max(0, window.StartSec - EngagePreRollSec);
@@ -399,7 +429,7 @@ public sealed class RenderAgent(AgentConfig config)
                     await WaitForSeekAsync(replayApi, preRoll, ct);
                     await replayApi.SetPlaybackAsync(time: null, paused: false, speed: 1, ct);
 
-                    engaged = await EngageCameraAsync(replayApi, slot, attempt, cameraName, ct);
+                    engaged = await EngageCameraAsync(replayApi, windowSlot, attempt, windowCameraName, ct);
                     if (!engaged)
                     {
                         if (attempt >= 3) break;
@@ -510,13 +540,13 @@ public sealed class RenderAgent(AgentConfig config)
     /// ID formats vary - so try what the game itself reports for the tracked
     /// player (champion matches first) and keep the first that verifiably
     /// sticks. Falls back to the server-sent name with a warning.
-    private static async Task<string?> ResolveCameraNameAsync(ReplayApiClient api, RenderJob job, CancellationToken ct)
+    private static async Task<string?> ResolveCameraNameAsync(ReplayApiClient api, string? targetName, string? targetChampion, CancellationToken ct)
     {
         // The player list can lag the playback API by a few seconds while the
         // game finishes loading - retry before giving up on a verified name.
         for (var attempt = 1; attempt <= 5; attempt++)
         {
-            foreach (var name in await api.GetCameraCandidatesAsync(job.MyName, job.MyChampion, ct))
+            foreach (var name in await api.GetCameraCandidatesAsync(targetName, targetChampion, ct))
             {
                 await api.FollowPlayerAsync(name, ct);
                 if (string.Equals(await api.GetSelectionAsync(ct), name, StringComparison.OrdinalIgnoreCase))
@@ -529,10 +559,10 @@ public sealed class RenderAgent(AgentConfig config)
         }
         // Unverified names must not reach the Y toggle - without a selection it
         // flips the replay into the directed camera. Fog still gets a chance.
-        if (job.MyName is { Length: > 0 })
+        if (targetName is { Length: > 0 })
         {
-            Log.Warn($"Could not verify a selection for \"{job.MyName}\" - recording with a free camera");
-            await api.FollowPlayerAsync(job.MyName, ct);
+            Log.Warn($"Could not verify a selection for \"{targetName}\" - recording with a free camera");
+            await api.FollowPlayerAsync(targetName, ct);
         }
         return null;
     }
