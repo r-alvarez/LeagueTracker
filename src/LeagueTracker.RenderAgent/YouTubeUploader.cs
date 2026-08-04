@@ -31,7 +31,10 @@ public sealed record UploadResult(UploadOutcome Outcome, string? Url = null, str
 /// the last acknowledged byte instead of re-sending gigabytes.
 public sealed class YouTubeUploader(AgentConfig config)
 {
-    private const string Scope = "https://www.googleapis.com/auth/youtube.upload";
+    /// upload alone suffices for videos.insert; readonly is only so the auth
+    /// flow's channels.list can NAME the channel it just bound (upload-only
+    /// tokens get 403 insufficientPermissions on any read, learned live).
+    private const string Scope = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly";
     private const string TokenEndpoint = "https://oauth2.googleapis.com/token";
     private const string UploadEndpoint =
         "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status";
