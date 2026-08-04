@@ -11,7 +11,14 @@ try { File.Delete(RenderAgent.StopSentinelPath); } catch { /* fine - likely abse
 
 try
 {
-    if (Environment.GetEnvironmentVariable("LT_RECORD_TEST") is "1" or "true")
+    if (args.Contains("--youtube-auth"))
+    {
+        // One-time interactive consent for YouTube uploads: opens the
+        // browser, stores the refresh token next to the exe, exits.
+        return await YouTubeUploader.AuthorizeAsync(config);
+    }
+
+    if (Environment.GetEnvironmentVariable("LT_RECORD_TEST") is ("1" or "true" or "seg" or "wgc") and var testMode)
     {
         // Deliberately before tracker validation - the capture pipeline has
         // no server dependency, and the test must run with the NAS down too.
@@ -20,7 +27,9 @@ try
             Log.Error("ffmpeg not found - install it or set FfmpegPath");
             return 1;
         }
-        await GameRecorder.RecordTestAsync(config, ff, cts.Token);
+        if (testMode is "seg") await GameRecorder.SegmentTestAsync(config, ff, cts.Token);
+        else if (testMode is "wgc") await GameRecorder.WgcTestAsync(config, ff, cts.Token);
+        else await GameRecorder.RecordTestAsync(config, ff, cts.Token);
         return 0;
     }
 

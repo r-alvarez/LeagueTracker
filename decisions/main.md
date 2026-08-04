@@ -640,6 +640,53 @@ proximity counts are known-unreliable inside fight clusters, so cluster context
 always wins over frame counts.
 
 
+## 2026-07-29 — One game, one file: the recorder survives capture death
+
+**Diagnosis of a week of split/lost VODs** (agent.log, 23-28 Jul): every
+failure was ffmpeg ending on its own 6-38s into the game, then the restarted
+capture minting "Game N+1" for the tail of game N. Two mechanisms:
+
+1. `-shortest` made ffmpeg stop when EITHER input ended - so the audio pipe
+   dying ended the whole video recording with exit code 0, which the
+   "failed early" check (exit != 0) waved through as a complete 0-minute
+   game. Desktop Duplication (ddagrab) also cannot survive the display mode
+   switch of alt-tabbing an exclusive-fullscreen game, which is exactly what
+   happens in the first minute of most games.
+2. Game numbers were counted from the mp4s in the folder, so recycling or
+   renaming files between sessions made a later game reuse - and OVERWRITE -
+   an earlier number (happened 25 and 27 Jul).
+
+**The fix is supervision plus segments, not a sturdier capture**: ddagrab's
+session loss is a Windows fact (OBS-class recorders own a capture engine to
+get around it; not worth it for this). Instead each capture attempt is a
+numbered segment ({name}.segNN.part.mp4) of ONE game whose name is allocated
+once per LCU match id; when the game ends the segments are remuxed and
+concatenated (stream copy, seconds) into a single mp4, with clock-map and
+input-telemetry timestamps offset onto the joined timeline. A seam of a few
+seconds replaces a lost half-game.
+
+- `-shortest` is gone; a dead video stream is detected by ffmpeg's own
+  `-progress` frame counter stalling (~12s, vs ~60s of the old file-growth
+  heuristic), and a dying audio writer pads silence forever rather than
+  EOF-ing the pipe (audio must never end a video recording).
+- Game numbers come from max(folder scan, per-day ledger in
+  metadata/game-numbers.json); a game that never produced footage hands its
+  number back so days stay gapless.
+- {name}.inflight.json persists per-game state after every segment: a crash,
+  deploy or agent restart resumes the SAME game - even appending onto an
+  already-finalized mp4 (it re-enters as segment 1 and re-concatenates, and
+  the stale .uploaded stamp is dropped so trackers get the full version).
+- Startup failures retry 4x with backoff before the recorder sits a game out
+  (transient mode-switch windows heal; deterministic breakage still
+  hard-fails per the no-postpone-loop rule).
+- LT_RECORD_TEST=seg smoke-tests the segment/concat/merge path end to end
+  without a game.
+
+**Rejected:** appending to the open mp4 (no such thing mid-write without a
+recorder-owned muxer); gdigrab as a mode-switch-proof fallback (BitBlt of a
+D3D game is black); trimming frozen tails at the seam (complexity for
+seconds of dead video the join already bounds).
+
 ## 2026-07-29 — DDragon variant sets; YouTube links for any game
 
 **Champion lookups treat underscore DDragon ids ("Jade_Ezreal") as variants
@@ -659,4 +706,67 @@ links for any known match. Unrecorded games now get a compact link box; once
 linked, the full review card takes over. Without a recording clock map,
 moment-jumps assume the video starts at game clock 0:00 and say so
 (approximate jumps beat dead buttons).
->>>>>>> 1841464 (Decisions: variant champion sets never shadow real ones; link-any-game VODs)
+
+## 2026-07-29 — Plan B capture engine: WGC behind a config flag
+
+**Why a second engine exists**: ddagrab's fragility is structural - Desktop
+Duplication sessions die on exclusive-fullscreen display switches, and ffmpeg
+has no recovery. Ascent never breaks because it bundles OBS (ascent-obs.exe =
+rebranded libobs), whose capture is composition/hook based. Segments make
+ddagrab's deaths cosmetic, but Ruben's trust needs an engine where they don't
+happen at all - available BEFORE the next failure, not engineered after it.
+
+**`CaptureBackend` config ("ddagrab" default | "wgc")**: the wgc path records
+through ScreenRecorderLib 6.6 (Windows Graphics Capture -> Media Foundation
+hardware H264, fragmented mp4) - DWM-composited capture that mode switches and
+alt-tab cannot interrupt. Video only: game-process-only audio stays ours
+(ProcessAudioCapture), paced PCM written beside the segment and muxed to AAC
+at finalize - whole-desktop loopback (Ascent included) can't promise
+Discord-free audio. Everything downstream (segments, naming ledger, inflight
+resume, telemetry merge, uploads) is engine-agnostic and unchanged; WGC
+startup failure falls back to ddagrab per segment. MF quality = 96 - cq
+(cq 26 -> 70; ~7Mbps static desktop 1440p60, bt709 tagged). Supervision stays
+on for wgc too (growth watchdog) - engines can die quietly regardless.
+LT_RECORD_TEST=wgc smoke-tests the whole path; LT_CAPTURE_BACKEND overrides
+per run. Gotchas burned in: ScreenRecorderLib is C++/CLI, so the csproj pins
+Platform x64 and the dll must ship LOOSE next to the single-file exe
+(BadImageFormatException from inside the bundle) - deploys copy exe + pdb +
+ScreenRecorderLib.dll.
+
+**Rejected:** replacing ddagrab outright (a week-hardened path traded for an
+unsoaked one); WGC frames piped raw into ffmpeg (~900MB/s memcpy tax at
+1440p60 vs ScreenRecorderLib's all-GPU pipeline); bundling headless OBS like
+Ascent (heaviest dependency for the same capture class WGC provides).
+
+## 2026-08-04 — Recordings publish themselves to YouTube
+
+**The agent uploads each finished recording to YouTube and registers the
+link with the owning tracker** - the storage-free review mode existed end to
+end except for a human uploading the mp4 in YouTube Studio and pasting the
+link into the match page, daily. YouTube has no service accounts, so the
+uploader acts as the channel via OAuth: `--youtube-auth` runs the one-time
+browser consent (loopback + PKCE, hand-rolled - no Google SDK for two
+endpoints) and stores the refresh token next to the exe; the OAuth app must
+be "In production" or Google expires that token every 7 days. Uploads use
+the resumable protocol with the session URI persisted per game
+(`.ytsession.json` sidecar), so a game launch, deploy or dead wifi resumes
+from the last acknowledged byte instead of re-sending gigabytes. Titles come
+from the existing name ledger minus separators ("Road to Platinum 03 Aug
+2026 Game 2") - byte-identical to the hand-made uploads they replace.
+
+**Delivery is three independent files-as-truth stamps** (`.uploaded` =
+tracker has the sidecars/VOD, `.youtube.txt` = the watch URL, `.linked` =
+the owning tracker got the link), each retried by the same idle sweep that
+already redelivered VODs; link routing reuses the try-every-tracker
+ownership rule (404 = not yours). Failure taxonomy per the agent's rules:
+quota exhaustion (1600 units/upload against a 10k/day default = ~6/day,
+excess queues to tomorrow) and network are postponements; a revoked/expired
+grant or a 4xx reject is deterministic - `.ytfailed.txt` stops the retry
+loop and the log says so loudly.
+
+**Uploads never fight a game for the machine**: they only start in idle
+sweep windows, and the chunk loop (16MB pieces) aborts the moment a League
+game process exists - worst case one chunk of overlap with a loading screen.
+Known limitation accepted: unaudited Google API projects get uploads forced
+private regardless of the requested visibility; the audit exception is a
+console form, not code.
