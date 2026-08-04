@@ -181,6 +181,24 @@ public sealed class TrackerClient
         return true;
     }
 
+    /// The match's already-registered YouTube link, if this tracker has one.
+    /// Null = no link, unknown match, or unreachable tracker (the caller's
+    /// duplicate-upload guard just doesn't trigger).
+    public async Task<string?> GetVodLinkAsync(string matchId, CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _http.GetAsync($"{ServerUrl}/api/matches/{matchId}/vod/status", ct);
+            if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            return doc.RootElement.TryGetProperty("youtubeUrl", out var url) ? url.GetString() : null;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
     /// Registers a match's YouTube link (the review player embeds it). False
     /// when this tracker doesn't know the match - same ownership routing as
     /// the VOD upload; the caller tries the next tracker.

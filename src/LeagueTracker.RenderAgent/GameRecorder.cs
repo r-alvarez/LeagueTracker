@@ -522,6 +522,24 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         if (File.Exists(M(".ytfailed.txt"))) return true; // deterministic reject - a human decides, not a retry loop
         if (!File.Exists(M(".youtube.txt")))
         {
+            // A link already on a tracker means this game was published by
+            // hand (or by an earlier agent incarnation whose stamp is gone) -
+            // adopt that link instead of minting a duplicate video. Learned
+            // live 04 Aug 2026: the first sweep re-uploaded a hand-published
+            // backlog game before this guard existed.
+            foreach (var tracker in _trackers)
+            {
+                if (await tracker.GetVodLinkAsync(matchId, ct) is { Length: > 0 } existing)
+                {
+                    File.WriteAllText(M(".youtube.txt"), existing);
+                    File.WriteAllText(M(".linked"), tracker.ServerUrl);
+                    Log.Info($"Adopted existing YouTube link for {baseName} from {tracker.ServerUrl}");
+                    break;
+                }
+            }
+        }
+        if (!File.Exists(M(".youtube.txt")))
+        {
             var mp4 = Path.Combine(RecordingsDir, baseName + ".mp4");
             if (!File.Exists(mp4)) return true; // recycled before it ever published - nothing to upload
             // The title is the file name minus its separators - "Road to
