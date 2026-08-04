@@ -770,3 +770,20 @@ game process exists - worst case one chunk of overlap with a loading screen.
 Known limitation accepted: unaudited Google API projects get uploads forced
 private regardless of the requested visibility; the audit exception is a
 console form, not code.
+
+## 2026-08-04 — VOD-covered matches stop earning automatic clip renders
+
+**A match that already has VOD review data (recorded mp4 or a YouTube link)
+is skipped by the automatic clip planner** in /api/render/next. The 24 Jul
+"clips still render as backup" stance was priced for a manual, fragile
+YouTube step; with auto-publish live, every recorded game has the real
+footage on YouTube plus a local archive copy, and the invisible third copy
+(the UI already hides clips behind the VOD card) still cost idle-time
+renders, replay downloads and disk per game. The gate is per-match and
+late-bound (checked each time an agent asks for work, and sidecars reach the
+tracker within a second of game end), so agentless trackers (Ben), queues
+outside RecordQueues, and failed captures keep rendering exactly as before —
+and unlinking a match's VOD makes its renders eligible again while its
+replay is still archived. Explicit full-game render requests stay honored:
+user intent outranks the heuristic, and the UI already hides that button
+where a VOD exists.

@@ -459,7 +459,7 @@ app.MapGet("/api/render/queue", async (ClipService clips, FullGameService full, 
 // review loop), then explicit full-game requests. The plan manifest is written
 // at claim time so uploads can be validated against it.
 app.MapPost("/api/render/next", async (ClipService clips, FullGameService full, RenderLeaseService leases,
-    ReplayArchiveService replays, LeagueDbContext db, string agent = "render-agent", CancellationToken ct = default) =>
+    ReplayArchiveService replays, VodService vods, LeagueDbContext db, string agent = "render-agent", CancellationToken ct = default) =>
 {
     // The agent locks the replay camera onto this player (names as they were at
     // game time, from the stored participant row).
@@ -481,6 +481,12 @@ app.MapPost("/api/render/next", async (ClipService clips, FullGameService full, 
 
     foreach (var matchId in candidates)
     {
+        // A match with VOD review data (recorded mp4 or a YouTube link) earns
+        // no automatic clip renders - the real game is already watchable and
+        // the review UI hides clips behind it. Matches without VOD data
+        // (agentless trackers, unrecorded queues, failed captures) still
+        // render, and explicit full-game requests below are always honored.
+        if (vods.HasVod(matchId) || vods.ReadLink(matchId) is not null) continue;
         if (clips.FailReason(matchId) is not null || leases.IsLeased($"clips:{matchId}")) continue;
         // The saved plan is the manifest existing clips were rendered against
         // - recomputing could renumber windows and mislabel surviving files.
