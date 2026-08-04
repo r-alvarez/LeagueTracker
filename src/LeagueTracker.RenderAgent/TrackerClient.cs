@@ -181,6 +181,19 @@ public sealed class TrackerClient
         return true;
     }
 
+    /// Registers a match's YouTube link (the review player embeds it). False
+    /// when this tracker doesn't know the match - same ownership routing as
+    /// the VOD upload; the caller tries the next tracker.
+    public async Task<bool> SetVodLinkAsync(string matchId, string url, CancellationToken ct)
+    {
+        using var content = new StringContent(JsonSerializer.Serialize(new { url }),
+            System.Text.Encoding.UTF8, "application/json");
+        using var resp = await _http.PostAsync($"{ServerUrl}/api/matches/{matchId}/vod/link", content, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return false;
+        resp.EnsureSuccessStatusCode();
+        return true;
+    }
+
     public async Task CompleteAsync(RenderJob job, CancellationToken ct)
     {
         using var resp = await _http.PostAsync($"{ServerUrl}/api/render/{job.MatchId}/complete?kind={job.Kind}", null, ct);

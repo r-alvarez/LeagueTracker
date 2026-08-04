@@ -11,6 +11,13 @@ try { File.Delete(RenderAgent.StopSentinelPath); } catch { /* fine - likely abse
 
 try
 {
+    if (args.Contains("--youtube-auth"))
+    {
+        // One-time interactive consent for YouTube uploads: opens the
+        // browser, stores the refresh token next to the exe, exits.
+        return await YouTubeUploader.AuthorizeAsync(config);
+    }
+
     if (Environment.GetEnvironmentVariable("LT_RECORD_TEST") is ("1" or "true" or "seg" or "wgc") and var testMode)
     {
         // Deliberately before tracker validation - the capture pipeline has

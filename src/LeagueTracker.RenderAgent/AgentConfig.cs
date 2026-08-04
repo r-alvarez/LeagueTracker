@@ -80,6 +80,21 @@ public sealed class AgentConfig
     /// (the skip log names their id so they can be added here).
     public string RecordQueues { get; set; } = "ranked-solo,normal";
 
+    /// Publish each finished recording to the player's YouTube channel and
+    /// register the link with the owning tracker - the storage-free review
+    /// mode with the manual upload-and-paste step automated away. Needs a
+    /// Google OAuth "Desktop app" client (id/secret below) plus a one-time
+    /// "--youtube-auth" browser consent (refresh token lands next to the exe).
+    /// Note: unaudited Google API projects get their uploads forced private
+    /// regardless of the visibility asked for, until Google's audit clears
+    /// the project.
+    public bool YouTubeUpload { get; set; }
+    public string YouTubeClientId { get; set; } = "";
+    public string YouTubeClientSecret { get; set; } = "";
+
+    /// unlisted (default), private, or public.
+    public string YouTubeVisibility { get; set; } = "unlisted";
+
     /// Cloudflare Access service token (Zero Trust > Access > Service Auth) -
     /// lets the agent through the Access wall the trackers sit behind. Blank =
     /// no Access in front (dev against localhost).
@@ -112,6 +127,9 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_RECORD_QUEUES") is { Length: > 0 } queues) config.RecordQueues = queues;
         if (Environment.GetEnvironmentVariable("LT_RECORD_AUDIO") is { Length: > 0 } audio) config.RecordAudio = audio is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_CAPTURE_BACKEND") is { Length: > 0 } backend) config.CaptureBackend = backend;
+        if (Environment.GetEnvironmentVariable("LT_YOUTUBE_UPLOAD") is { Length: > 0 } yt) config.YouTubeUpload = yt is not ("0" or "false");
+        if (Environment.GetEnvironmentVariable("LT_YOUTUBE_CLIENT_ID") is { Length: > 0 } ytId) config.YouTubeClientId = ytId;
+        if (Environment.GetEnvironmentVariable("LT_YOUTUBE_CLIENT_SECRET") is { Length: > 0 } ytSecret) config.YouTubeClientSecret = ytSecret;
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_ID") is { Length: > 0 } cfId) config.CfAccessClientId = cfId;
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_SECRET") is { Length: > 0 } cfSecret) config.CfAccessClientSecret = cfSecret;
 

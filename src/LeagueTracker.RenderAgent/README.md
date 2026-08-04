@@ -81,6 +81,35 @@ start, one CPU-encoder retry (x264 veryfast) happens before giving up on
 that game. The game must be on the primary display (fullscreen or
 borderless both work - Desktop Duplication captures either).
 
+### Automatic YouTube publishing
+
+With `YouTubeUpload` on, every finished recording is uploaded to the
+authorized YouTube channel and the resulting link is registered with the
+tracker that owns the match - the storage-free review mode with zero manual
+steps. Uploads are resumable (one interrupted by a new game, a deploy or a
+dead connection continues from the last acknowledged byte) and pause the
+moment a game process appears; the recorder's idle sweeps pick them back up.
+The video title is the recording's file name minus its separators
+("Road to Platinum 03 Aug 2026 Game 2").
+
+One-time setup:
+
+1. Google Cloud Console: create a project, enable the **YouTube Data API
+   v3**, create an OAuth client ID of type **Desktop app**, and set the OAuth
+   consent screen to **In production** (left in "Testing", refresh tokens
+   expire after 7 days).
+2. Put the client id/secret in `appsettings.json` (`YouTubeClientId` /
+   `YouTubeClientSecret`) and set `"YouTubeUpload": true`.
+3. Run `LeagueTracker.RenderAgent.exe --youtube-auth` once and approve in the
+   browser **with the channel's Google account**. The refresh token lands in
+   `youtube-token.json` next to the exe; `agent.log` names the authorized
+   channel so a wrong-account consent is caught immediately.
+
+Caveats: the API prices an upload at 1600 of the default 10,000 daily quota
+units (~6 uploads/day - the excess just queues to the next day), and Google
+forces uploads from unaudited API projects to **private** regardless of
+`YouTubeVisibility` until the project passes their audit/exception process.
+
 ## Test/debug environment flags
 
 - `LT_MOCK_RENDER=1` - render ffmpeg test patterns instead of launching the

@@ -737,3 +737,36 @@ ScreenRecorderLib.dll.
 unsoaked one); WGC frames piped raw into ffmpeg (~900MB/s memcpy tax at
 1440p60 vs ScreenRecorderLib's all-GPU pipeline); bundling headless OBS like
 Ascent (heaviest dependency for the same capture class WGC provides).
+
+## 2026-08-04 — Recordings publish themselves to YouTube
+
+**The agent uploads each finished recording to YouTube and registers the
+link with the owning tracker** - the storage-free review mode existed end to
+end except for a human uploading the mp4 in YouTube Studio and pasting the
+link into the match page, daily. YouTube has no service accounts, so the
+uploader acts as the channel via OAuth: `--youtube-auth` runs the one-time
+browser consent (loopback + PKCE, hand-rolled - no Google SDK for two
+endpoints) and stores the refresh token next to the exe; the OAuth app must
+be "In production" or Google expires that token every 7 days. Uploads use
+the resumable protocol with the session URI persisted per game
+(`.ytsession.json` sidecar), so a game launch, deploy or dead wifi resumes
+from the last acknowledged byte instead of re-sending gigabytes. Titles come
+from the existing name ledger minus separators ("Road to Platinum 03 Aug
+2026 Game 2") - byte-identical to the hand-made uploads they replace.
+
+**Delivery is three independent files-as-truth stamps** (`.uploaded` =
+tracker has the sidecars/VOD, `.youtube.txt` = the watch URL, `.linked` =
+the owning tracker got the link), each retried by the same idle sweep that
+already redelivered VODs; link routing reuses the try-every-tracker
+ownership rule (404 = not yours). Failure taxonomy per the agent's rules:
+quota exhaustion (1600 units/upload against a 10k/day default = ~6/day,
+excess queues to tomorrow) and network are postponements; a revoked/expired
+grant or a 4xx reject is deterministic - `.ytfailed.txt` stops the retry
+loop and the log says so loudly.
+
+**Uploads never fight a game for the machine**: they only start in idle
+sweep windows, and the chunk loop (16MB pieces) aborts the moment a League
+game process exists - worst case one chunk of overlap with a loading screen.
+Known limitation accepted: unaudited Google API projects get uploads forced
+private regardless of the requested visibility; the audit exception is a
+console form, not code.

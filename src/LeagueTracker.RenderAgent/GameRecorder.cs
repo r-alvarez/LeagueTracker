@@ -42,6 +42,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
     private DateTime _lastSweep;
 
+    private readonly YouTubeUploader _youtube = new(config);
+
     private readonly HttpClient _liveClient = new(new HttpClientHandler
     {
         // Same self-signed local cert as the Replay API (same port, in fact).
@@ -103,6 +105,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                  (config.CaptureBackend.Trim().Equals("wgc", StringComparison.OrdinalIgnoreCase)
                      ? $"WGC + MF quality {Math.Clamp(96 - config.RecordQuality, 40, 95)})"
                      : $"ddagrab + NVENC cq {config.RecordQuality})"));
+        _youtube.ValidateAtStartup();
         _lastSweep = DateTime.UtcNow;
         try { await SweepUnuploadedAsync(ct); }
         catch (OperationCanceledException) { return; }
@@ -307,11 +310,16 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             Log.Info($"Recording complete: {state.BaseName}.mp4 ({state.Segments.Sum(seg => seg.VideoSec) / 60:0} min, {state.Segments.Count} segment(s))");
             // Customs/Practice Tool have no Riot match for a tracker to own -
             // those recordings are local-only, not eternal upload retries.
-            // A deploy stop skips the upload; the startup sweep delivers it.
-            if ((config.UploadVods || config.UploadVodSidecars) && state.MatchId is not null && !RenderAgent.StopRequested
-                && QueueCategories.GetValueOrDefault(state.QueueId ?? -1, "other") is not "custom")
+            // A deploy stop skips the deliveries; the startup sweep catches up.
+            var deliverable = state.MatchId is not null && !RenderAgent.StopRequested
+                && QueueCategories.GetValueOrDefault(state.QueueId ?? -1, "other") is not "custom";
+            if (deliverable && (config.UploadVods || config.UploadVodSidecars))
             {
-                await TryUploadVodAsync(state.MatchId, state.BaseName, ct);
+                await TryUploadVodAsync(state.MatchId!, state.BaseName, ct);
+            }
+            if (deliverable && _youtube.Enabled)
+            {
+                await TryPublishToYouTubeAsync(state.MatchId!, state.BaseName, ct);
             }
         }
         else
@@ -502,21 +510,108 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         Log.Info($"VOD {matchId}: no tracker accepted it yet (match not imported) - will retry");
     }
 
-    /// Recordings whose upload never landed (tracker down, match not yet
-    /// imported, agent killed): retried at startup, oldest first.
+    /// Uploads the finished mp4 to YouTube (unless already published) and
+    /// hands the link to the owning tracker. False = stop attempting further
+    /// uploads this pass: a game wants the machine, or quota/network is the
+    /// blocker - and both are shared, so the next file would only fail the
+    /// same way.
+    private async Task<bool> TryPublishToYouTubeAsync(string matchId, string baseName, CancellationToken ct)
+    {
+        string M(string ext) => Path.Combine(MetaDir, baseName + ext);
+        if (!_youtube.Enabled) return false;
+        if (File.Exists(M(".ytfailed.txt"))) return true; // deterministic reject - a human decides, not a retry loop
+        if (!File.Exists(M(".youtube.txt")))
+        {
+            var mp4 = Path.Combine(RecordingsDir, baseName + ".mp4");
+            if (!File.Exists(mp4)) return true; // recycled before it ever published - nothing to upload
+            // The title is the file name minus its separators - "Road to
+            // Platinum 03 Aug 2026 Game 2", the exact style the channel's
+            // hand-made uploads already use.
+            var result = await _youtube.UploadAsync(mp4, baseName.Replace(" - ", " "), $"Match {matchId}",
+                M(".ytsession.json"), holdOff: () => GameProcessRunning, ct);
+            switch (result.Outcome)
+            {
+                case UploadOutcome.Uploaded:
+                    File.WriteAllText(M(".youtube.txt"), result.Url);
+                    Log.Info($"Published to YouTube: {baseName} -> {result.Url}");
+                    break;
+                case UploadOutcome.Paused:
+                    Log.Info($"YouTube upload paused ({result.Error}): {baseName} - resumes at the next idle sweep");
+                    return false;
+                case UploadOutcome.Postponed:
+                    Log.Warn($"YouTube upload postponed ({result.Error}): {baseName}");
+                    return false;
+                case UploadOutcome.Failed:
+                    File.WriteAllText(M(".ytfailed.txt"), result.Error);
+                    Log.Error($"YouTube rejected {baseName}: {result.Error} - not retrying (delete {baseName}.ytfailed.txt to try again)");
+                    return true;
+            }
+        }
+        await TryPostVodLinkAsync(matchId, baseName, ct);
+        return true;
+    }
+
+    /// The link goes to whichever tracker owns the match, the same routing
+    /// rule as the VOD itself; a .linked stamp stops re-posting. No taker
+    /// (poller lag on a fresh game) just means the next sweep retries.
+    private async Task TryPostVodLinkAsync(string matchId, string baseName, CancellationToken ct)
+    {
+        string M(string ext) => Path.Combine(MetaDir, baseName + ext);
+        if (File.Exists(M(".linked"))) return;
+        string url;
+        try { url = File.ReadAllText(M(".youtube.txt")).Trim(); }
+        catch { return; }
+        if (url.Length == 0) return;
+        foreach (var tracker in _trackers)
+        {
+            try
+            {
+                if (!await tracker.SetVodLinkAsync(matchId, url, ct)) continue;
+                File.WriteAllText(M(".linked"), tracker.ServerUrl);
+                Log.Info($"VOD link for {matchId} registered on {tracker.ServerUrl}");
+                return;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"VOD link post to {tracker.ServerUrl} failed: {ex.Message} (retried at next sweep)");
+            }
+        }
+        Log.Info($"VOD link for {matchId}: no tracker accepted it yet (match not imported) - will retry");
+    }
+
+    /// The between-chunks pause signal for YouTube uploads: a running game
+    /// process means the player (and the recorder loop this runs on) needs
+    /// the machine right now.
+    private static bool GameProcessRunning
+    {
+        get
+        {
+            var procs = Process.GetProcessesByName(GameProcessName);
+            foreach (var p in procs) p.Dispose();
+            return procs.Length > 0;
+        }
+    }
+
+    /// Recordings with deliveries still owed (tracker down, match not yet
+    /// imported, YouTube quota spent, agent killed): retried at startup and
+    /// on idle passes, oldest first.
     private async Task SweepUnuploadedAsync(CancellationToken ct)
     {
-        if (!config.UploadVods && !config.UploadVodSidecars) return;
+        if (!config.UploadVods && !config.UploadVodSidecars && !_youtube.Enabled) return;
+        var youtubeGo = _youtube.Enabled;
         string? resolvedPlatform = null;
         var platformProbed = false;
         foreach (var sidecar in Directory.EnumerateFiles(MetaDir, "*.json").OrderBy(f => f))
         {
-            if (sidecar.EndsWith(".inflight.json", StringComparison.OrdinalIgnoreCase)) continue;
+            if (sidecar.EndsWith(".inflight.json", StringComparison.OrdinalIgnoreCase)
+                || sidecar.EndsWith(".ytsession.json", StringComparison.OrdinalIgnoreCase)) continue;
             var baseName = Path.GetFileNameWithoutExtension(sidecar);
-            if (File.Exists(Path.Combine(MetaDir, baseName + ".uploaded"))) continue;
-            // Sidecars upload even after the local mp4 is gone (published to
-            // YouTube and cleaned up); a full upload obviously cannot.
-            if (config.UploadVods && !File.Exists(Path.Combine(RecordingsDir, baseName + ".mp4"))) continue;
+            var delivered = File.Exists(Path.Combine(MetaDir, baseName + ".uploaded"));
+            if (delivered && !_youtube.Enabled) continue; // nothing left owed for this game
             string? matchId;
             try
             {
@@ -554,7 +649,15 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             {
                 continue;
             }
-            if (matchId is { Length: > 0 }) await TryUploadVodAsync(matchId, baseName, ct);
+            if (matchId is not { Length: > 0 }) continue;
+            // Sidecars upload even after the local mp4 is gone (published to
+            // YouTube and cleaned up); a full upload obviously cannot.
+            if (!delivered && (config.UploadVods || config.UploadVodSidecars)
+                && (!config.UploadVods || File.Exists(Path.Combine(RecordingsDir, baseName + ".mp4"))))
+            {
+                await TryUploadVodAsync(matchId, baseName, ct);
+            }
+            if (youtubeGo) youtubeGo = await TryPublishToYouTubeAsync(matchId, baseName, ct);
         }
     }
 
