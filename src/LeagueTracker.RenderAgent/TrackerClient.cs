@@ -5,7 +5,11 @@ namespace LeagueTracker.RenderAgent;
 
 public sealed record ClipEvent(string Kind, int TimeSec);
 
-public sealed record ClipWindow(int Index, int StartSec, int EndSec, string Label, List<ClipEvent> Events);
+/// CameraName/CameraChampion override the job-level follow target for this
+/// window - "fight" windows film a team fight the player was not in from a
+/// surviving fighter's POV. Null = follow the job's player as always.
+public sealed record ClipWindow(int Index, int StartSec, int EndSec, string Label, List<ClipEvent> Events,
+    string Kind = "moment", string? CameraName = null, string? CameraChampion = null);
 
 public sealed record RenderJob(
     string Kind, string MatchId, string GameVersion, double DurationSec, string ReplayUrl,
