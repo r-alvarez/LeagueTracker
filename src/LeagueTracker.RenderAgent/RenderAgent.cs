@@ -419,6 +419,13 @@ public sealed class RenderAgent(AgentConfig config)
                 var output = Path.Combine(_workDir, $"{job.MatchId}-w{window.Index:00}.mp4");
                 var duration = Math.Max(2, window.EndSec - window.StartSec);
                 var preRoll = Math.Max(0, window.StartSec - EngagePreRollSec);
+                // A fight window's clip must be rolling by the fight moment
+                // itself - a dead camera target whose respawn lands later can
+                // only film the aftermath (EUW1_7936338594 w16: a 25s respawn
+                // wait pushed recording past the whole fight).
+                var fightEventSec = window.Kind is "fight"
+                    ? window.Events is { Count: > 0 } events ? events[0].TimeSec : window.StartSec
+                    : (int?)null;
                 var engaged = false;
                 var frozen = 0;
                 var skippedThis = false;
@@ -429,7 +436,18 @@ public sealed class RenderAgent(AgentConfig config)
                     await WaitForSeekAsync(replayApi, preRoll, ct);
                     await replayApi.SetPlaybackAsync(time: null, paused: false, speed: 1, ct);
 
-                    engaged = await EngageCameraAsync(replayApi, windowSlot, attempt, windowCameraName, ct);
+                    var result = await EngageCameraAsync(replayApi, windowSlot, attempt, windowCameraName, fightEventSec, ct);
+                    if (result is EngageResult.TargetDeadPastFight)
+                    {
+                        // Deterministic per replay timestamp - a retry or a
+                        // postpone replays the same respawn timer. Skip the
+                        // window so the rest render and the job names the gap.
+                        Log.Warn($"Window {window.Index} ({window.Label}): \"{targetChampion}\" is dead until after the fight - no POV to film it from, skipping this window");
+                        skippedWindows.Add(window.Index);
+                        skippedThis = true;
+                        break;
+                    }
+                    engaged = result is EngageResult.Engaged;
                     if (!engaged)
                     {
                         if (attempt >= 3) break;
@@ -604,13 +622,17 @@ public sealed class RenderAgent(AgentConfig config)
         (12800, 1800),
     ];
 
+    private enum EngageResult { Engaged, Failed, TargetDeadPastFight }
+
     /// Clicks the filmed champion's side in the fog dropdown, then the
     /// champion in the camera dropdown, and verifies the camera really
     /// tracks - the Replay API has no working equivalent, and the
     /// verification cannot false-positive while the directed camera is
     /// disabled. Runs while the replay is playing (the lock only engages
-    /// during playback).
-    private async Task<bool> EngageCameraAsync(ReplayApiClient replayApi, (int Index, bool Blue) slot, int attempt, string? cameraName, CancellationToken ct)
+    /// during playback). fightEventSec, set for fight windows, is the game
+    /// second the clip exists to capture: a dead target whose respawn lands
+    /// past it cannot film the fight from anywhere but their fountain.
+    private async Task<EngageResult> EngageCameraAsync(ReplayApiClient replayApi, (int Index, bool Blue) slot, int attempt, string? cameraName, int? fightEventSec, CancellationToken ct)
     {
         // Park the free camera away from where the world-reload leaves it,
         // BEFORE the clicks (render-API writes reset the camera mode). The
@@ -630,7 +652,7 @@ public sealed class RenderAgent(AgentConfig config)
         if (!GameWindow.TryClickAt(GameWindowTitle, FogX, FogBoxY))
         {
             Log.Warn("Could not focus the game window for the fog dropdown");
-            return false;
+            return EngageResult.Failed;
         }
         await Task.Delay(TimeSpan.FromMilliseconds(900), ct);
         // The dropdown defaults to All (no fog); pick the filmed champion's
@@ -656,19 +678,31 @@ public sealed class RenderAgent(AgentConfig config)
         // Playback keeps running, so wait out a short respawn and re-check:
         // a locked camera follows the champion out of the fountain, an
         // unlocked one stays. Recording then starts a few seconds into the
-        // pre-roll cushion, which the 20s window lead absorbs.
+        // pre-roll cushion, which the 20s window lead absorbs - unless this
+        // is a fight window and the respawn lands past the fight itself, in
+        // which case there is nothing left worth filming and waiting would
+        // record the aftermath (EUW1_7936338594 w16).
         if (!tracks && cameraName is { Length: > 0 }
-            && await replayApi.GetPlayerDeathStateAsync(cameraName, ct) is { IsDead: true } death
-            && death.RespawnIn <= 25)
+            && await replayApi.GetPlayerDeathStateAsync(cameraName, ct) is { IsDead: true } death)
         {
-            Log.Info($"Tracked player is dead (respawn in {death.RespawnIn:0}s) - waiting to re-verify the camera lock");
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(death.RespawnIn + 5);
-            while (DateTime.UtcNow < deadline
-                && await replayApi.GetPlayerDeathStateAsync(cameraName, ct) is { IsDead: true })
+            if (fightEventSec is { } eventSec
+                && await replayApi.GetPlaybackAsync(ct) is { } playback
+                && playback.Time + death.RespawnIn > eventSec)
             {
-                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                Log.Warn($"Camera target is dead at {playback.Time:0}s with {death.RespawnIn:0}s respawn - back after the fight moment ({eventSec}s)");
+                return EngageResult.TargetDeadPastFight;
             }
-            tracks = await CameraTracksAsync(replayApi, parked, ct);
+            if (death.RespawnIn <= 25)
+            {
+                Log.Info($"Tracked player is dead (respawn in {death.RespawnIn:0}s) - waiting to re-verify the camera lock");
+                var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(death.RespawnIn + 5);
+                while (DateTime.UtcNow < deadline
+                    && await replayApi.GetPlayerDeathStateAsync(cameraName, ct) is { IsDead: true })
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                }
+                tracks = await CameraTracksAsync(replayApi, parked, ct);
+            }
         }
 
         if (!tracks)
@@ -681,13 +715,13 @@ public sealed class RenderAgent(AgentConfig config)
             var current = await replayApi.GetCameraPositionAsync(ct);
             var selection = await replayApi.GetSelectionAsync(ct);
             Log.Warn($"Camera check failed: parked=({parked?.X:0},{parked?.Z:0}) now=({current?.X:0},{current?.Z:0}) selection='{selection}'");
-            return false;
+            return EngageResult.Failed;
         }
 
         // Park the cursor away from the panel and screen edges so it neither
         // shows over the HUD in recordings nor edge-scrolls the camera.
         GameWindow.TryMoveCursor(GameWindowTitle, 0.5, 0.35);
-        return true;
+        return EngageResult.Engaged;
     }
 
     /// Not a failure: the conditions for a quality render weren't met (camera

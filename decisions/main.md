@@ -935,3 +935,28 @@ verification doubled as settle time; fog-first replaces that with an
 explicit 1.5s settle before the first click. Watch the first fight-clip job
 after deploy: a "Camera check failed ... selection=''" loop or an all-map
 (fog-free) clip means the settle is too short.
+
+## 2026-08-05 — Fight clips: the camera target must be alive for the fight
+
+**Found via EUW1_7936338594 window 16:** a 39s "skirmish 2v4" clip contained
+only aftermath - the designated POV (Gwen) had died in the preceding fight,
+sat on a 25s respawn timer at engage, and the agent's respawn wait pushed
+recording past the entire window. Two compounding causes, both fixed:
+
+**Analyzer:** "surviving fighter" only meant no death in *this* cluster. A
+corpse from the previous fight interpolates as "near the centroid" (dead
+bodies don't move), counts as involved, and outranks everyone. Camera pick
+now tiers alive-throughout fighters (no death within 60s before the fight -
+a death timer at any game length) above recently-dead survivors, keeping
+the old order inside each tier. Headcount still counts such corpses as
+fighters ("2v4" may be inflated) - left alone deliberately; changing it
+would retro-shift fight labels and the Q3 analytics adjudicated 2026-08-05.
+
+**Agent:** the respawn wait (built for own-death windows, where the 20s
+pre-roll absorbs it) now refuses to wait past a fight window's event time:
+dead target + respawn landing after the fight moment = skip the window with
+it named in the job failure, not a postpone (the replay's respawn state at
+that timestamp is deterministic - a retry can never go differently) and not
+an aftermath recording. Already-saved plan manifests keep their original
+camera targets (plans are claim-time snapshots); the fix applies to matches
+planned after the analyzer reprocess.
