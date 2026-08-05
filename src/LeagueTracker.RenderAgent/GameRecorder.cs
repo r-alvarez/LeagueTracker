@@ -893,18 +893,25 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                     break;
                 }
 
-                if (DateTime.UtcNow - lastClockSample > TimeSpan.FromSeconds(30))
+                if (DateTime.UtcNow - lastClockSample > TimeSpan.FromSeconds(15))
                 {
                     lastClockSample = DateTime.UtcNow;
-                    if (await GameTimeAsync(ct) is { } gameSec)
+                    // The pair's video side is the encoder's out_time - the
+                    // mp4's own clock, which is what review jumps seek
+                    // against. Wall elapsed also counts ffmpeg's startup
+                    // latency and any encoder lag, and those seconds put
+                    // markers early against the finished video.
+                    double encodedSec;
+                    lock (progressGate) encodedSec = videoUs / 1e6;
+                    if (encodedSec > 0 && await GameTimeAsync(ct) is { } gameSec)
                     {
-                        clockMap.Add(((DateTime.UtcNow - startedUtc).TotalSeconds, gameSec));
+                        clockMap.Add((encodedSec, gameSec));
                     }
                     activePlayer ??= await ActivePlayerAsync(ct);
-                    // Every 3rd sample (~90s) also re-check the phase: the
+                    // Every 6th sample (~90s) also re-check the phase: the
                     // post-game screen keeps the process alive briefly, and
                     // there is nothing worth recording past "InProgress".
-                    if (clockMap.Count % 3 == 0 && await PhaseAsync(CancellationToken.None) is not "InProgress" and not null) break;
+                    if (clockMap.Count % 6 == 0 && await PhaseAsync(CancellationToken.None) is not "InProgress" and not null) break;
                 }
             }
         }
@@ -999,15 +1006,20 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 }
             }
 
-            if (DateTime.UtcNow - lastClockSample > TimeSpan.FromSeconds(30))
+            if (DateTime.UtcNow - lastClockSample > TimeSpan.FromSeconds(15))
             {
                 lastClockSample = DateTime.UtcNow;
                 if (await GameTimeAsync(ct) is { } gameSec)
                 {
+                    // Wall elapsed IS the stream position here, unlike the
+                    // ffmpeg path: Media Foundation writes VFR frames whose
+                    // durations are the real time between captures, so the
+                    // mp4's clock tracks wall time from the first frame -
+                    // exactly startedUtc's zero point.
                     clockMap.Add(((DateTime.UtcNow - startedUtc).TotalSeconds, gameSec));
                 }
                 activePlayer ??= await ActivePlayerAsync(ct);
-                if (clockMap.Count % 3 == 0 && await PhaseAsync(CancellationToken.None) is not "InProgress" and not null) break;
+                if (clockMap.Count % 6 == 0 && await PhaseAsync(CancellationToken.None) is not "InProgress" and not null) break;
             }
         }
 

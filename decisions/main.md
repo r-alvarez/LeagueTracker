@@ -821,3 +821,28 @@ fights" card next to the VOD (kill/death clips stay hidden behind it).
 Backfill needs one /api/analytics/reprocess per tracker (CameraParticipantId
 defaults to 0 = unclippable on old rows). Replay patch-lock still applies:
 fights only clip while the match's replay runs on the installed client.
+
+## 2026-08-05 — VOD clock map: encoded position over wall clock, interpolation over median
+
+**The ffmpeg path's clock-map pairs now use the encoder's out_time (already
+parsed from -progress) as the video coordinate instead of wall-elapsed
+seconds.** Wall time counts ffmpeg's startup latency plus any encoder lag,
+which landed review markers seconds early against the finished video — the
+YouTube timing drift Ruben reported. The WGC path deliberately KEEPS wall
+clock: verified in ScreenRecorderLib/RecordingManager.cpp that Media
+Foundation writes VFR frames whose durations are the real time between
+captures, so wall elapsed since first frame IS the stream position there.
+Its OnFrameRecorded.Timestamp was considered and rejected — it is
+system_clock epoch millis, not stream position. Sampling densified 30s→15s
+(localhost call, negligible cost).
+
+**VodReview maps game↔video by piecewise-linear interpolation over the
+sampled pairs instead of one median offset.** A capture restart leaves a gap
+in the video while the game clock runs on, so the two sides of a seam sit at
+different offsets — a single constant was wrong for every marker after the
+first seam. Both coordinates are monotonic, so one sorted array serves both
+directions (markers game→video, APM tooltip video→game); outside the sampled
+range extrapolation uses slope 1 (the clocks tick at the same rate).
+Alternative rejected: fixing timing via Riot's Spectator API — gameStartTime
+reads 0 for minutes and spectator data runs ~3 min delayed; the local Live
+Client API (already sampled) is strictly better.

@@ -50,12 +50,30 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
   const youtubeRef = useRef<HTMLIFrameElement | null>(null)
   const ytPlayerRef = useRef<{ seekTo: (s: number, allowAhead: boolean) => void; playVideo: () => void } | null>(null)
 
-  const gameToVideoOffset = useMemo(() => {
-    const pairs = vod?.meta?.clockMap ?? []
-    if (pairs.length === 0) return null
-    const offsets = pairs.map(p => p.gameSec - p.videoSec).sort((a, b) => a - b)
-    return offsets[Math.floor(offsets.length / 2)]
+  // Piecewise-linear mapping over the sampled (videoSec, gameSec) pairs. A
+  // capture restart leaves a gap in the video while the game clock runs on,
+  // so the two sides of a seam sit at different offsets — one constant (the
+  // old median) put every marker after a seam in the wrong place. Both
+  // coordinates only ever increase, so one sort serves both directions;
+  // outside the sampled range the clocks advance in lockstep (slope 1).
+  const clockPairs = useMemo(() => {
+    const pairs = (vod?.meta?.clockMap ?? []).filter(p => Number.isFinite(p.videoSec) && Number.isFinite(p.gameSec))
+    return [...pairs].sort((a, b) => a.videoSec - b.videoSec)
   }, [vod])
+
+  const interpolate = (from: 'videoSec' | 'gameSec', to: 'videoSec' | 'gameSec', x: number): number | null => {
+    if (clockPairs.length === 0) return null
+    const first = clockPairs[0]
+    const last = clockPairs[clockPairs.length - 1]
+    if (x <= first[from]) return first[to] + (x - first[from])
+    if (x >= last[from]) return last[to] + (x - last[from])
+    const upper = clockPairs.findIndex(p => p[from] >= x)
+    const lo = clockPairs[upper - 1]
+    const hi = clockPairs[upper]
+    const span = hi[from] - lo[from]
+    if (span <= 0) return lo[to] + (x - lo[from])
+    return lo[to] + ((x - lo[from]) / span) * (hi[to] - lo[to])
+  }
 
   const ytId = vod?.youtubeUrl ? youtubeId(vod.youtubeUrl) : null
   const hasHostedVideo = vod?.exists ?? false
@@ -113,7 +131,7 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
 
   // Without a recording clock map (hand-linked YouTube upload) assume the
   // video starts at game clock 0:00 - approximate jumps beat dead buttons.
-  const videoFor = (gameSec: number) => Math.max(0, gameSec - (gameToVideoOffset ?? 0))
+  const videoFor = (gameSec: number) => Math.max(0, interpolate('gameSec', 'videoSec', gameSec) ?? gameSec)
 
   const jumpToMoment = (gameSec: number) => seekTo(Math.max(0, videoFor(gameSec) - 5)) // 5s of approach context
 
@@ -122,7 +140,7 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
     return {
       videoSec,
       apm,
-      gameClock: gameToVideoOffset === null ? fmtClock(videoSec) : fmtClock(videoSec + gameToVideoOffset),
+      gameClock: fmtClock(interpolate('videoSec', 'gameSec', videoSec) ?? videoSec),
     }
   })
 
@@ -289,7 +307,7 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
                   </button>
                 ))}
               </div>
-              {gameToVideoOffset === null && (
+              {clockPairs.length === 0 && (
                 <p className="mut sm-text" style={{ margin: '6px 0 0' }}>
                   No recording clock map for this game — jumps assume the video starts at the game's 0:00.
                 </p>
