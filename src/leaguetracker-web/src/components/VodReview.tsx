@@ -190,7 +190,6 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
         Your VOD <span className="mut" style={{ fontWeight: 400 }}>— the game as you played it, recorded live with your inputs</span>
       </h2>
 
-      {/* Video column + review sidebar; wraps to one column when narrow. */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
         <div style={{ flex: '2 1 560px', minWidth: 0 }}>
           {hasHostedVideo ? (
