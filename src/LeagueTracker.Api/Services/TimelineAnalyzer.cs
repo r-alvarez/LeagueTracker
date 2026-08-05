@@ -221,7 +221,7 @@ public static class TimelineAnalyzer
         var pidToRole = info.Participants.ToDictionary(p => p.ParticipantId, p => RoleLabel(p.TeamPosition));
 
         var enemyJunglerPid = info.Participants.FirstOrDefault(p =>
-            p.TeamId != me.TeamId && p.TeamPosition == "JUNGLE")?.ParticipantId;
+            p.TeamId != me.TeamId && p.TeamPosition is "JUNGLE")?.ParticipantId;
 
         foreach (var death in deaths)
         {
@@ -264,7 +264,7 @@ public static class TimelineAnalyzer
         // taking earliest placements; blue trinket is a sweeper, not vision).
         var visionWards = myWardSecs.Where(w => w.Type is not "TEEMO_MUSHROOM" and not "UNDEFINED").ToList();
         int? firstWardSec = visionWards is { Count: > 0 } ? visionWards.Min(w => w.Sec) : null;
-        var controlWardSecs = myWardSecs.Where(w => w.Type == "CONTROL_WARD").Select(w => w.Sec).ToList();
+        var controlWardSecs = myWardSecs.Where(w => w.Type is "CONTROL_WARD").Select(w => w.Sec).ToList();
         int? firstControlWardSec = controlWardSecs is { Count: > 0 } ? controlWardSecs.Min() : null;
         var wardsFirst10 = visionWards.Count(w => w.Sec < 600);
 
@@ -708,7 +708,7 @@ public static class TimelineAnalyzer
         return new ObjectiveEvent
         {
             TimeSec = TimeSecOf(ev),
-            Kind = buildingType == "INHIBITOR_BUILDING" ? "INHIBITOR" : "TOWER",
+            Kind = buildingType is "INHIBITOR_BUILDING" ? "INHIBITOR" : "TOWER",
             SubKind = ev.TryGetProperty("towerType", out var tt) ? (tt.GetString() ?? "").Replace("_TURRET", "") : "",
             ByMyTeam = victimTeam != myTeamId,
             KillerParticipantId = ev.TryGetProperty("killerId", out var k) ? k.GetInt32() : 0,

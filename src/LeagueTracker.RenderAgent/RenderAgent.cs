@@ -148,7 +148,7 @@ public sealed class RenderAgent(AgentConfig config)
                 // at None - verified live), but a human watching one is not
                 // idle. Only an unattended None-phase process qualifies.
                 var unattended = GameWindow.UserIdleTime >= TimeSpan.FromSeconds(config.IdleSeconds);
-                _orphanStrikes = unattended && phaseNow == "None" ? _orphanStrikes + 1 : 0;
+                _orphanStrikes = unattended && phaseNow is "None" ? _orphanStrikes + 1 : 0;
                 if (_orphanStrikes >= 3)
                 {
                     _orphanStrikes = 0;

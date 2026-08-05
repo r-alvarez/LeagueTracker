@@ -69,7 +69,7 @@ public sealed class ReplayApiClient : IDisposable
             foreach (var player in doc.RootElement.EnumerateArray())
             {
                 var champ = player.TryGetProperty("championName", out var c) ? c.GetString() ?? "" : "";
-                var blue = !player.TryGetProperty("team", out var team) || team.GetString() == "ORDER";
+                var blue = !player.TryGetProperty("team", out var team) || team.GetString() is "ORDER";
                 players.Add((champ, blue));
             }
             return players;

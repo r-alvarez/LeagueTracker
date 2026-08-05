@@ -498,7 +498,7 @@ public static class Reports
                 TotalDeaths = deaths.Count,
                 FollowIns = followIns.Count,
                 Rate = deaths is { Count: > 0 } ? Math.Round(followIns.Count / (double)deaths.Count, 3) : 0,
-                PureLoss = followIns.Count(d => d.FollowPureLoss == true),
+                PureLoss = followIns.Count(d => d.FollowPureLoss is true),
                 TwoPlusDown = followIns.Count(d => d.FollowAlliesDownBefore >= 2),
                 ByRole = Counted(followIns.Select(d => d.FollowTeammateRole ?? "?"), followIns.Count),
                 GoldState = new
@@ -563,7 +563,7 @@ public static class Reports
         if (deaths is { Count: > 0 } && followIns is { Count: > 0 })
         {
             var rate = Math.Round(100.0 * followIns.Count / deaths.Count);
-            var pure = followIns.Count(d => d.FollowPureLoss == true);
+            var pure = followIns.Count(d => d.FollowPureLoss is true);
             o.Add($"{rate} % of deaths are follow-ins (walking in after a fallen teammate); {pure} of {followIns.Count} got nothing back.");
         }
 

@@ -149,7 +149,7 @@ public sealed class LensService(LeagueDbContext db)
         var categories = Categories.Select(cat =>
         {
             var catSpecs = Specs.Where(s => s.Category == cat.Key).ToList();
-            var subs = cat.Key == "fighting"
+            var subs = cat.Key is "fighting"
                 ? FightingSubs.Select(sub =>
                 {
                     var subSpecs = catSpecs.Where(s => s.Sub == sub.Key).ToList();

@@ -208,9 +208,9 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
         var durMin = Math.Max(1.0, info.DurationSeconds / 60.0);
 
         match.OpponentChampion = opp?.ChampionName;
-        match.EnemyJungler = info.Participants.FirstOrDefault(p => p.TeamId != me.TeamId && p.TeamPosition == "JUNGLE")?.ChampionName;
+        match.EnemyJungler = info.Participants.FirstOrDefault(p => p.TeamId != me.TeamId && p.TeamPosition is "JUNGLE")?.ChampionName;
         match.AllyJungler = info.Participants.FirstOrDefault(p =>
-            p.TeamId == me.TeamId && p.TeamPosition == "JUNGLE" && p.Puuid != me.Puuid)?.ChampionName;
+            p.TeamId == me.TeamId && p.TeamPosition is "JUNGLE" && p.Puuid != me.Puuid)?.ChampionName;
         match.SkillshotsHit = me.Challenges?.SkillshotsHit;
         match.SkillshotsDodged = me.Challenges?.SkillshotsDodged;
         match.SoloKills = (int)(me.Challenges?.SoloKills ?? 0);

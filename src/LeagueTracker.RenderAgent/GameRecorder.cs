@@ -117,7 +117,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             try
             {
                 var phase = await PhaseAsync(ct);
-                if (phase == "InProgress")
+                if (phase is "InProgress")
                 {
                     var gaveUp = !await RecordGameAsync(ct);
                     if (gaveUp)
@@ -127,7 +127,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                         // reach) - retrying every pass would spam ffmpeg
                         // launches all game, so sit it out.
                         Log.Warn("Recording gave up on this game - waiting for it to end");
-                        while (!RenderAgent.StopRequested && await PhaseAsync(ct) == "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
+                        while (!RenderAgent.StopRequested && await PhaseAsync(ct) is "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
                     }
                     continue;
                 }
@@ -171,7 +171,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         {
             Log.Info($"Not recording this game: {skipReason}");
             // StopRequested too: a deploy must not wait for the game to end.
-            while (!RenderAgent.StopRequested && await PhaseAsync(ct) == "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
+            while (!RenderAgent.StopRequested && await PhaseAsync(ct) is "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
             return true;
         }
 
@@ -203,7 +203,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 // Deploy stop mid-game: leave the segments and state on disk
                 // for the next agent run to resume - finalizing here would
                 // split the game across two numbers.
-                if (state.Segments is { Count: > 0 } && await PhaseSafeAsync() == "InProgress")
+                if (state.Segments is { Count: > 0 } && await PhaseSafeAsync() is "InProgress")
                 {
                     SaveInflight(state);
                     Log.Info($"Stop requested mid-game - {state.BaseName} will resume after restart");
@@ -1318,7 +1318,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         string? liveMatchId = null;
         try
         {
-            if (await PhaseAsync(ct) == "InProgress" && LcuClient.TryConnect(leagueRoot) is { } lcu)
+            if (await PhaseAsync(ct) is "InProgress" && LcuClient.TryConnect(leagueRoot) is { } lcu)
             {
                 using (lcu)
                 {

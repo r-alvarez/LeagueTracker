@@ -60,10 +60,10 @@ public static class MatchMetricRows
                     var mine = fights.Where(f => f.Participated && f.Kind == kind).ToList();
                     values[$"{key}Count"] = mine.Count;
                     var decisive = mine.Count(f => f.Result is "won" or "lost");
-                    if (decisive > 0) values[$"{key}Winrate"] = 100.0 * mine.Count(f => f.Result == "won") / decisive;
+                    if (decisive > 0) values[$"{key}Winrate"] = 100.0 * mine.Count(f => f.Result is "won") / decisive;
                     values[$"{key}Gold"] = mine.Sum(f => f.GoldSwing);
                 }
-                var won = fights.Where(f => f.Participated && f.Result == "won").ToList();
+                var won = fights.Where(f => f.Participated && f.Result is "won").ToList();
                 if (won is { Count: > 0 }) values["fightConversion"] = 100.0 * won.Count(f => f.ConvertedObjective) / won.Count;
             }
             catch { /* old rows without fights just skip these metrics */ }

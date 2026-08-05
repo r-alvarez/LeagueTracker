@@ -110,8 +110,8 @@ public sealed class ReviewService(LeagueDbContext db)
     {
         string?[] verdicts = [r.Lane?.Verdict, r.Fights.Verdict, r.Discipline.Verdict, r.Stewardship?.Verdict];
         if (verdicts.All(v => v is null)) return null;
-        var won = verdicts.Count(v => v == "yes");
-        var lost = verdicts.Count(v => v == "no");
+        var won = verdicts.Count(v => v is "yes");
+        var lost = verdicts.Count(v => v is "no");
         return won >= SweepCount && lost == 0 ? "dominated"
             : lost >= SweepCount && won == 0 ? "runover"
             : won > lost ? "won"
@@ -238,10 +238,10 @@ public sealed class ReviewService(LeagueDbContext db)
         // outcomes - the Fights and Discipline questions already own those.
         // The duel comparison only counts kills earned while the other was
         // absent by choice (elsewhere or nearby-uninvolved), both ways.
-        var theirCashKills = theirCashIns.Where(x => x.Where != "dead").Sum(x => x.Kills);
-        var myCashKills = myCashIns.Where(x => x.Where != "dead").Sum(x => x.Kills);
-        var myUnpaidAbsences = theirCashIns.Count(x => x.Where == "elsewhere" && !x.Paid);
-        var theirUnpaidAbsences = myCashIns.Count(x => x.Where == "elsewhere" && !x.Paid);
+        var theirCashKills = theirCashIns.Where(x => x.Where is not "dead").Sum(x => x.Kills);
+        var myCashKills = myCashIns.Where(x => x.Where is not "dead").Sum(x => x.Kills);
+        var myUnpaidAbsences = theirCashIns.Count(x => x.Where is "elsewhere" && !x.Paid);
+        var theirUnpaidAbsences = myCashIns.Count(x => x.Where is "elsewhere" && !x.Paid);
 
         var checkpoints = m.LaneDiffsJson is { Length: > 0 }
             ? JsonSerializer.Deserialize<List<TimelineAnalyzer.LaneDiffPoint>>(m.LaneDiffsJson, Json) ?? []
@@ -321,11 +321,11 @@ public sealed class ReviewService(LeagueDbContext db)
         return new Verdicted(verdict, new
         {
             Participated = mine.Count,
-            Won = mine.Count(f => f.Result == "won"),
-            Lost = mine.Count(f => f.Result == "lost"),
-            Draw = mine.Count(f => f.Result == "draw"),
-            Converted = mine.Count(f => f.Result == "won" && f.ConvertedObjective),
-            Conceded = mine.Count(f => f.Result == "lost" && f.ConvertedObjective),
+            Won = mine.Count(f => f.Result is "won"),
+            Lost = mine.Count(f => f.Result is "lost"),
+            Draw = mine.Count(f => f.Result is "draw"),
+            Converted = mine.Count(f => f.Result is "won" && f.ConvertedObjective),
+            Conceded = mine.Count(f => f.Result is "lost" && f.ConvertedObjective),
             Overstays = overstays,
             PaidAbsences = paidAbsences,
         });
@@ -394,8 +394,8 @@ public sealed class ReviewService(LeagueDbContext db)
         var withTeam = 0;
         foreach (var d in deaths)
         {
-            if (d.EnemyJunglerNear == true && d.TimeSec < LaneEndSec) ganked++;
-            else if (d.FollowTeammate is not null && d.FollowPureLoss == false) followInsTraded++;
+            if (d.EnemyJunglerNear is true && d.TimeSec < LaneEndSec) ganked++;
+            else if (d.FollowTeammate is not null && d.FollowPureLoss is false) followInsTraded++;
             else if (d.FollowTeammate is not null) followIns++;
             else if (d is { EnemiesNearDeath: 0 } && d.TimeSec >= LaneEndSec && !InCommittedFight(fights, d.TimeSec)) fogPicks++;
             else if (d is { EnemiesNearDeath: { } e, AlliesNearDeath: { } a } && e >= a + 2) outnumbered++;

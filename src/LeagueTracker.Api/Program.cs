@@ -634,13 +634,13 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, ReplayArch
             .ToListAsync(ct);
     object TeamObjectives(bool mine) => new
     {
-        Towers = match.ObjectiveEvents.Count(o => o.Kind == "TOWER" && o.ByMyTeam == mine),
-        Inhibitors = match.ObjectiveEvents.Count(o => o.Kind == "INHIBITOR" && o.ByMyTeam == mine),
-        Dragons = match.ObjectiveEvents.Count(o => o.Kind == "DRAGON" && o.ByMyTeam == mine),
-        Barons = match.ObjectiveEvents.Count(o => o.Kind == "BARON" && o.ByMyTeam == mine),
-        Heralds = match.ObjectiveEvents.Count(o => o.Kind == "HERALD" && o.ByMyTeam == mine),
-        Grubs = match.ObjectiveEvents.Count(o => o.Kind == "GRUBS" && o.ByMyTeam == mine),
-        Atakhan = match.ObjectiveEvents.Count(o => o.Kind == "ATAKHAN" && o.ByMyTeam == mine),
+        Towers = match.ObjectiveEvents.Count(o => o.Kind is "TOWER" && o.ByMyTeam == mine),
+        Inhibitors = match.ObjectiveEvents.Count(o => o.Kind is "INHIBITOR" && o.ByMyTeam == mine),
+        Dragons = match.ObjectiveEvents.Count(o => o.Kind is "DRAGON" && o.ByMyTeam == mine),
+        Barons = match.ObjectiveEvents.Count(o => o.Kind is "BARON" && o.ByMyTeam == mine),
+        Heralds = match.ObjectiveEvents.Count(o => o.Kind is "HERALD" && o.ByMyTeam == mine),
+        Grubs = match.ObjectiveEvents.Count(o => o.Kind is "GRUBS" && o.ByMyTeam == mine),
+        Atakhan = match.ObjectiveEvents.Count(o => o.Kind is "ATAKHAN" && o.ByMyTeam == mine),
     };
 
     return Results.Ok(new
