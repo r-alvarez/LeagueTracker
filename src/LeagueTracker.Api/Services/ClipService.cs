@@ -18,7 +18,7 @@ public sealed record ClipPlan(string MatchId, string GameVersion, double Duratio
 /// Plans and stores the per-match highlight clips that the render agent turns
 /// into mp4s. Follows the app's files-as-truth rule: the plan manifest and the
 /// rendered clips live under data/clips/{matchId}; the db is never written.
-public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays, DataPaths paths)
+public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays, VodService vods, DataPaths paths)
 {
     // A fight window is [event - pre, event + post]; overlapping windows merge,
     // so a kill followed by your death 15s later reviews as one clip.
@@ -249,11 +249,16 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
             }
             else
             {
-                var missing = plan.Windows.Count(w => ClipPath(m.Id, w.Index) is null);
+                // A VOD-covered match only ever renders its "fight" windows
+                // (the render/next rule) - counting the others against it
+                // reported every reviewed match as "partial" forever.
+                var vodCovered = vods.HasVod(m.Id) || vods.ReadLink(m.Id) is not null;
+                var renderable = plan.Windows.Where(w => !vodCovered || w.Kind is "fight").ToList();
+                var missing = renderable.Count(w => ClipPath(m.Id, w.Index) is null);
                 status = missing == 0 ? "done"
                     : failed is not null ? "failed"
                     : leases.IsLeased($"clips:{m.Id}") ? "rendering"
-                    : missing < plan.Windows.Count ? "partial"
+                    : missing < renderable.Count ? "partial"
                     : "pending";
             }
             rows.Add(new { MatchId = m.Id, m.Champion, m.GameEndUtc, Kind = "clips", Status = status, Error = failed });
