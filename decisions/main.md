@@ -920,3 +920,18 @@ IQueryable lambdas (patterns don't compile in expression trees — e.g.
 Reports.cs `.Where(p => p.Tier != null)`), `Count == 0` sites where a pattern
 would also match null and flip a guard, and handle/`nint` comparisons in the
 interop-heavy recorder code.
+
+## 2026-08-05 — Replay engage order: fog first, camera last
+
+**The fog side is clicked before the camera selection, not after** (Ruben's
+ask). Rationale beyond preference: the camera lock is the only engage step
+with a verification, so it should be the final UI interaction before the
+recording rolls — previously the unverifiable fog clicks landed after the
+verified lock, and a missed second click could leave the fog dropdown open
+on screen for the whole clip. With fog first, the camera-box click closes
+any stray fog list. The old order existed because the freshly-initialized
+post-world-reload UI ate the session's first fog click and the ~5s camera
+verification doubled as settle time; fog-first replaces that with an
+explicit 1.5s settle before the first click. Watch the first fight-clip job
+after deploy: a "Camera check failed ... selection=''" loop or an all-map
+(fog-free) clip means the settle is too short.

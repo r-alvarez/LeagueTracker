@@ -343,7 +343,7 @@ public sealed class RenderAgent(AgentConfig config)
         {
             game = await StartReplayAsync();
 
-            // The camera/fog dropdowns are clicked PER WINDOW, after its seek:
+            // The fog/camera dropdowns are clicked PER WINDOW, after its seek:
             // any seek that rewinds (and the engage verification always plays
             // past the point it must return to) reloads the world and silently
             // wipes the dropdown state, so it must be re-applied as the last
@@ -604,11 +604,12 @@ public sealed class RenderAgent(AgentConfig config)
         (12800, 1800),
     ];
 
-    /// Clicks the tracked champion in the camera dropdown and their side in
-    /// the fog dropdown, then verifies the camera really tracks - the Replay
-    /// API has no working equivalent, and the verification cannot
-    /// false-positive while the directed camera is disabled. Runs while the
-    /// replay is playing (the lock only engages during playback).
+    /// Clicks the filmed champion's side in the fog dropdown, then the
+    /// champion in the camera dropdown, and verifies the camera really
+    /// tracks - the Replay API has no working equivalent, and the
+    /// verification cannot false-positive while the directed camera is
+    /// disabled. Runs while the replay is playing (the lock only engages
+    /// during playback).
     private async Task<bool> EngageCameraAsync(ReplayApiClient replayApi, (int Index, bool Blue) slot, int attempt, string? cameraName, CancellationToken ct)
     {
         // Park the free camera away from where the world-reload leaves it,
@@ -617,11 +618,27 @@ public sealed class RenderAgent(AgentConfig config)
         var spot = CameraParkSpots[(attempt - 1) % CameraParkSpots.Length];
         var parked = await replayApi.ParkCameraAsync(spot.X, 1911, spot.Z, cameraName, ct);
 
-        if (!GameWindow.TryClickAt(GameWindowTitle, PanelX, CameraBoxY))
+        // Fog before camera: the camera lock is the only step with a
+        // verification, so it goes last - no click lands on the UI after the
+        // verified lock, and a fog mis-click (the dropdown has no readback)
+        // gets its stray open list closed by the camera clicks instead of
+        // sitting open through the recording. The freshly-initialized UI
+        // right after a world reload eats the first clicks (previously
+        // absorbed by running fog after the ~5s camera verification), so
+        // give it a beat before clicking.
+        await Task.Delay(TimeSpan.FromMilliseconds(1500), ct);
+        if (!GameWindow.TryClickAt(GameWindowTitle, FogX, FogBoxY))
         {
-            Log.Warn("Could not focus the game window for the camera dropdown");
+            Log.Warn("Could not focus the game window for the fog dropdown");
             return false;
         }
+        await Task.Delay(TimeSpan.FromMilliseconds(900), ct);
+        // The dropdown defaults to All (no fog); pick the filmed champion's
+        // side. Deterministic click, idempotent when already set.
+        GameWindow.TryClickAt(GameWindowTitle, FogX, slot.Blue ? FogBlueY : FogRedY);
+        await Task.Delay(TimeSpan.FromMilliseconds(400), ct);
+
+        GameWindow.TryClickAt(GameWindowTitle, PanelX, CameraBoxY);
         await Task.Delay(TimeSpan.FromMilliseconds(700), ct);
         var championRowY = CameraListBottomY - (10 - slot.Index) * DropdownRowH + DropdownRowH / 2;
         GameWindow.TryClickAt(GameWindowTitle, PanelX, championRowY);
@@ -630,9 +647,6 @@ public sealed class RenderAgent(AgentConfig config)
         await Task.Delay(TimeSpan.FromMilliseconds(400), ct);
         GameWindow.TryMoveCursor(GameWindowTitle, 0.5, 0.35);
 
-        // Camera verification first - its ~5s doubles as settle time for the
-        // freshly-initialized UI, which made a fog click right after the
-        // camera clicks miss on the session's first window.
         var tracks = await CameraTracksAsync(replayApi, parked, ct);
 
         // A locked camera parks a dead champion's view at their fountain -
@@ -668,16 +682,6 @@ public sealed class RenderAgent(AgentConfig config)
             var selection = await replayApi.GetSelectionAsync(ct);
             Log.Warn($"Camera check failed: parked=({parked?.X:0},{parked?.Z:0}) now=({current?.X:0},{current?.Z:0}) selection='{selection}'");
             return false;
-        }
-
-        // Fog perspective: the dropdown defaults to All (no fog); pick the
-        // tracked player's side. Deterministic click, no readback available,
-        // idempotent when already set.
-        if (GameWindow.TryClickAt(GameWindowTitle, FogX, FogBoxY))
-        {
-            await Task.Delay(TimeSpan.FromMilliseconds(900), ct);
-            GameWindow.TryClickAt(GameWindowTitle, FogX, slot.Blue ? FogBlueY : FogRedY);
-            await Task.Delay(TimeSpan.FromMilliseconds(400), ct);
         }
 
         // Park the cursor away from the panel and screen edges so it neither
