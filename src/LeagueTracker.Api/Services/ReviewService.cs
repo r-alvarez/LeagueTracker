@@ -222,7 +222,7 @@ public sealed class ReviewService(LeagueDbContext db)
                 // the fight - the same headcount idea the analyzer uses for me.
                 var oppThere = windowKills.Any(k => k.KillerParticipantId == opp.ParticipantId
                         || k.VictimParticipantId == opp.ParticipantId || AssistedBy(k, opp.ParticipantId))
-                    || (windowKills.Count > 0 && InterpolatedAt(oppPositions, midSec) is { } op
+                    || (windowKills is { Count: > 0 } && InterpolatedAt(oppPositions, midSec) is { } op
                         && Math.Sqrt(Math.Pow(op.X - windowKills.Average(k => k.X), 2)
                             + Math.Pow(op.Y - windowKills.Average(k => k.Y), 2)) <= 2500);
                 if (oppThere) continue;

@@ -493,7 +493,7 @@ public sealed class RenderAgent(AgentConfig config)
                 File.Delete(output);
                 Log.Info($"Window {window.Index}: uploaded");
             }
-            if (skippedWindows.Count > 0)
+            if (skippedWindows is { Count: > 0 })
             {
                 // Partial coverage must not read as complete: fail with the
                 // skipped windows named, so the gap is visible on the Data
@@ -720,7 +720,7 @@ public sealed class RenderAgent(AgentConfig config)
         {
             ct.ThrowIfCancellationRequested();
             var procs = Process.GetProcessesByName(GameProcessName);
-            if (procs.Length > 0)
+            if (procs is { Length: > 0 })
             {
                 foreach (var extra in procs[1..]) extra.Dispose();
                 return procs[0];

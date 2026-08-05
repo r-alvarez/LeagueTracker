@@ -154,8 +154,7 @@ public sealed class TrackerClient
                     // Server has a different partial length (an earlier
                     // attempt died mid-chunk) - resume from where it is.
                     var body = await resp.Content.ReadAsStringAsync(ct);
-                    var expected = JsonDocument.Parse(body).RootElement.GetProperty("expected").GetInt64();
-                    offset = expected;
+                    offset = JsonDocument.Parse(body).RootElement.GetProperty("expected").GetInt64();
                     file.Seek(offset, SeekOrigin.Begin);
                     continue;
                 }

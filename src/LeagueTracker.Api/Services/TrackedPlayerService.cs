@@ -1,6 +1,5 @@
 using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Riot;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace LeagueTracker.Api.Services;

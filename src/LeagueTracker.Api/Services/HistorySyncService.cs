@@ -169,8 +169,8 @@ public sealed class HistorySyncService(
                     p.RankValue = RankMath.ToValue(entry.Tier, entry.Rank, entry.LeaguePoints);
                     p.RankQueue = RankMath.QueueLabel(entry.QueueType);
                 }
-                var allyValues = match.Participants.Where(p => p.IsAlly && p.RankValue != null).Select(p => (double)p.RankValue!).ToList();
-                var enemyValues = match.Participants.Where(p => !p.IsAlly && p.RankValue != null).Select(p => (double)p.RankValue!).ToList();
+                var allyValues = match.Participants.Where(p => p.IsAlly && p.RankValue is not null).Select(p => (double)p.RankValue!).ToList();
+                var enemyValues = match.Participants.Where(p => !p.IsAlly && p.RankValue is not null).Select(p => (double)p.RankValue!).ToList();
                 match.AvgAllyRankValue = allyValues is { Count: > 0 } ? allyValues.Average() : null;
                 match.AvgEnemyRankValue = enemyValues is { Count: > 0 } ? enemyValues.Average() : null;
                 match.AllyRanksKnown = allyValues.Count;

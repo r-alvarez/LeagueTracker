@@ -243,7 +243,7 @@ public static class TimelineAnalyzer
         var f14 = FrameAtMinute(frames, 14);
         var f15 = FrameAtMinute(frames, 15);
         var f20 = FrameAtMinute(frames, 20);
-        var last = frames.Count > 0 ? frames[^1] : null;
+        var last = frames is { Count: > 0 } ? frames[^1] : null;
         FrameStats? My(Frame? f) => f is not null && f.Stats.TryGetValue(me.ParticipantId, out var s) ? s : null;
         FrameStats? Opp(Frame? f) => opp is not null && f is not null && f.Stats.TryGetValue(opp.ParticipantId, out var s) ? s : null;
 
@@ -482,13 +482,13 @@ public static class TimelineAnalyzer
 
         void Flush()
         {
-            if (cluster.Count > 0) fights.Add(BuildFight(cluster, frames, objectives, allyPids, enemyPids, myPid));
+            if (cluster is { Count: > 0 }) fights.Add(BuildFight(cluster, frames, objectives, allyPids, enemyPids, myPid));
             cluster = [];
         }
 
         foreach (var k in kills.OrderBy(k => k.TimeSec))
         {
-            if (cluster.Count > 0)
+            if (cluster is { Count: > 0 })
             {
                 var cx = cluster.Average(c => c.X);
                 var cy = cluster.Average(c => c.Y);

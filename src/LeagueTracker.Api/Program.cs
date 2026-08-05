@@ -497,7 +497,7 @@ app.MapPost("/api/render/next", async (ClipService clips, FullGameService full, 
         // page re-renders just that window, keeping the good ones.
         var missing = plan.Windows.Where(w => clips.ClipPath(matchId, w.Index) is null
             && (!vodCovered || w.Kind is "fight")).ToList();
-        if (missing.Count == 0) continue;
+        if (missing is not { Count: > 0 }) continue;
         if (!leases.TryClaim($"clips:{matchId}", agent)) continue;
         await clips.SavePlanAsync(plan, ct);
         var (myName, myChampion) = await CameraTargetAsync(matchId);

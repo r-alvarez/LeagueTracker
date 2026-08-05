@@ -898,3 +898,25 @@ the same frame-proximity unreliability the Q2 adjudication flagged.
 Adjudicated with Ruben 2026-08-05: blanket gate stays; no opponent
 plumbing into Discipline. Audit script: scratchpad audit_q3.py against a
 copy of data/leaguetracker.db.
+
+## 2026-08-05 — Repo CLAUDE.md + style-only cleanup
+
+**CLAUDE.md added and force-added to git.** Carries the Git Commits & PRs,
+Comments & Documentation, and Code Style sections from the user-level global
+instructions so future sessions apply them without user-level config. Force-add
+needed because `~/.gitignore_global` excludes `claude*.md`; tracking overrides
+the ignore from here on.
+
+**Bare `///` prose comments left as-is, not converted to `//`.** The codebase
+has zero `/// <summary>` blocks but ~849 plain `///` narrative comments across
+59 files — a deliberate house convention, and their content is exactly the WHY
+material the comment rule protects. Converting would have been a wholesale
+reformat of protected content for zero information gain. Same ruling applied to
+the frontend: JSDoc `/** */` blocks on exported types were kept (they also feed
+IDE hover), reverting an agent pass that had downgraded them to `//`.
+
+**Cleanup deliberately skipped:** null/pattern conversions inside EF Core
+IQueryable lambdas (patterns don't compile in expression trees — e.g.
+Reports.cs `.Where(p => p.Tier != null)`), `Count == 0` sites where a pattern
+would also match null and flip a guard, and handle/`nint` comparisons in the
+interop-heavy recorder code.

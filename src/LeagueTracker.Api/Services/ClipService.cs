@@ -72,7 +72,7 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         }
         windows.AddRange(await FightWindowsAsync(match, myPid.Value, windows.Count, ct));
 
-        return windows.Count > 0 ? new ClipPlan(matchId, match.GameVersion, match.DurationSec, windows) : null;
+        return windows is { Count: > 0 } ? new ClipPlan(matchId, match.GameVersion, match.DurationSec, windows) : null;
     }
 
     /// The team's skirmishes/teamfights the player was NOT in, filmed from a
@@ -97,7 +97,7 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
             .Where(f => !f.Participated && f.CameraParticipantId > 0
                 && (f.Kind is "teamfight" || (f.Kind is "skirmish" && f.AllyKills + f.EnemyKills >= 2)))
             .ToList();
-        if (wanted.Count == 0) return [];
+        if (wanted is not { Count: > 0 }) return [];
 
         var fighters = await db.Participants.AsNoTracking()
             .Where(p => p.MatchId == match.Id)

@@ -203,7 +203,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 // Deploy stop mid-game: leave the segments and state on disk
                 // for the next agent run to resume - finalizing here would
                 // split the game across two numbers.
-                if (state.Segments.Count > 0 && await PhaseSafeAsync() == "InProgress")
+                if (state.Segments is { Count: > 0 } && await PhaseSafeAsync() == "InProgress")
                 {
                     SaveInflight(state);
                     Log.Info($"Stop requested mid-game - {state.BaseName} will resume after restart");
@@ -610,7 +610,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         {
             var procs = Process.GetProcessesByName(GameProcessName);
             foreach (var p in procs) p.Dispose();
-            return procs.Length > 0;
+            return procs is { Length: > 0 };
         }
     }
 

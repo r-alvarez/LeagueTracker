@@ -27,8 +27,7 @@ public sealed class ReplayApiClient : IDisposable
     {
         try
         {
-            var raw = await _http.GetStringAsync($"{Base}/replay/playback", ct);
-            return JsonSerializer.Deserialize<Playback>(raw, Json);
+            return JsonSerializer.Deserialize<Playback>(await _http.GetStringAsync($"{Base}/replay/playback", ct), Json);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
