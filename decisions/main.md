@@ -865,3 +865,36 @@ frame-number callback unconditionally, so the counter advances for every
 rendered frame. The AND with growth means the new check can only ever
 restart less than the old one, even if a future library version stopped
 reporting frames.
+
+## 2026-08-05 — Q3 epic concessions get the same laning-phase gate as the Q1 ledger
+
+**Discipline's conceded-epic loop now skips objectives before LaneEndSec
+(14:00).** The Q1 absence ledger already excluded laning-phase fights because
+the "absent" laner is holding their lane — payment the ledger can't see,
+since it only recognizes structure kills — but the Q3 concession check had
+no phase filter, so an early dragon/grubs taken while the player laned
+cross-map (with 2+ allies contesting) charged an unpaid concession under
+the exact rationale the ledger fix rejected. Same gate, same constant.
+Alternative rejected: recognizing farming/CS as payment — CS-per-window
+attribution from 60s frames is noise, and structures remain the only
+payment signal the system can honestly verify. Verdicts recompute at read
+time from stored objectives, so no reprocess is needed; historical
+Discipline verdicts with pre-14:00 unpaid concessions may soften on next
+view (20 of 448 audited verdicts change, all no→mixed or mixed→yes,
+including the miscredited Ahri-vs-Lux split-push win EUW1_7925471410).
+
+**Alternative rejected after audit: the "mirror rule" (charge a pre-14:00
+concession only when the lane opponent rotated to the epic and you
+didn't).** Audited 448 timeline games (May 10–Jul 24): 44 pre-14:00
+concessions; the opponent had rotated in just 6 (all mid-lane games, 3W/3L
+— no gradient; top's 16 were all cross-map farming, opponent rotated 0
+times). The decisive number: ranked games charged ONLY by early
+concessions ran 58% WR vs the 51% no-concession baseline — the early
+charge was anti-signal, penalizing correct play — while post-14:00
+charges (kept by the gate) run 36% WR, the real discipline signal. Vs the
+gate the mirror rule changes 3 verdicts, 2 of which sit on interpolation
+margins (me 4207u vs the 4000 threshold, opp 2384u vs 2500) in won games —
+the same frame-proximity unreliability the Q2 adjudication flagged.
+Adjudicated with Ruben 2026-08-05: blanket gate stays; no opponent
+plumbing into Discipline. Audit script: scratchpad audit_q3.py against a
+copy of data/leaguetracker.db.

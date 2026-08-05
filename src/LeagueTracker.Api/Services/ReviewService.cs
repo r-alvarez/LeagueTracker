@@ -407,12 +407,15 @@ public sealed class ReviewService(LeagueDbContext db)
         // Uncontested concessions are team macro calls, not personal discipline,
         // so they never appear here. "Paid" = I took a structure around that
         // moment (a real trade). Same-kind events within 90s (grub spawns)
-        // collapse into one moment.
+        // collapse into one moment. Laning-phase epics are excluded for the
+        // same reason the Q1 ledger starts at LaneEndSec: the "absent" laner
+        // is holding their lane - payment this check can't see, since it only
+        // recognizes structures.
         var byPid = positions.GroupBy(p => p.ParticipantId)
             .ToDictionary(g => g.Key, g => g.OrderBy(p => p.TimeSec).ToList());
         var myPositions = me is not null ? byPid.GetValueOrDefault(me.ParticipantId) ?? [] : [];
         var concededAbsent = new List<ConcededEpic>();
-        foreach (var o in objectives.Where(o => !o.ByMyTeam && EpicKinds.Contains(o.Kind)).OrderBy(o => o.TimeSec))
+        foreach (var o in objectives.Where(o => !o.ByMyTeam && o.TimeSec >= LaneEndSec && EpicKinds.Contains(o.Kind)).OrderBy(o => o.TimeSec))
         {
             if (concededAbsent.Any(c => c.Kind == o.Kind && o.TimeSec - c.TimeSec <= 90)) continue;
             if (InterpolatedAt(myPositions, o.TimeSec) is not { } p) continue;
