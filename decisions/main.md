@@ -846,3 +846,22 @@ range extrapolation uses slope 1 (the clocks tick at the same rate).
 Alternative rejected: fixing timing via Riot's Spectator API — gameStartTime
 reads 0 for minutes and spectator data runs ~3 min delayed; the local Live
 Client API (already sampled) is strictly better.
+
+## 2026-08-05 — WGC becomes the default capture engine; watchdog watches frames, not bytes
+
+**CaptureBackend default (AgentConfig + shipped appsettings.json) flipped
+ddagrab→wgc.** WGC was merged as an opt-in plan B and never enabled, so every
+"broken video" seam to date was produced by ddagrab's known failure (Desktop
+Duplication dies on exclusive-fullscreen mode switches) — the engine built to
+fix it had not run. Fallback order unchanged: a WGC startup failure still
+drops that segment to ddagrab and retries WGC on the next one.
+
+**The WGC stall watchdog now keys on Recorder.CurrentFrameNumber, keeping
+file growth only as a backstop (restart requires BOTH dead).** The old
+<5 MB/min growth check false-positived on visually quiet stretches, where
+quality-mode H264 writes almost nothing — a false restart WGC would get
+blamed for. Verified in ScreenRecorderLib source that Record() wires the
+frame-number callback unconditionally, so the counter advances for every
+rendered frame. The AND with growth means the new check can only ever
+restart less than the old one, even if a future library version stopped
+reporting frames.

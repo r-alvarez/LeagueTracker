@@ -22,6 +22,12 @@ public sealed class WgcRecorder : IDisposable
 
     public bool HasEnded => _done.Task.IsCompleted;
 
+    /// Frames rendered into the output so far - the segment supervisor's
+    /// aliveness signal. File growth alone can't tell a dead engine from a
+    /// visually quiet stretch (quality-mode H264 writes almost nothing when
+    /// little moves on screen); the frame counter advances either way.
+    public int CurrentFrameNumber => _recorder.CurrentFrameNumber;
+
     private WgcRecorder((int X, int Y, int Width, int Height)? rect, int framerate, int quality)
     {
         var source = DisplayRecordingSource.MainMonitor;

@@ -978,10 +978,15 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var clockMap = new List<(double, double)>();
         string? activePlayer = null;
         var lastClockSample = DateTime.MinValue;
-        // WGC surviving mode switches makes the growth watchdog mostly
-        // vestigial, but engines can still die quietly - same belt and
-        // braces as the ffmpeg path, just measured on the output file.
-        var lastGrowthCheck = DateTime.UtcNow;
+        // WGC surviving mode switches makes this watchdog mostly vestigial,
+        // but engines can still die quietly. The frame counter is the primary
+        // aliveness signal - file growth false-positived on visually quiet
+        // stretches (shopping, scoreboard), where quality-mode H264 writes
+        // almost nothing. Growth stays as the backstop condition so a frame
+        // counter that stops reporting can never kill healthy captures that
+        // are visibly writing video.
+        var lastWatchdogCheck = DateTime.UtcNow;
+        var lastFrameNumber = 0;
         long lastPartSize = 0;
 
         while (!recorder.HasEnded)
@@ -993,15 +998,18 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             if (g.Process.HasExited) break;
             if (RenderAgent.StopRequested) break;
 
-            if (DateTime.UtcNow - lastGrowthCheck > TimeSpan.FromSeconds(60))
+            if (DateTime.UtcNow - lastWatchdogCheck > TimeSpan.FromSeconds(60))
             {
-                lastGrowthCheck = DateTime.UtcNow;
+                lastWatchdogCheck = DateTime.UtcNow;
+                var frameNumber = recorder.CurrentFrameNumber;
+                var framesAdvanced = frameNumber > lastFrameNumber;
+                lastFrameNumber = frameNumber;
                 var size = new FileInfo(partPath) is { Exists: true } part ? part.Length : 0;
                 var grewBytes = size - lastPartSize;
                 lastPartSize = size;
-                if (grewBytes < 5_000_000 && DateTime.UtcNow - startedUtc > TimeSpan.FromSeconds(90))
+                if (!framesAdvanced && grewBytes < 5_000_000 && DateTime.UtcNow - startedUtc > TimeSpan.FromSeconds(90))
                 {
-                    Log.Warn($"WGC capture stalled ({grewBytes / 1024} KB in the last minute); restarting the capture");
+                    Log.Warn($"WGC capture stalled (frame counter parked at {frameNumber}, {grewBytes / 1024} KB in the last minute); restarting the capture");
                     break;
                 }
             }

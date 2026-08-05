@@ -71,7 +71,7 @@ public sealed class AgentConfig
     /// (ScreenRecorderLib + Media Foundation hardware H264) - DWM-composited
     /// capture that mode switches and alt-tab cannot interrupt; falls back
     /// to ddagrab per segment if it won't start.
-    public string CaptureBackend { get; set; } = "ddagrab";
+    public string CaptureBackend { get; set; } = "wgc";
 
     /// Which queue kinds get recorded, comma-separated: ranked-solo,
     /// ranked-flex, normal (draft/blind/swiftplay/quickplay), aram, clash,
