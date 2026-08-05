@@ -449,6 +449,12 @@ export interface VodClockPair {
   gameSec: number
 }
 
+export interface VodSegment {
+  startUtc: string
+  videoOffsetSec: number
+  videoSec: number
+}
+
 export interface VodMeta {
   matchId: string | null
   gameMode: string | null
@@ -460,6 +466,8 @@ export interface VodMeta {
   fps: number
   encoder: string
   clockMap: VodClockPair[]
+  // Absent on sidecars from before segmented recording.
+  segments?: VodSegment[]
 }
 
 export interface VodApm {

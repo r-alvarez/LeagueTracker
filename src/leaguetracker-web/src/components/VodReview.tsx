@@ -110,9 +110,14 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
   const hasAnyData = vod.exists || !!vod.youtubeUrl || !!vod.meta || !!vod.apm
 
   // Without a loaded <video> element (YouTube mode) the recording length
-  // comes from the sidecar's own start/end stamps.
+  // comes from the sidecar. Segment durations are ffprobe-exact and skip the
+  // dead time between capture restarts; the wall-clock span (which counts
+  // those gaps as footage) is only for sidecars from before segmented
+  // recording.
   const metaDuration = vod.meta
-    ? (new Date(vod.meta.recordingEndUtc).getTime() - new Date(vod.meta.recordingStartUtc).getTime()) / 1000
+    ? (vod.meta.segments && vod.meta.segments.length > 0
+        ? vod.meta.segments.reduce((sum, s) => sum + s.videoSec, 0)
+        : (new Date(vod.meta.recordingEndUtc).getTime() - new Date(vod.meta.recordingStartUtc).getTime()) / 1000)
     : null
   const effectiveDuration = duration ?? metaDuration
 
