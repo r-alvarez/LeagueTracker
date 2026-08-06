@@ -960,3 +960,17 @@ that timestamp is deterministic - a retry can never go differently) and not
 an aftermath recording. Already-saved plan manifests keep their original
 camera targets (plans are claim-time snapshots); the fix applies to matches
 planned after the analyzer reprocess.
+
+## 2026-08-05 — Re-rendering a match drops its plan snapshot
+
+Plans are claim-time snapshots so rendered mp4s stay matched to the window
+indices they were rendered against - but nothing ever deleted one, so a
+match planned before an analyzer fix re-rendered against the same bad
+camera target forever. Re-render now drops the plan with the clips: the
+whole-match retry always, and a single-clip delete once it removes the last
+mp4 (nothing left pinned to the old indices). Deleting one clip out of
+several still keeps the plan - its siblings are named by it.
+
+The alive-for-the-fight margin also grew from 60s to 80s to cover the clip's
+20s pre-roll: a fighter who respawned 45s before the fight is alive at
+engage but spends the pre-roll walking down a lane, which is not the shot.

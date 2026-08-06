@@ -207,22 +207,36 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         if (File.Exists(marker)) File.Delete(marker);
     }
 
-    /// Drops rendered clips so the match re-qualifies for the render queue.
+    /// Drops rendered clips so the match re-qualifies for the render queue,
+    /// and the plan with them: nothing is pinned to the old window indices any
+    /// more, so the re-render should use current analysis (camera targets in
+    /// particular) rather than replaying whatever was planned at claim time.
     public void DeleteClips(string matchId)
     {
         if (DirFor(matchId) is not { } dir || !Directory.Exists(dir)) return;
         foreach (var mp4 in Directory.EnumerateFiles(dir, "*.mp4")) File.Delete(mp4);
+        DeletePlan(matchId);
     }
 
     /// Drops one bad clip so just that window re-renders. Also clears the
     /// failed marker - a match can hold good clips AND a failure (e.g. the
     /// game died mid-job), and the marker would otherwise block the re-render.
+    /// The plan survives while any clip does: the surviving mp4s are named by
+    /// its window indices. Once the last one goes, it is free to be replanned.
     public bool DeleteClip(string matchId, int index)
     {
         if (ClipPath(matchId, index) is not { } path) return false;
         File.Delete(path);
         ClearFailed(matchId);
+        if (!HasClips(matchId)) DeletePlan(matchId);
         return true;
+    }
+
+    private void DeletePlan(string matchId)
+    {
+        if (DirFor(matchId) is not { } dir) return;
+        var plan = Path.Combine(dir, "plan.json");
+        if (File.Exists(plan)) File.Delete(plan);
     }
 
     /// Render-queue view over every match with an archived replay, newest first.

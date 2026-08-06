@@ -104,9 +104,11 @@ public static class TimelineAnalyzer
     private const int FightChainUnits = 3500;
     private const int FightNearUnits = 2500;
     private const int FightConversionSec = 45;
-    // Covers a death timer at any game length: a fighter who died within this
-    // of the fight starting may still be on their respawn timer when it does.
-    private const int RecentDeathSec = 60;
+    // Covers a death timer at any game length plus the clip's pre-roll: a
+    // fighter who died within this of the fight starting is either still on
+    // their respawn timer when it does, or walking back down a lane while the
+    // clip is meant to be showing the fight forming.
+    private const int RecentDeathSec = 80;
 
     /// One detected fight. Kind: duel (1v1) / skirmish / teamfight (3+ a side).
     /// Result is from my team's perspective; GoldSwing is the team-gold-diff
