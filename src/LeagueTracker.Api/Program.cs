@@ -41,6 +41,7 @@ builder.Services.AddScoped<TimelineSeriesService>();
 builder.Services.AddScoped<LensService>();
 builder.Services.AddScoped<FundamentalsService>();
 builder.Services.AddScoped<ReviewService>();
+builder.Services.AddScoped<ReviewReelService>();
 // dpm.lol answers 403 to default HTTP clients; browser-like headers get JSON.
 builder.Services.AddHttpClient<DpmLpBackfillService>(c =>
 {
@@ -747,6 +748,11 @@ app.MapGet("/api/fundamentals", async (FundamentalsService svc, int window = 20,
 // my lane / fights bought the map / stepped with the enemy accounted for.
 app.MapGet("/api/matches/{id}/review", async (string id, ReviewService svc, CancellationToken ct) =>
     await svc.GetAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+
+// The between-games review: the moments the player was in, as replay
+// timestamps, for the agent to drive the game client through.
+app.MapGet("/api/matches/{id}/reel", async (string id, ReviewReelService svc, CancellationToken ct) =>
+    await svc.GetAsync(id, ct) is { } reel ? Results.Ok(reel) : Results.NotFound());
 
 // Verdict triples for a page of matches (the list rows' process chips).
 app.MapGet("/api/reviews", async (string ids, ReviewService svc, CancellationToken ct) =>

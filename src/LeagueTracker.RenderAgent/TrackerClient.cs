@@ -5,6 +5,14 @@ namespace LeagueTracker.RenderAgent;
 
 public sealed record ClipEvent(string Kind, int TimeSec);
 
+/// One stop on the between-games review: a replay window in game-clock
+/// seconds, what it is, and the facts to check it against.
+public sealed record ReviewMoment(
+    string Kind, int TimeSec, int StartSec, int EndSec, string Title, string Detail);
+
+public sealed record ReviewReel(
+    string MatchId, string? MyRiotId, string? MyChampion, List<ReviewMoment> Moments);
+
 /// CameraName/CameraChampion override the job-level follow target for this
 /// window - "fight" windows film a team fight the player was not in from a
 /// surviving fighter's POV. Null = follow the job's player as always.
@@ -58,6 +66,24 @@ public sealed class TrackerClient
         }
     }
 
+    /// The between-games review reel: the moments the player was in, as
+    /// replay timestamps. Null when this tracker doesn't hold the match (not
+    /// its account) or hasn't imported it yet - the caller retries for the
+    /// latter, and this doubles as the "does this tracker own the game" probe.
+    public async Task<ReviewReel?> GetReelAsync(string matchId, CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _http.GetAsync($"{ServerUrl}/api/matches/{Uri.EscapeDataString(matchId)}/reel", ct);
+            if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
+            return JsonSerializer.Deserialize<ReviewReel>(await resp.Content.ReadAsStringAsync(ct), Json);
+        }
+        catch when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
     public async Task<RenderJob?> ClaimNextAsync(CancellationToken ct)
     {
         using var resp = await _http.PostAsync($"{ServerUrl}/api/render/next?agent={Uri.EscapeDataString(_agentName)}", null, ct);
@@ -97,6 +123,21 @@ public sealed class TrackerClient
         await using var stream = await _http.GetStreamAsync($"{ServerUrl}{job.ReplayUrl}", ct);
         await using var file = File.Create(targetPath);
         await stream.CopyToAsync(file, ct);
+    }
+
+    /// The archived .rofl for a match, without a render job to carry the url -
+    /// the between-games review launches replays off nothing but a match id.
+    /// False = this tracker has no replay archived for it.
+    public async Task<bool> TryDownloadReplayAsync(string matchId, string targetPath, CancellationToken ct)
+    {
+        using var resp = await _http.GetAsync(
+            $"{ServerUrl}/api/matches/{Uri.EscapeDataString(matchId)}/replay",
+            HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!resp.IsSuccessStatusCode) return false;
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        await using var file = File.Create(targetPath);
+        await stream.CopyToAsync(file, ct);
+        return true;
     }
 
     public async Task UploadAsync(RenderJob job, int index, string mp4Path, CancellationToken ct)

@@ -125,6 +125,20 @@ public sealed class RenderAgent(AgentConfig config)
 
     private async Task<bool> RunOnceAsync(CancellationToken ct)
     {
+        // A between-games review owns the replay client while it runs. This
+        // has to come FIRST, ahead of the orphan sweep below: a review's
+        // replay is API-launched, so gameflow reads "None", and a player
+        // sitting still to think about a moment is indistinguishable from an
+        // idle machine - the orphan rule would kill the very replay they are
+        // watching. Rendering simply waits for the review to end.
+        if (ReplayReview.SessionActive)
+        {
+            if (!_reportedUserActive) Log.Info("Post-game review in progress - rendering waits for it to finish");
+            _reportedUserActive = true;
+            _orphanStrikes = 0;
+            return false;
+        }
+
         // Never fight the player for the machine - judged from THIS machine
         // only: a game client running locally, or the local League client
         // anywhere in the play flow (lobby, queue, champ select, loading,
@@ -594,18 +608,16 @@ public sealed class RenderAgent(AgentConfig config)
             : throw new InvalidOperationException($"unexpected match id format: {matchId}");
     }
 
-    // Replay UI geometry as ratios of the client area, calibrated at 2560x1440
-    // with default HUD scale (GlobalScaleReplay=1). The camera dropdown lists
-    // 13 entries (FPS, Directed, Manual, then the 10 champions in player-list
-    // order) stacked upward from the box; the fog dropdown lists Blue/Red/All.
-    private const double PanelX = 0.0703;
-    private const double CameraBoxY = 0.9167;
-    private const double CameraListBottomY = 0.90625;
-    private const double DropdownRowH = 0.021806;
-    private const double FogX = 0.114;
-    private const double FogBoxY = 0.948;
-    private const double FogBlueY = 0.8813;
-    private const double FogRedY = 0.9035;
+    // Replay UI geometry lives in ReplayCameraUi - the between-games review
+    // drives the same dropdowns, and one HUD has one set of coordinates.
+    private const double PanelX = ReplayCameraUi.PanelX;
+    private const double CameraBoxY = ReplayCameraUi.CameraBoxY;
+    private const double CameraListBottomY = ReplayCameraUi.CameraListBottomY;
+    private const double DropdownRowH = ReplayCameraUi.DropdownRowH;
+    private const double FogX = ReplayCameraUi.FogX;
+    private const double FogBoxY = ReplayCameraUi.FogBoxY;
+    private const double FogBlueY = ReplayCameraUi.FogBlueY;
+    private const double FogRedY = ReplayCameraUi.FogRedY;
 
     private const int EngagePreRollSec = 10;
     private const int MaxIdenticalPostpones = 3;
@@ -907,29 +919,7 @@ public sealed class RenderAgent(AgentConfig config)
             : null;
     }
 
-    /// The game persists EnableDirectedCamera in game.cfg's [Replay] section and
-    /// reads it at launch. Idempotent; called while no game runs.
-    private void EnsureDirectedCameraDisabled()
-    {
-        var cfg = Path.Combine(LeagueRoot, "Config", "game.cfg");
-        if (!File.Exists(cfg)) return;
-
-        var lines = File.ReadAllLines(cfg).ToList();
-        var existing = lines.FindIndex(l => l.Trim().StartsWith("EnableDirectedCamera", StringComparison.OrdinalIgnoreCase));
-        if (existing >= 0)
-        {
-            if (lines[existing].Trim().EndsWith("=0")) return;
-            lines[existing] = "EnableDirectedCamera=0";
-        }
-        else
-        {
-            var replay = lines.FindIndex(l => l.Trim().Equals("[Replay]", StringComparison.OrdinalIgnoreCase));
-            if (replay < 0) { lines.Add("[Replay]"); replay = lines.Count - 1; }
-            lines.Insert(replay + 1, "EnableDirectedCamera=0");
-        }
-        File.WriteAllLines(cfg, lines);
-        Log.Info("Disabled the directed replay camera in game.cfg");
-    }
+    private void EnsureDirectedCameraDisabled() => ReplayCameraUi.EnsureDirectedCameraDisabled(LeagueRoot);
 
     /// One-time setup the Replay API needs; idempotent, and the game only reads
     /// the file at launch so editing while no game runs is safe.

@@ -974,3 +974,77 @@ several still keeps the plan - its siblings are named by it.
 The alive-for-the-fight margin also grew from 60s to 80s to cover the clip's
 20s pre-roll: a fighter who respawned 45s before the fight is alive at
 engage but spends the pre-roll walking down a lane, which is not the shot.
+
+## 2026-08-07 — The finished game plays itself back, in the client, before the next queue
+
+**A game that has just ended opens its own replay, camera locked to the
+player, and stops at each moment that decided something - unless the next game
+is already being queued for.** Recording the game automated away the review
+that used to happen by accident (glimpses of the capture while AFK at the PC),
+and the between-games window is the only one where a review can still change
+anything.
+
+Not a video reel on the match page: that was the first build and it was wrong.
+The match page already holds the full VOD with jump markers AND the rendered
+clips for fights the player missed - a reel over the same footage is a fourth
+way to watch what is already watchable. The client's replay is the thing the
+website can't be: a real camera, in the actual game, that can be flown.
+
+**The reel is scoped to moments the player was IN** (`/api/matches/{id}/reel`).
+The session locks the camera once and never re-aims it, because the dropdown
+click is the only route to a follow-cam and re-aiming per moment is precisely
+the fragile machinery the clip pipeline already carries. A fight across the map
+from a locked camera is thirty seconds of fog - and those fights already have
+clips filmed from someone who was there.
+
+Selection is dedup before ranking. A death inside a fight IS that fight; two
+fights five seconds apart are one fight with a re-engage. Then fights rank
+(gold swing, bodies, teamfight, converted) and cap at ten. A death's window
+ENDS at the death: the replay parks a dead champion's camera at their own
+fountain, so every second past it is an empty base.
+
+**The reel rolls on by itself and the hotkeys are the override** (F9 skip, F8
+back, F10 again) - `PostGameReviewAutoAdvance`, on by default. There is no quit
+hotkey: closing the replay window ends the session, which alt+F4 already does
+and needs no explaining. The
+first build parked at every window and demanded a key; watching it run, the
+stopping was friction rather than reflection, and going back is the rarer
+action that deserves the keypress. The hook drains queued keys BEFORE each
+seek, not after: with the reel advancing on its own, a key pressed while the
+next moment loads is the player reacting to the one that just ended (usually
+"wait, go back"), and eating it makes the hotkeys feel dead exactly when they
+matter. It is a low-level hook because the game holds focus and the agent has
+no window; it swallows nothing and lives only for the session.
+
+**The camera must be re-aimed after EVERY seek** (found live 2026-08-07): a
+seek reloads the world and drops the camera back to Manual, so the session
+that aimed once at launch played every moment on the free camera. Each moment
+now seeks ~9s early and re-clicks the dropdown during that lead-in, so the lock
+is in place before the window proper starts - the same reason the clip pipeline
+engages per window rather than per job. The aim is deliberately unverified,
+unlike the render path's: that pipeline verifies because nobody is watching it,
+while here the player is, and a camera that didn't take is obvious in a second.
+Camera geometry and the directed-camera cfg write moved to `ReplayCameraUi` so
+both callers share one set of coordinates.
+
+**Two live-system hazards found while testing this, both invisible to a build.**
+The render loop kills a game process when gameflow reads "None" and the user
+has been idle three polls - and a review's replay is API-launched, so it reads
+"None" while the player sits still to think. The review guard therefore runs
+FIRST in the render gate, ahead of that orphan sweep. And the session used to
+adopt whatever game process it found and kill it on the way out; it now refuses
+to start when one is already running, and never kills while the client says a
+game is live.
+
+**The render loop stands down for the session** (`ReplayReview.SessionActive`).
+Someone watching a replay looks exactly like an idle machine to the render
+gate, which would otherwise launch a second replay over the top of the review.
+
+Off by default (`PostGameReview`): it takes the screen, which is only welcome
+if you asked for it. `LT_REVIEW_TEST=<matchId>` runs a session now instead of
+waiting for a game to end - the only way to exercise launch, camera lock, seek
+and hotkeys without playing first. Honest limits: the review needs the match
+imported AND its replay archived, so it opens minutes after the game rather
+than at the honor screen (the agent waits `PostGameReviewWaitMin`, 8 by
+default, then gives up loudly); and replays are patch-locked, so this only ever
+works for a game just played, which is exactly the use case.
