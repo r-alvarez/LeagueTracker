@@ -437,18 +437,30 @@ public sealed class RenderAgent(AgentConfig config)
                         continue;
                     }
 
-                    Log.Info($"Window {window.Index}: recording {duration}s...");
+                    // Engaging ate a variable slice of the pre-roll while
+                    // playback ran, so a fixed duration would shift the clip's
+                    // end by the same slack - clipping the play's tail when
+                    // engage was quick, trailing past it when it was slow.
+                    // Anchor the end to the planned EndSec from where playback
+                    // actually is; the floor keeps a short clip when engaging
+                    // overran the whole window (dead-champion waits), where
+                    // late footage beats none.
+                    var playhead = await replayApi.GetPlaybackAsync(ct);
+                    var captureSec = playhead is { } at
+                        ? Math.Max(8, (int)Math.Round(window.EndSec - at.Time))
+                        : duration;
+                    Log.Info($"Window {window.Index}: recording {captureSec}s...");
                     var started = DateTime.UtcNow;
-                    await CaptureAsync(output, duration, ct);
+                    await CaptureAsync(output, captureSec, ct);
                     await replayApi.SetPlaybackAsync(time: null, paused: true, speed: null, ct);
 
                     // Desktop Duplication can end the stream early (e.g. a display
                     // mode switch) with ffmpeg still exiting 0 - trust the wall
                     // clock, not the exit code, and redo the window.
                     var recorded = (DateTime.UtcNow - started).TotalSeconds;
-                    if (recorded < duration - 3 && attempt < 3)
+                    if (recorded < captureSec - 3 && attempt < 3)
                     {
-                        Log.Warn($"Window {window.Index}: capture ended after {recorded:0}s of {duration}s - retrying");
+                        Log.Warn($"Window {window.Index}: capture ended after {recorded:0}s of {captureSec}s - retrying");
                         continue;
                     }
 

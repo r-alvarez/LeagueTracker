@@ -20,10 +20,16 @@ public sealed record ClipPlan(string MatchId, string GameVersion, double Duratio
 /// rendered clips live under data/clips/{matchId}; the db is never written.
 public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays, DataPaths paths)
 {
-    // A fight window is [event - pre, event + post]; overlapping windows merge,
-    // so a kill followed by your death 15s later reviews as one clip.
+    // A fight window is [first event - pre, chained end + post]; overlapping
+    // windows merge, so a kill followed by your death 15s later reviews as one
+    // clip. The chained end follows the whole play, not just the player's own
+    // last event - teammates finishing the fight, the chase-down after - by
+    // chaining ANY kills that stay close in time and space (the same
+    // clustering TimelineAnalyzer uses for fights).
     private const int PreRollSec = 20;
     private const int PostRollSec = 10;
+    private const int ChainSec = 15;
+    private const int ChainUnits = 3500;
 
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true, WriteIndented = true };
 
@@ -46,29 +52,35 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
             .FirstOrDefaultAsync(ct);
         if (myPid is null) return null;
 
-        var events = await db.KillEvents.AsNoTracking()
-            .Where(k => k.MatchId == matchId && (k.KillerParticipantId == myPid || k.VictimParticipantId == myPid))
+        // Every kill in the match, not just the player's: the chained window
+        // end needs the kills around their events too.
+        var kills = await db.KillEvents.AsNoTracking()
+            .Where(k => k.MatchId == matchId)
             .OrderBy(k => k.TimeSec)
-            .Select(k => new ClipEvent(k.VictimParticipantId == myPid ? "death" : "kill", k.TimeSec))
+            .Select(k => new Kill(k.TimeSec, k.KillerParticipantId, k.VictimParticipantId, k.X, k.Y))
             .ToListAsync(ct);
+        var mine = kills.Where(k => k.KillerId == myPid || k.VictimId == myPid).ToList();
 
         var windows = new List<ClipWindow>();
-        if (events is { Count: > 0 })
+        if (mine.Count > 0)
         {
-            var group = new List<ClipEvent> { events[0] };
-            foreach (var e in events.Skip(1))
+            var group = new List<Kill> { mine[0] };
+            var groupEnd = ChainedEndSec(mine[0], kills);
+            foreach (var k in mine.Skip(1))
             {
-                if (e.TimeSec - PreRollSec <= group[^1].TimeSec + PostRollSec)
+                if (k.TimeSec - PreRollSec <= groupEnd + PostRollSec)
                 {
-                    group.Add(e);
+                    group.Add(k);
+                    groupEnd = Math.Max(groupEnd, ChainedEndSec(k, kills));
                 }
                 else
                 {
-                    windows.Add(ToWindow(windows.Count, group, match.DurationSec));
-                    group = [e];
+                    windows.Add(ToWindow(windows.Count, group, myPid.Value, groupEnd, match.DurationSec));
+                    group = [k];
+                    groupEnd = ChainedEndSec(k, kills);
                 }
             }
-            windows.Add(ToWindow(windows.Count, group, match.DurationSec));
+            windows.Add(ToWindow(windows.Count, group, myPid.Value, groupEnd, match.DurationSec));
         }
         windows.AddRange(await FightWindowsAsync(match, myPid.Value, windows.Count, ct));
 
@@ -122,8 +134,27 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         return windows;
     }
 
-    private static ClipWindow ToWindow(int index, List<ClipEvent> events, double durationSec)
+    private sealed record Kill(int TimeSec, int KillerId, int VictimId, int X, int Y);
+
+    /// Where the play actually ends: from the given kill, follow ANY kills
+    /// that land within ChainSec/ChainUnits of the last chained one. A kill
+    /// elsewhere on the map is skipped, not a chain-breaker.
+    private static int ChainedEndSec(Kill from, List<Kill> kills)
     {
+        var (t, x, y) = (from.TimeSec, from.X, from.Y);
+        foreach (var k in kills)
+        {
+            if (k.TimeSec <= t) continue;
+            if (k.TimeSec - t > ChainSec) break;
+            if (Math.Sqrt(Math.Pow(k.X - x, 2) + Math.Pow(k.Y - y, 2)) > ChainUnits) continue;
+            (t, x, y) = (k.TimeSec, k.X, k.Y);
+        }
+        return t;
+    }
+
+    private static ClipWindow ToWindow(int index, List<Kill> group, int myPid, int endEventSec, double durationSec)
+    {
+        var events = group.Select(k => new ClipEvent(k.VictimId == myPid ? "death" : "kill", k.TimeSec)).ToList();
         var kills = events.Count(e => e.Kind is "kill");
         var deaths = events.Count(e => e.Kind is "death");
         var label = (kills, deaths) switch
@@ -135,8 +166,8 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         };
         return new ClipWindow(
             index,
-            Math.Max(0, events[0].TimeSec - PreRollSec),
-            (int)Math.Min(durationSec, events[^1].TimeSec + PostRollSec),
+            Math.Max(0, group[0].TimeSec - PreRollSec),
+            (int)Math.Min(durationSec, endEventSec + PostRollSec),
             label,
             events);
     }
