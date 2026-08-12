@@ -288,9 +288,9 @@ public sealed class RenderAgent(AgentConfig config)
 
         _lastClientLaunchAttempt = DateTime.UtcNow;
 
-        // Two stages. A Riot hub that is already open just needs its Play
-        // button pressed - RiotClientServices ignores --launch-product when
-        // the hub is up, it only focuses the window (observed 2026-08-12).
+        // The hub's API is the launch mechanism, full stop -
+        // RiotClientServices ignores --launch-product from cold and warm
+        // alike (both observed 2026-08-12); the exe only brings the hub up.
         if (await ClientLauncher.PressPlayAsync(ct))
         {
             Log.Info($"{pending} render job(s) waiting - the Riot hub was already open, pressed Play through its API");
@@ -306,8 +306,22 @@ public sealed class RenderAgent(AgentConfig config)
             return;
         }
 
-        Log.Info($"{pending} render job(s) waiting and the client is closed - launching League via {launcher}");
-        ClientLauncher.Launch(launcher);
+        Log.Info($"{pending} render job(s) waiting and the client is closed - starting the Riot hub via {launcher}");
+        if (!ClientLauncher.Launch(launcher)) return;
+
+        // Press Play in the same breath: leaving it for the next attempt
+        // strands a parked hub for minutes (or indefinitely if the user
+        // comes back, since launching never happens while they're active).
+        for (var waited = 0; waited < 90; waited += 5)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), ct);
+            if (await ClientLauncher.PressPlayAsync(ct, quiet: true))
+            {
+                Log.Info("Riot hub is up - pressed Play through its API");
+                return;
+            }
+        }
+        Log.Warn("The Riot hub's API did not answer within 90s of starting it - retrying within 3 minutes");
     }
 
     private async Task<bool> ProcessJobAsync(TrackerClient tracker, RenderJob job, CancellationToken ct)

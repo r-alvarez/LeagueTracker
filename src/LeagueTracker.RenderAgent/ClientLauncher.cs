@@ -65,12 +65,14 @@ public static class ClientLauncher
     }
 
     /// The Riot hub's own local API - lockfile scheme identical to the LCU's.
-    /// Starting RiotClientServices with --launch-product can land at the hub's
-    /// Play button instead of in League (observed 2026-08-12, signed-in hub,
-    /// launch args ignored); this endpoint IS that Play button, minus the
-    /// mouse (verified live: 200, LeagueClientUx came up). False when the hub
-    /// isn't running or the call fails - the caller cold-starts instead.
-    public static async Task<bool> PressPlayAsync(CancellationToken ct)
+    /// RiotClientServices ignores --launch-product entirely (observed
+    /// 2026-08-12 on cold start AND with the hub already open) and only ever
+    /// lands at the hub's Play button; this endpoint IS that Play button,
+    /// minus the mouse (verified live: 200, LeagueClientUx came up). The API
+    /// is the launch mechanism - the exe merely brings the hub up. False
+    /// when the hub isn't running or the call fails. `quiet` mutes the
+    /// failure warning for callers probing a hub that is still starting.
+    public static async Task<bool> PressPlayAsync(CancellationToken ct, bool quiet = false)
     {
         var lockfile = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -99,7 +101,7 @@ public static class ClientLauncher
         {
             // A stale lockfile from a crashed hub refuses the connection -
             // that's "not running", not an error worth more than a warning.
-            Log.Warn($"Pressing Play via the Riot Client API failed: {ex.Message}");
+            if (!quiet) Log.Warn($"Pressing Play via the Riot Client API failed: {ex.Message}");
             return false;
         }
     }
