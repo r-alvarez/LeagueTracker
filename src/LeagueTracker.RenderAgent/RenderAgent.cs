@@ -20,6 +20,8 @@ public sealed class RenderAgent(AgentConfig config)
     private string _ffmpeg = "";
     private bool _reportedUserActive;
     private int _orphanStrikes;
+    private DateTime _lastClientLaunchAttempt = DateTime.MinValue;
+    private bool _clientLaunchUnavailable;
 
     /// Deploys ask the agent to stop by dropping this file next to the exe:
     /// the agent finishes (or cleanly postpones) what it is doing and exits,
@@ -183,8 +185,14 @@ public sealed class RenderAgent(AgentConfig config)
             _orphanStrikes = 0;
 
             // Vanguard only allows replay launches through the League client, so
-            // there's no point claiming a job while it's closed.
-            if (LcuClient.TryConnect(LeagueRoot) is not { } lcu) { Log.Info("League client not running - waiting"); return false; }
+            // there's no point claiming a job while it's closed. A machine the
+            // NAS just woke for queued work has nobody around to open it,
+            // though - when work waits and the keyboard is quiet, open it here.
+            if (LcuClient.TryConnect(LeagueRoot) is not { } lcu)
+            {
+                await MaybeLaunchClientAsync(ct);
+                return false;
+            }
             using (lcu)
             {
                 if (!await lcu.IsUpAsync(ct)) { Log.Info("League client still starting - waiting"); return false; }
@@ -238,6 +246,56 @@ public sealed class RenderAgent(AgentConfig config)
             if (job is not null) return await ProcessJobAsync(tracker, job, ct);
         }
         return false;
+    }
+
+    /// The client is closed. Open it (via Riot's launcher - the only
+    /// Vanguard-blessed path) when queued work is waiting and nobody is at
+    /// the keyboard. With no work it stays closed on purpose: an idle
+    /// machine should be free to go back to sleep, not have League opened
+    /// on it. Needs "stay signed in" ticked in the Riot client - a launch
+    /// parked at a login prompt renders nothing.
+    private async Task MaybeLaunchClientAsync(CancellationToken ct)
+    {
+        if (!config.AutoLaunchClient || _clientLaunchUnavailable)
+        {
+            Log.Info("League client not running - waiting");
+            return;
+        }
+        // Same politeness bar as rendering itself: a user at the keyboard
+        // without League open did not ask for it to appear over their work.
+        if (GameWindow.UserIdleTime < TimeSpan.FromSeconds(config.IdleSeconds))
+        {
+            Log.Info("League client not running - waiting (user is active, not launching over them)");
+            return;
+        }
+        // One attempt per window: the Riot client patching or logging in
+        // looks closed from here for minutes, and relaunching is just noise.
+        if (DateTime.UtcNow - _lastClientLaunchAttempt < TimeSpan.FromMinutes(10))
+        {
+            Log.Info("League client not running - a launch is in progress (patching/login can take minutes)");
+            return;
+        }
+
+        var pending = 0;
+        foreach (var tracker in _trackers) pending += await tracker.PendingRenderCountAsync(ct);
+        if (pending == 0)
+        {
+            Log.Info("League client not running - no queued work, leaving it closed");
+            return;
+        }
+
+        if (ClientLauncher.Resolve(LeagueRoot) is not { } launcher)
+        {
+            // Deterministic: a missing Riot launcher will not appear on a
+            // retry - say so once, loudly, and stop pretending it might.
+            _clientLaunchUnavailable = true;
+            Log.Error("Cannot auto-launch the League client: RiotClientServices.exe not found (checked RiotClientInstalls.json and the League root's sibling folder)");
+            return;
+        }
+
+        _lastClientLaunchAttempt = DateTime.UtcNow;
+        Log.Info($"{pending} render job(s) waiting and the client is closed - launching League via {launcher}");
+        ClientLauncher.Launch(launcher);
     }
 
     private async Task<bool> ProcessJobAsync(TrackerClient tracker, RenderJob job, CancellationToken ct)

@@ -115,6 +115,25 @@ public sealed class TrackerClient
         }
     }
 
+    /// How many render jobs sit claimable on this tracker ("pending" or
+    /// "partial" - "rendering" means somebody already holds the lease).
+    /// Best-effort: an unreachable or walled-off tracker counts as zero.
+    public async Task<int> PendingRenderCountAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _http.GetAsync($"{ServerUrl}/api/render/queue", ct);
+            if (!resp.IsSuccessStatusCode || !IsJson(resp)) return 0;
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            return doc.RootElement.EnumerateArray().Count(row =>
+                row.TryGetProperty("status", out var s) && s.GetString() is "pending" or "partial");
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return 0;
+        }
+    }
+
     private static bool IsJson(HttpResponseMessage resp) =>
         resp.Content.Headers.ContentType?.MediaType is "application/json";
 

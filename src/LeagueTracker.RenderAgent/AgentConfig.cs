@@ -116,6 +116,13 @@ public sealed class AgentConfig
     /// wait cancels the review.
     public int PostGameReviewWaitMin { get; set; } = 8;
 
+    /// Open the League client automatically (through Riot's launcher) when
+    /// render jobs are waiting, the client is closed, and nobody is at the
+    /// keyboard - the agent-side half of wake-on-LAN: the NAS wakes the
+    /// machine, this brings up the client the renders need. Requires "stay
+    /// signed in" in the Riot client so the launch lands logged in.
+    public bool AutoLaunchClient { get; set; } = true;
+
     /// Cloudflare Access service token (Zero Trust > Access > Service Auth) -
     /// lets the agent through the Access wall the trackers sit behind. Blank =
     /// no Access in front (dev against localhost).
@@ -152,6 +159,7 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_YOUTUBE_CLIENT_ID") is { Length: > 0 } ytId) config.YouTubeClientId = ytId;
         if (Environment.GetEnvironmentVariable("LT_YOUTUBE_CLIENT_SECRET") is { Length: > 0 } ytSecret) config.YouTubeClientSecret = ytSecret;
         if (Environment.GetEnvironmentVariable("LT_POSTGAME_REVIEW") is { Length: > 0 } review) config.PostGameReview = review is not ("0" or "false");
+        if (Environment.GetEnvironmentVariable("LT_AUTO_LAUNCH_CLIENT") is { Length: > 0 } autoLaunch) config.AutoLaunchClient = autoLaunch is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_ID") is { Length: > 0 } cfId) config.CfAccessClientId = cfId;
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_SECRET") is { Length: > 0 } cfSecret) config.CfAccessClientSecret = cfSecret;
 
