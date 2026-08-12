@@ -37,10 +37,13 @@ public sealed class ReviewReelService(LeagueDbContext db)
     /// approach the fight clips use, for the same reason.
     private const int PreRollSec = 20;
     private const int FightPostSec = 10;
-    /// A death's window ENDS at the death. The replay parks a dead champion's
-    /// camera at their own fountain, so every second after it is an empty
-    /// base - the opposite of review material.
-    private const int DeathPostSec = 0;
+    /// A death's window ends a few beats AFTER the death, not at it: timeline
+    /// seconds truncate and the agent's advance poll fires on >= EndSec, so a
+    /// zero post-roll skipped to the next moment while the killing blow was
+    /// still landing - the player never saw themselves die. The replay parks a
+    /// dead champion's camera at their own fountain, so anything much longer
+    /// is empty base; three seconds buys the death itself and no more.
+    private const int DeathPostSec = 3;
     /// How many fights the reel plays. A game between games is the budget.
     private const int MaxFights = 10;
 
