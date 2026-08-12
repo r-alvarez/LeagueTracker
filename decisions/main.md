@@ -1085,3 +1085,12 @@ admin set as Portainer stack env vars (UNIFI_USER/UNIFI_PASS) - never in the
 repo. The raw broadcast stays as a free secondary for a same-L2 future. The
 auto-launch chain proved itself the same evening: claim, hub Play press,
 render, upload, all unattended.
+
+**The UniFi wake path passed its live test, so the PC gets to sleep - guarded.**
+KeepAwake pulses ES_SYSTEM_REQUIRED (no ES_CONTINUOUS: await hops threads, and
+a continuous assertion belongs to the thread that made it) while anything
+unattended runs: a render job, a recording (its finalize/upload outlives the
+player), the catch-up upload sweep, a review session. The launch chain gets a
+five-minute timed hold because a WoL-woken machine re-sleeps on the UNATTENDED
+idle timeout - two minutes by default, shorter than the client boots. With the
+guards in, the Windows sleep timer finally comes off "never".

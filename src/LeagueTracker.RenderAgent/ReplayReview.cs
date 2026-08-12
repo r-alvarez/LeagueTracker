@@ -150,6 +150,9 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot)
     /// Launch the replay, lock the camera on the player, and walk the moments.
     private async Task RunSessionAsync(TrackerClient tracker, ReviewReel reel, CancellationToken ct)
     {
+        // Watching a replay is mouse-quiet for minutes at a stretch - don't
+        // let the idle-sleep timer end the review mid-moment.
+        using var awake = KeepAwake.Hold();
         Interlocked.Exchange(ref _sessionActive, 1);
         Process? game = null;
         using var replayApi = new ReplayApiClient();

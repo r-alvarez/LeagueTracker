@@ -158,6 +158,10 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// to the game simply ending).
     private async Task<bool> RecordGameAsync(CancellationToken ct)
     {
+        // The player's input covers the game itself, but finalize + upload
+        // run after they walk away - hold the machine awake to the end.
+        using var awake = KeepAwake.Hold();
+
         // Match identity first: the gameflow session knows the game id before
         // the game window even exists. Platform + id is the same match id the
         // trackers use, which is what ties the VOD to its match page later.
@@ -620,6 +624,9 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     private async Task SweepUnuploadedAsync(CancellationToken ct)
     {
         if (!config.UploadVods && !config.UploadVodSidecars && !_youtube.Enabled) return;
+        // Catch-up uploads run unattended (typically right after a wake) -
+        // a multi-GB VOD upload must not lose the machine halfway.
+        using var awake = KeepAwake.Hold();
         var youtubeGo = _youtube.Enabled;
         string? resolvedPlatform = null;
         var platformProbed = false;

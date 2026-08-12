@@ -288,6 +288,13 @@ public sealed class RenderAgent(AgentConfig config)
 
         _lastClientLaunchAttempt = DateTime.UtcNow;
 
+        // Work is waiting and the launch chain starts now. After a
+        // Wake-on-LAN wake Windows re-sleeps on the UNATTENDED idle timeout
+        // (2 minutes by default) - shorter than the client takes to boot to
+        // its first claim, so hold the machine awake through that window;
+        // the claimed job's own hold takes over from there.
+        KeepAwake.HoldFor(TimeSpan.FromMinutes(5));
+
         // The hub's API is the launch mechanism, full stop -
         // RiotClientServices ignores --launch-product from cold and warm
         // alike (both observed 2026-08-12); the exe only brings the hub up.
@@ -326,6 +333,9 @@ public sealed class RenderAgent(AgentConfig config)
 
     private async Task<bool> ProcessJobAsync(TrackerClient tracker, RenderJob job, CancellationToken ct)
     {
+        // Renders generate no input; without this the idle-sleep timer would
+        // put the machine to sleep mid-job.
+        using var awake = KeepAwake.Hold();
 
         var windows = config.MaxWindowsPerJob > 0 ? job.Windows.Take(config.MaxWindowsPerJob).ToList() : job.Windows;
         Log.Info($"Job {job.MatchId} ({job.Kind}) from {tracker.ServerUrl}: {windows.Count} window(s), following \"{job.MyName}\" ({job.MyChampion})");
