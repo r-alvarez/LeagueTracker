@@ -86,6 +86,27 @@ services:
       - traefik.http.routers.leaguetracker-ben.priority=100
       - traefik.http.routers.leaguetracker-ben.service=leaguetracker-ben
 
+  # Wakes the render PC while render work waits, so the gaming machine can
+  # sleep instead of idling 24/7. Host networking is mandatory: a WoL magic
+  # packet is a subnet broadcast that cannot leave the Docker bridge. It also
+  # makes the tracker hostnames resolve via the LAN's split-horizon DNS
+  # straight to Traefik, so no Cloudflare Access token is involved.
+  waker:
+    build:
+      context: ./waker
+    pull_policy: build
+    image: leaguetracker-waker:local
+    container_name: leaguetracker-waker
+    user: "568:568"
+    network_mode: host
+    environment:
+      - TZ=Europe/London
+      - TRACKER_URLS=https://league.rjav-tech.co.uk,https://league-alt.rjav-tech.co.uk,https://league-ben.rjav-tech.co.uk
+      - PC_MAC=D8-5E-D3-A2-58-4F
+      - WOL_BROADCAST=10.10.10.255
+      - POLL_SECONDS=60
+    restart: unless-stopped
+
 networks:
   frontend:
     external: true

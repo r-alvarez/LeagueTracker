@@ -1048,3 +1048,29 @@ imported AND its replay archived, so it opens minutes after the game rather
 than at the honor screen (the agent waits `PostGameReviewWaitMin`, 8 by
 default, then gives up loudly); and replays are patch-locked, so this only ever
 works for a game just played, which is exactly the use case.
+
+## 2026-08-12 — The gaming PC sleeps; TrueNAS wakes it
+
+**Replay rendering stays on real hardware — Vanguard refuses every VM** (VAN
+138 on KVM/VMware/Hyper-V, no workaround as of 2026), so "move the replay side
+to the NAS" is off the table. The energy problem is solved the other way
+round: the PC sleeps (S3, ~2W instead of ~80W idle) and a `waker` service in
+the TrueNAS stack polls every tracker's `/api/render/queue` each minute,
+broadcasting a WoL magic packet while any job sits `pending` or `partial`.
+
+**No "is it awake" probe.** Windows firewalls routinely eat ICMP, so a ping
+check would misread an awake PC as asleep — instead the packet is simply sent
+every poll while work waits; magic packets are no-ops on a running machine.
+`rendering` doesn't wake: a lease means the PC already holds the job, and a
+mid-render sleep (which the agent must prevent, not the waker) re-queues via
+lease expiry anyway.
+
+**Host networking, not the `frontend` bridge:** a magic packet is a subnet
+broadcast that cannot cross the Docker bridge onto the LAN. Side effect worth
+keeping: the tracker hostnames resolve through the LAN's split-horizon DNS
+straight to Traefik, so the waker carries no Cloudflare Access token.
+
+Still to do before the PC actually sleeps: the agent must hold
+`ES_SYSTEM_REQUIRED` while rendering/recording/reviewing, then Windows gets an
+idle-sleep timer. Until then the waker idles harmlessly alongside an always-on
+PC.
