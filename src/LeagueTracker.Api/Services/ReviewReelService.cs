@@ -44,8 +44,11 @@ public sealed class ReviewReelService(LeagueDbContext db)
     /// dead champion's camera at their own fountain, so anything much longer
     /// is empty base; three seconds buys the death itself and no more.
     private const int DeathPostSec = 3;
-    /// How many fights the reel plays. A game between games is the budget.
-    private const int MaxFights = 10;
+    /// How many fights the reel plays: one slot per this many seconds of game,
+    /// so a 45-minute war reviews more than a 20-minute stomp. A game between
+    /// games is still the budget - the reel grows with the game it reviews.
+    private const int FightSlotPerSec = 180;
+    private const int MinFights = 6;
 
     /// Teamfights always; skirmishes once they cost two lives. The same
     /// significance gate the fight-clip planner uses.
@@ -84,9 +87,10 @@ public sealed class ReviewReelService(LeagueDbContext db)
 
         // Only fights compete for the cap - deaths are few and each one is its
         // own question.
+        var maxFights = Math.Max(MinFights, (int)(match.DurationSec / FightSlotPerSec));
         var keep = moments
             .OrderByDescending(m => m.Impact)
-            .Take(MaxFights)
+            .Take(maxFights)
             .Select(m => m.Moment)
             .ToHashSet();
         var chosen = moments.Where(m => keep.Contains(m.Moment)).Select(m => m.Moment).ToList();
