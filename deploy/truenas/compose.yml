@@ -87,10 +87,13 @@ services:
       - traefik.http.routers.leaguetracker-ben.service=leaguetracker-ben
 
   # Wakes the render PC while render work waits, so the gaming machine can
-  # sleep instead of idling 24/7. Host networking is mandatory: a WoL magic
-  # packet is a subnet broadcast that cannot leave the Docker bridge. It also
-  # makes the tracker hostnames resolve via the LAN's split-horizon DNS
-  # straight to Traefik, so no Cloudflare Access token is involved.
+  # sleep instead of idling 24/7. The PC (10.10.10.x) and the NAS (10.10.40.x)
+  # are on different subnets and routers drop directed broadcasts, so the
+  # primary path asks the UniFi gateway to emit the magic packet inside the
+  # PC's own VLAN. UNIFI_USER/UNIFI_PASS are set as Portainer stack env vars
+  # (a local view-capable UniFi admin), NEVER committed here. Host networking
+  # keeps the secondary raw broadcast possible and makes the tracker
+  # hostnames resolve via split-horizon DNS - no Cloudflare Access token.
   waker:
     build:
       context: ./waker
@@ -105,6 +108,9 @@ services:
       - PC_MAC=D8-5E-D3-A2-58-4F
       - WOL_BROADCAST=10.10.10.255
       - POLL_SECONDS=60
+      - UNIFI_URL=${UNIFI_URL:-https://10.10.40.1}
+      - UNIFI_USER=${UNIFI_USER:-}
+      - UNIFI_PASS=${UNIFI_PASS:-}
     restart: unless-stopped
 
 networks:

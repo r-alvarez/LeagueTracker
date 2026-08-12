@@ -1074,3 +1074,14 @@ Still to do before the PC actually sleeps: the agent must hold
 `ES_SYSTEM_REQUIRED` while rendering/recording/reviewing, then Windows gets an
 idle-sleep timer. Until then the waker idles harmlessly alongside an always-on
 PC.
+
+**First live sleep test failed - the broadcast never left the NAS's subnet.**
+The PC lives on 10.10.10.x, the NAS on 10.10.40.x; a directed broadcast to
+another subnet is dropped by the UniFi gateway like by everything else. The
+primary wake path is now the UniFi controller itself: the waker logs into the
+console (`/api/auth/login`, then `cmd/stamgr` `wake-device`) and the gateway
+emits the magic packet inside the PC's VLAN. Credentials are a local UniFi
+admin set as Portainer stack env vars (UNIFI_USER/UNIFI_PASS) - never in the
+repo. The raw broadcast stays as a free secondary for a same-L2 future. The
+auto-launch chain proved itself the same evening: claim, hub Play press,
+render, upload, all unattended.
