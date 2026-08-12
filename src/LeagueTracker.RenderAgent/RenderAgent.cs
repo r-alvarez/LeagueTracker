@@ -268,9 +268,11 @@ public sealed class RenderAgent(AgentConfig config)
             Log.Info("League client not running - waiting (user is active, not launching over them)");
             return;
         }
-        // One attempt per window: the Riot client patching or logging in
-        // looks closed from here for minutes, and relaunching is just noise.
-        if (DateTime.UtcNow - _lastClientLaunchAttempt < TimeSpan.FromMinutes(10))
+        // One attempt per window: a cold start or a patching client looks
+        // closed from here for a couple of minutes, and re-asking is noise.
+        // Short enough that stage two (the Play press below) follows a cold
+        // start that parked at the hub without much of a wait.
+        if (DateTime.UtcNow - _lastClientLaunchAttempt < TimeSpan.FromMinutes(3))
         {
             Log.Info("League client not running - a launch is in progress (patching/login can take minutes)");
             return;
@@ -284,6 +286,17 @@ public sealed class RenderAgent(AgentConfig config)
             return;
         }
 
+        _lastClientLaunchAttempt = DateTime.UtcNow;
+
+        // Two stages. A Riot hub that is already open just needs its Play
+        // button pressed - RiotClientServices ignores --launch-product when
+        // the hub is up, it only focuses the window (observed 2026-08-12).
+        if (await ClientLauncher.PressPlayAsync(ct))
+        {
+            Log.Info($"{pending} render job(s) waiting - the Riot hub was already open, pressed Play through its API");
+            return;
+        }
+
         if (ClientLauncher.Resolve(LeagueRoot) is not { } launcher)
         {
             // Deterministic: a missing Riot launcher will not appear on a
@@ -293,7 +306,6 @@ public sealed class RenderAgent(AgentConfig config)
             return;
         }
 
-        _lastClientLaunchAttempt = DateTime.UtcNow;
         Log.Info($"{pending} render job(s) waiting and the client is closed - launching League via {launcher}");
         ClientLauncher.Launch(launcher);
     }
