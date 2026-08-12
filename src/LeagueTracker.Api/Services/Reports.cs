@@ -259,7 +259,7 @@ public static class Reports
         {
             Games = matches.Count,
             TotalDeaths = deaths.Count,
-            DeathsPerGame = matches.Count > 0 ? Math.Round((double)deaths.Count / matches.Count, 2) : 0,
+            DeathsPerGame = matches is { Count: > 0 } ? Math.Round((double)deaths.Count / matches.Count, 2) : 0,
             // The active target: walked into 3+ enemies who were actually there.
             CollapseDeaths = analysed.Count(d => d.EnemiesNearDeath >= 3),
             IsolatedDeaths = analysed.Count(d => d.AlliesNearDeath == 0),
@@ -305,7 +305,7 @@ public static class Reports
         var followIns = deaths.Where(d => d.FollowTeammate is not null).ToList();
 
         static double Avg(IEnumerable<double> xs) { var l = xs.ToList(); return l is { Count: > 0 } ? l.Average() : 0; }
-        double PerGame(int count) => matches.Count > 0 ? Math.Round(count / (double)matches.Count, 2) : 0;
+        double PerGame(int count) => matches is { Count: > 0 } ? Math.Round(count / (double)matches.Count, 2) : 0;
         double DurMin(Match m) => Math.Max(1.0, m.DurationSec / 60.0);
         double Kda(Match m) => (m.Kills + m.Assists) / (double)Math.Max(1, m.Deaths);
         static object Bucket(List<Match> ms) => new
@@ -484,7 +484,7 @@ public static class Reports
                 Games = matches.Count,
                 Wins = wins,
                 Losses = matches.Count - wins,
-                WinRate = matches.Count > 0 ? Math.Round(wins / (double)matches.Count, 3) : 0,
+                WinRate = matches is { Count: > 0 } ? Math.Round(wins / (double)matches.Count, 3) : 0,
                 DateFrom = chrono is { Count: > 0 } ? chrono[0].GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd") : null,
                 DateTo = chrono is { Count: > 0 } ? chrono[^1].GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd") : null,
                 Champions = matches.Select(m => m.Champion).Distinct().Count(),
@@ -497,8 +497,8 @@ public static class Reports
             {
                 TotalDeaths = deaths.Count,
                 FollowIns = followIns.Count,
-                Rate = deaths.Count > 0 ? Math.Round(followIns.Count / (double)deaths.Count, 3) : 0,
-                PureLoss = followIns.Count(d => d.FollowPureLoss == true),
+                Rate = deaths is { Count: > 0 } ? Math.Round(followIns.Count / (double)deaths.Count, 3) : 0,
+                PureLoss = followIns.Count(d => d.FollowPureLoss is true),
                 TwoPlusDown = followIns.Count(d => d.FollowAlliesDownBefore >= 2),
                 ByRole = Counted(followIns.Select(d => d.FollowTeammateRole ?? "?"), followIns.Count),
                 GoldState = new
@@ -563,7 +563,7 @@ public static class Reports
         if (deaths is { Count: > 0 } && followIns is { Count: > 0 })
         {
             var rate = Math.Round(100.0 * followIns.Count / deaths.Count);
-            var pure = followIns.Count(d => d.FollowPureLoss == true);
+            var pure = followIns.Count(d => d.FollowPureLoss is true);
             o.Add($"{rate} % of deaths are follow-ins (walking in after a fallen teammate); {pure} of {followIns.Count} got nothing back.");
         }
 
@@ -661,12 +661,11 @@ public static class Reports
         // Newest-first in, chronological for the trend sparkline.
         var chronological = matches.AsEnumerable().Reverse()
             .Select(m => (m.Win, Metrics: MetricsFor(m))).ToList();
-        var perMatch = chronological;
         var rows = new List<object>();
 
         foreach (var def in MetricCatalog)
         {
-            var present = perMatch.Where(x => x.Metrics.ContainsKey(def.Key)).ToList();
+            var present = chronological.Where(x => x.Metrics.ContainsKey(def.Key)).ToList();
             if (present.Count < 3) continue;   // too few to average meaningfully
 
             double Avg(IEnumerable<(bool Win, Dictionary<string, double> Metrics)> xs)

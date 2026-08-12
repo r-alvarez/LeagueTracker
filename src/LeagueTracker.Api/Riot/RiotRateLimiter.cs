@@ -26,7 +26,7 @@ public sealed class RiotRateLimiter(IOptions<RiotOptions> options)
             lock (_lock)
             {
                 var now = DateTime.UtcNow;
-                while (_history.Count > 0 && now - _history[0] >= _widest) _history.RemoveAt(0);
+                while (_history is { Count: > 0 } && now - _history[0] >= _widest) _history.RemoveAt(0);
 
                 waitMs = 0;
                 foreach (var w in _windows)
@@ -62,7 +62,7 @@ public sealed class RiotRateLimiter(IOptions<RiotOptions> options)
         var appLimit = Parse(Header(resp, "X-App-Rate-Limit"));
         var methodLimit = Parse(Header(resp, "X-Method-Rate-Limit"));
         var appCount = Parse(Header(resp, "X-App-Rate-Limit-Count"));
-        if (appLimit.Count == 0) return;
+        if (appLimit is not { Count: > 0 }) return;
 
         // Most restrictive cap for each window span across app + method limits.
         var caps = new Dictionary<int, int>();
@@ -80,7 +80,7 @@ public sealed class RiotRateLimiter(IOptions<RiotOptions> options)
                 new Window(Math.Max(1, (int)Math.Floor(c.Value * (1 - _safetyMargin))), TimeSpan.FromSeconds(c.Key)))];
             _widest = _windows.Max(w => w.Span);
 
-            if (!_seeded && appCount.Count > 0)
+            if (!_seeded && appCount is { Count: > 0 })
             {
                 var widestSpanCount = appCount.OrderByDescending(c => c.Key).First().Value;
                 var now = DateTime.UtcNow;

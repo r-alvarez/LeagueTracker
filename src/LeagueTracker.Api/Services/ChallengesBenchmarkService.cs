@@ -1,7 +1,6 @@
 using System.Text.Json;
 using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Riot;
-using Microsoft.EntityFrameworkCore;
 
 namespace LeagueTracker.Api.Services;
 

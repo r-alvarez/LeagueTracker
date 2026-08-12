@@ -558,7 +558,6 @@ export default function MatchDetail() {
     api.vodStatus(id).then(setVod).catch(() => setVod(null))
   }, [id])
 
-  // Jump the covering clip to ~5s before the moment and play it.
   const playMoment = (timeSec: number) => {
     const clip = clips.find(c => c.ready && timeSec >= c.startSec && timeSec <= c.endSec)
     const el = clip ? clipRefs.current[clip.index] : null

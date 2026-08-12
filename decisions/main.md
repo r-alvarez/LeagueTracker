@@ -821,3 +821,230 @@ fights" card next to the VOD (kill/death clips stay hidden behind it).
 Backfill needs one /api/analytics/reprocess per tracker (CameraParticipantId
 defaults to 0 = unclippable on old rows). Replay patch-lock still applies:
 fights only clip while the match's replay runs on the installed client.
+
+## 2026-08-05 — VOD clock map: encoded position over wall clock, interpolation over median
+
+**The ffmpeg path's clock-map pairs now use the encoder's out_time (already
+parsed from -progress) as the video coordinate instead of wall-elapsed
+seconds.** Wall time counts ffmpeg's startup latency plus any encoder lag,
+which landed review markers seconds early against the finished video — the
+YouTube timing drift Ruben reported. The WGC path deliberately KEEPS wall
+clock: verified in ScreenRecorderLib/RecordingManager.cpp that Media
+Foundation writes VFR frames whose durations are the real time between
+captures, so wall elapsed since first frame IS the stream position there.
+Its OnFrameRecorded.Timestamp was considered and rejected — it is
+system_clock epoch millis, not stream position. Sampling densified 30s→15s
+(localhost call, negligible cost).
+
+**VodReview maps game↔video by piecewise-linear interpolation over the
+sampled pairs instead of one median offset.** A capture restart leaves a gap
+in the video while the game clock runs on, so the two sides of a seam sit at
+different offsets — a single constant was wrong for every marker after the
+first seam. Both coordinates are monotonic, so one sorted array serves both
+directions (markers game→video, APM tooltip video→game); outside the sampled
+range extrapolation uses slope 1 (the clocks tick at the same rate).
+Alternative rejected: fixing timing via Riot's Spectator API — gameStartTime
+reads 0 for minutes and spectator data runs ~3 min delayed; the local Live
+Client API (already sampled) is strictly better.
+
+## 2026-08-05 — WGC becomes the default capture engine; watchdog watches frames, not bytes
+
+**CaptureBackend default (AgentConfig + shipped appsettings.json) flipped
+ddagrab→wgc.** WGC was merged as an opt-in plan B and never enabled, so every
+"broken video" seam to date was produced by ddagrab's known failure (Desktop
+Duplication dies on exclusive-fullscreen mode switches) — the engine built to
+fix it had not run. Fallback order unchanged: a WGC startup failure still
+drops that segment to ddagrab and retries WGC on the next one.
+
+**The WGC stall watchdog now keys on Recorder.CurrentFrameNumber, keeping
+file growth only as a backstop (restart requires BOTH dead).** The old
+<5 MB/min growth check false-positived on visually quiet stretches, where
+quality-mode H264 writes almost nothing — a false restart WGC would get
+blamed for. Verified in ScreenRecorderLib source that Record() wires the
+frame-number callback unconditionally, so the counter advances for every
+rendered frame. The AND with growth means the new check can only ever
+restart less than the old one, even if a future library version stopped
+reporting frames.
+
+## 2026-08-05 — Q3 epic concessions get the same laning-phase gate as the Q1 ledger
+
+**Discipline's conceded-epic loop now skips objectives before LaneEndSec
+(14:00).** The Q1 absence ledger already excluded laning-phase fights because
+the "absent" laner is holding their lane — payment the ledger can't see,
+since it only recognizes structure kills — but the Q3 concession check had
+no phase filter, so an early dragon/grubs taken while the player laned
+cross-map (with 2+ allies contesting) charged an unpaid concession under
+the exact rationale the ledger fix rejected. Same gate, same constant.
+Alternative rejected: recognizing farming/CS as payment — CS-per-window
+attribution from 60s frames is noise, and structures remain the only
+payment signal the system can honestly verify. Verdicts recompute at read
+time from stored objectives, so no reprocess is needed; historical
+Discipline verdicts with pre-14:00 unpaid concessions may soften on next
+view (20 of 448 audited verdicts change, all no→mixed or mixed→yes,
+including the miscredited Ahri-vs-Lux split-push win EUW1_7925471410).
+
+**Alternative rejected after audit: the "mirror rule" (charge a pre-14:00
+concession only when the lane opponent rotated to the epic and you
+didn't).** Audited 448 timeline games (May 10–Jul 24): 44 pre-14:00
+concessions; the opponent had rotated in just 6 (all mid-lane games, 3W/3L
+— no gradient; top's 16 were all cross-map farming, opponent rotated 0
+times). The decisive number: ranked games charged ONLY by early
+concessions ran 58% WR vs the 51% no-concession baseline — the early
+charge was anti-signal, penalizing correct play — while post-14:00
+charges (kept by the gate) run 36% WR, the real discipline signal. Vs the
+gate the mirror rule changes 3 verdicts, 2 of which sit on interpolation
+margins (me 4207u vs the 4000 threshold, opp 2384u vs 2500) in won games —
+the same frame-proximity unreliability the Q2 adjudication flagged.
+Adjudicated with Ruben 2026-08-05: blanket gate stays; no opponent
+plumbing into Discipline. Audit script: scratchpad audit_q3.py against a
+copy of data/leaguetracker.db.
+
+## 2026-08-05 — Repo CLAUDE.md + style-only cleanup
+
+**CLAUDE.md added and force-added to git.** Carries the Git Commits & PRs,
+Comments & Documentation, and Code Style sections from the user-level global
+instructions so future sessions apply them without user-level config. Force-add
+needed because `~/.gitignore_global` excludes `claude*.md`; tracking overrides
+the ignore from here on.
+
+**Bare `///` prose comments left as-is, not converted to `//`.** The codebase
+has zero `/// <summary>` blocks but ~849 plain `///` narrative comments across
+59 files — a deliberate house convention, and their content is exactly the WHY
+material the comment rule protects. Converting would have been a wholesale
+reformat of protected content for zero information gain. Same ruling applied to
+the frontend: JSDoc `/** */` blocks on exported types were kept (they also feed
+IDE hover), reverting an agent pass that had downgraded them to `//`.
+
+**Cleanup deliberately skipped:** null/pattern conversions inside EF Core
+IQueryable lambdas (patterns don't compile in expression trees — e.g.
+Reports.cs `.Where(p => p.Tier != null)`), `Count == 0` sites where a pattern
+would also match null and flip a guard, and handle/`nint` comparisons in the
+interop-heavy recorder code.
+
+## 2026-08-05 — Replay engage order: fog first, camera last
+
+**The fog side is clicked before the camera selection, not after** (Ruben's
+ask). Rationale beyond preference: the camera lock is the only engage step
+with a verification, so it should be the final UI interaction before the
+recording rolls — previously the unverifiable fog clicks landed after the
+verified lock, and a missed second click could leave the fog dropdown open
+on screen for the whole clip. With fog first, the camera-box click closes
+any stray fog list. The old order existed because the freshly-initialized
+post-world-reload UI ate the session's first fog click and the ~5s camera
+verification doubled as settle time; fog-first replaces that with an
+explicit 1.5s settle before the first click. Watch the first fight-clip job
+after deploy: a "Camera check failed ... selection=''" loop or an all-map
+(fog-free) clip means the settle is too short.
+
+## 2026-08-05 — Fight clips: the camera target must be alive for the fight
+
+**Found via EUW1_7936338594 window 16:** a 39s "skirmish 2v4" clip contained
+only aftermath - the designated POV (Gwen) had died in the preceding fight,
+sat on a 25s respawn timer at engage, and the agent's respawn wait pushed
+recording past the entire window. Two compounding causes, both fixed:
+
+**Analyzer:** "surviving fighter" only meant no death in *this* cluster. A
+corpse from the previous fight interpolates as "near the centroid" (dead
+bodies don't move), counts as involved, and outranks everyone. Camera pick
+now tiers alive-throughout fighters (no death within 60s before the fight -
+a death timer at any game length) above recently-dead survivors, keeping
+the old order inside each tier. Headcount still counts such corpses as
+fighters ("2v4" may be inflated) - left alone deliberately; changing it
+would retro-shift fight labels and the Q3 analytics adjudicated 2026-08-05.
+
+**Agent:** the respawn wait (built for own-death windows, where the 20s
+pre-roll absorbs it) now refuses to wait past a fight window's event time:
+dead target + respawn landing after the fight moment = skip the window with
+it named in the job failure, not a postpone (the replay's respawn state at
+that timestamp is deterministic - a retry can never go differently) and not
+an aftermath recording. Already-saved plan manifests keep their original
+camera targets (plans are claim-time snapshots); the fix applies to matches
+planned after the analyzer reprocess.
+
+## 2026-08-05 — Re-rendering a match drops its plan snapshot
+
+Plans are claim-time snapshots so rendered mp4s stay matched to the window
+indices they were rendered against - but nothing ever deleted one, so a
+match planned before an analyzer fix re-rendered against the same bad
+camera target forever. Re-render now drops the plan with the clips: the
+whole-match retry always, and a single-clip delete once it removes the last
+mp4 (nothing left pinned to the old indices). Deleting one clip out of
+several still keeps the plan - its siblings are named by it.
+
+The alive-for-the-fight margin also grew from 60s to 80s to cover the clip's
+20s pre-roll: a fighter who respawned 45s before the fight is alive at
+engage but spends the pre-roll walking down a lane, which is not the shot.
+
+## 2026-08-07 — The finished game plays itself back, in the client, before the next queue
+
+**A game that has just ended opens its own replay, camera locked to the
+player, and stops at each moment that decided something - unless the next game
+is already being queued for.** Recording the game automated away the review
+that used to happen by accident (glimpses of the capture while AFK at the PC),
+and the between-games window is the only one where a review can still change
+anything.
+
+Not a video reel on the match page: that was the first build and it was wrong.
+The match page already holds the full VOD with jump markers AND the rendered
+clips for fights the player missed - a reel over the same footage is a fourth
+way to watch what is already watchable. The client's replay is the thing the
+website can't be: a real camera, in the actual game, that can be flown.
+
+**The reel is scoped to moments the player was IN** (`/api/matches/{id}/reel`).
+The session locks the camera once and never re-aims it, because the dropdown
+click is the only route to a follow-cam and re-aiming per moment is precisely
+the fragile machinery the clip pipeline already carries. A fight across the map
+from a locked camera is thirty seconds of fog - and those fights already have
+clips filmed from someone who was there.
+
+Selection is dedup before ranking. A death inside a fight IS that fight; two
+fights five seconds apart are one fight with a re-engage. Then fights rank
+(gold swing, bodies, teamfight, converted) and cap at ten. A death's window
+ENDS at the death: the replay parks a dead champion's camera at their own
+fountain, so every second past it is an empty base.
+
+**The reel rolls on by itself and the hotkeys are the override** (F9 skip, F8
+back, F10 again) - `PostGameReviewAutoAdvance`, on by default. There is no quit
+hotkey: closing the replay window ends the session, which alt+F4 already does
+and needs no explaining. The
+first build parked at every window and demanded a key; watching it run, the
+stopping was friction rather than reflection, and going back is the rarer
+action that deserves the keypress. The hook drains queued keys BEFORE each
+seek, not after: with the reel advancing on its own, a key pressed while the
+next moment loads is the player reacting to the one that just ended (usually
+"wait, go back"), and eating it makes the hotkeys feel dead exactly when they
+matter. It is a low-level hook because the game holds focus and the agent has
+no window; it swallows nothing and lives only for the session.
+
+**The camera must be re-aimed after EVERY seek** (found live 2026-08-07): a
+seek reloads the world and drops the camera back to Manual, so the session
+that aimed once at launch played every moment on the free camera. Each moment
+now seeks ~9s early and re-clicks the dropdown during that lead-in, so the lock
+is in place before the window proper starts - the same reason the clip pipeline
+engages per window rather than per job. The aim is deliberately unverified,
+unlike the render path's: that pipeline verifies because nobody is watching it,
+while here the player is, and a camera that didn't take is obvious in a second.
+Camera geometry and the directed-camera cfg write moved to `ReplayCameraUi` so
+both callers share one set of coordinates.
+
+**Two live-system hazards found while testing this, both invisible to a build.**
+The render loop kills a game process when gameflow reads "None" and the user
+has been idle three polls - and a review's replay is API-launched, so it reads
+"None" while the player sits still to think. The review guard therefore runs
+FIRST in the render gate, ahead of that orphan sweep. And the session used to
+adopt whatever game process it found and kill it on the way out; it now refuses
+to start when one is already running, and never kills while the client says a
+game is live.
+
+**The render loop stands down for the session** (`ReplayReview.SessionActive`).
+Someone watching a replay looks exactly like an idle machine to the render
+gate, which would otherwise launch a second replay over the top of the review.
+
+Off by default (`PostGameReview`): it takes the screen, which is only welcome
+if you asked for it. `LT_REVIEW_TEST=<matchId>` runs a session now instead of
+waiting for a game to end - the only way to exercise launch, camera lock, seek
+and hotkeys without playing first. Honest limits: the review needs the match
+imported AND its replay archived, so it opens minutes after the game rather
+than at the honor screen (the agent waits `PostGameReviewWaitMin`, 8 by
+default, then gives up loudly); and replays are patch-locked, so this only ever
+works for a game just played, which is exactly the use case.

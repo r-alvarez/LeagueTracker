@@ -18,7 +18,7 @@ public sealed record ClipPlan(string MatchId, string GameVersion, double Duratio
 /// Plans and stores the per-match highlight clips that the render agent turns
 /// into mp4s. Follows the app's files-as-truth rule: the plan manifest and the
 /// rendered clips live under data/clips/{matchId}; the db is never written.
-public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays, DataPaths paths)
+public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays, VodService vods, DataPaths paths)
 {
     // A fight window is [first event - pre, chained end + post]; overlapping
     // windows merge, so a kill followed by your death 15s later reviews as one
@@ -84,7 +84,7 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         }
         windows.AddRange(await FightWindowsAsync(match, myPid.Value, windows.Count, ct));
 
-        return windows.Count > 0 ? new ClipPlan(matchId, match.GameVersion, match.DurationSec, windows) : null;
+        return windows is { Count: > 0 } ? new ClipPlan(matchId, match.GameVersion, match.DurationSec, windows) : null;
     }
 
     /// The team's skirmishes/teamfights the player was NOT in, filmed from a
@@ -109,7 +109,7 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
             .Where(f => !f.Participated && f.CameraParticipantId > 0
                 && (f.Kind is "teamfight" || (f.Kind is "skirmish" && f.AllyKills + f.EnemyKills >= 2)))
             .ToList();
-        if (wanted.Count == 0) return [];
+        if (wanted is not { Count: > 0 }) return [];
 
         var fighters = await db.Participants.AsNoTracking()
             .Where(p => p.MatchId == match.Id)
@@ -238,22 +238,36 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         if (File.Exists(marker)) File.Delete(marker);
     }
 
-    /// Drops rendered clips so the match re-qualifies for the render queue.
+    /// Drops rendered clips so the match re-qualifies for the render queue,
+    /// and the plan with them: nothing is pinned to the old window indices any
+    /// more, so the re-render should use current analysis (camera targets in
+    /// particular) rather than replaying whatever was planned at claim time.
     public void DeleteClips(string matchId)
     {
         if (DirFor(matchId) is not { } dir || !Directory.Exists(dir)) return;
         foreach (var mp4 in Directory.EnumerateFiles(dir, "*.mp4")) File.Delete(mp4);
+        DeletePlan(matchId);
     }
 
     /// Drops one bad clip so just that window re-renders. Also clears the
     /// failed marker - a match can hold good clips AND a failure (e.g. the
     /// game died mid-job), and the marker would otherwise block the re-render.
+    /// The plan survives while any clip does: the surviving mp4s are named by
+    /// its window indices. Once the last one goes, it is free to be replanned.
     public bool DeleteClip(string matchId, int index)
     {
         if (ClipPath(matchId, index) is not { } path) return false;
         File.Delete(path);
         ClearFailed(matchId);
+        if (!HasClips(matchId)) DeletePlan(matchId);
         return true;
+    }
+
+    private void DeletePlan(string matchId)
+    {
+        if (DirFor(matchId) is not { } dir) return;
+        var plan = Path.Combine(dir, "plan.json");
+        if (File.Exists(plan)) File.Delete(plan);
     }
 
     /// Render-queue view over every match with an archived replay, newest first.
@@ -280,11 +294,16 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
             }
             else
             {
-                var missing = plan.Windows.Count(w => ClipPath(m.Id, w.Index) is null);
+                // A VOD-covered match only ever renders its "fight" windows
+                // (the render/next rule) - counting the others against it
+                // reported every reviewed match as "partial" forever.
+                var vodCovered = vods.HasVod(m.Id) || vods.ReadLink(m.Id) is not null;
+                var renderable = plan.Windows.Where(w => !vodCovered || w.Kind is "fight").ToList();
+                var missing = renderable.Count(w => ClipPath(m.Id, w.Index) is null);
                 status = missing == 0 ? "done"
                     : failed is not null ? "failed"
                     : leases.IsLeased($"clips:{m.Id}") ? "rendering"
-                    : missing < plan.Windows.Count ? "partial"
+                    : missing < renderable.Count ? "partial"
                     : "pending";
             }
             rows.Add(new { MatchId = m.Id, m.Champion, m.GameEndUtc, Kind = "clips", Status = status, Error = failed });

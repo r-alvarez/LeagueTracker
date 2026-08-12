@@ -117,7 +117,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             try
             {
                 var phase = await PhaseAsync(ct);
-                if (phase == "InProgress")
+                if (phase is "InProgress")
                 {
                     var gaveUp = !await RecordGameAsync(ct);
                     if (gaveUp)
@@ -127,7 +127,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                         // reach) - retrying every pass would spam ffmpeg
                         // launches all game, so sit it out.
                         Log.Warn("Recording gave up on this game - waiting for it to end");
-                        while (!RenderAgent.StopRequested && await PhaseAsync(ct) == "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
+                        while (!RenderAgent.StopRequested && await PhaseAsync(ct) is "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
                     }
                     continue;
                 }
@@ -171,7 +171,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         {
             Log.Info($"Not recording this game: {skipReason}");
             // StopRequested too: a deploy must not wait for the game to end.
-            while (!RenderAgent.StopRequested && await PhaseAsync(ct) == "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
+            while (!RenderAgent.StopRequested && await PhaseAsync(ct) is "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
             return true;
         }
 
@@ -203,7 +203,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 // Deploy stop mid-game: leave the segments and state on disk
                 // for the next agent run to resume - finalizing here would
                 // split the game across two numbers.
-                if (state.Segments.Count > 0 && await PhaseSafeAsync() == "InProgress")
+                if (state.Segments is { Count: > 0 } && await PhaseSafeAsync() is "InProgress")
                 {
                     SaveInflight(state);
                     Log.Info($"Stop requested mid-game - {state.BaseName} will resume after restart");
@@ -610,7 +610,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         {
             var procs = Process.GetProcessesByName(GameProcessName);
             foreach (var p in procs) p.Dispose();
-            return procs.Length > 0;
+            return procs is { Length: > 0 };
         }
     }
 
@@ -893,18 +893,25 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                     break;
                 }
 
-                if (DateTime.UtcNow - lastClockSample > TimeSpan.FromSeconds(30))
+                if (DateTime.UtcNow - lastClockSample > TimeSpan.FromSeconds(15))
                 {
                     lastClockSample = DateTime.UtcNow;
-                    if (await GameTimeAsync(ct) is { } gameSec)
+                    // The pair's video side is the encoder's out_time - the
+                    // mp4's own clock, which is what review jumps seek
+                    // against. Wall elapsed also counts ffmpeg's startup
+                    // latency and any encoder lag, and those seconds put
+                    // markers early against the finished video.
+                    double encodedSec;
+                    lock (progressGate) encodedSec = videoUs / 1e6;
+                    if (encodedSec > 0 && await GameTimeAsync(ct) is { } gameSec)
                     {
-                        clockMap.Add(((DateTime.UtcNow - startedUtc).TotalSeconds, gameSec));
+                        clockMap.Add((encodedSec, gameSec));
                     }
                     activePlayer ??= await ActivePlayerAsync(ct);
-                    // Every 3rd sample (~90s) also re-check the phase: the
+                    // Every 6th sample (~90s) also re-check the phase: the
                     // post-game screen keeps the process alive briefly, and
                     // there is nothing worth recording past "InProgress".
-                    if (clockMap.Count % 3 == 0 && await PhaseAsync(CancellationToken.None) is not "InProgress" and not null) break;
+                    if (clockMap.Count % 6 == 0 && await PhaseAsync(CancellationToken.None) is not "InProgress" and not null) break;
                 }
             }
         }
@@ -971,10 +978,15 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var clockMap = new List<(double, double)>();
         string? activePlayer = null;
         var lastClockSample = DateTime.MinValue;
-        // WGC surviving mode switches makes the growth watchdog mostly
-        // vestigial, but engines can still die quietly - same belt and
-        // braces as the ffmpeg path, just measured on the output file.
-        var lastGrowthCheck = DateTime.UtcNow;
+        // WGC surviving mode switches makes this watchdog mostly vestigial,
+        // but engines can still die quietly. The frame counter is the primary
+        // aliveness signal - file growth false-positived on visually quiet
+        // stretches (shopping, scoreboard), where quality-mode H264 writes
+        // almost nothing. Growth stays as the backstop condition so a frame
+        // counter that stops reporting can never kill healthy captures that
+        // are visibly writing video.
+        var lastWatchdogCheck = DateTime.UtcNow;
+        var lastFrameNumber = 0;
         long lastPartSize = 0;
 
         while (!recorder.HasEnded)
@@ -986,28 +998,36 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             if (g.Process.HasExited) break;
             if (RenderAgent.StopRequested) break;
 
-            if (DateTime.UtcNow - lastGrowthCheck > TimeSpan.FromSeconds(60))
+            if (DateTime.UtcNow - lastWatchdogCheck > TimeSpan.FromSeconds(60))
             {
-                lastGrowthCheck = DateTime.UtcNow;
+                lastWatchdogCheck = DateTime.UtcNow;
+                var frameNumber = recorder.CurrentFrameNumber;
+                var framesAdvanced = frameNumber > lastFrameNumber;
+                lastFrameNumber = frameNumber;
                 var size = new FileInfo(partPath) is { Exists: true } part ? part.Length : 0;
                 var grewBytes = size - lastPartSize;
                 lastPartSize = size;
-                if (grewBytes < 5_000_000 && DateTime.UtcNow - startedUtc > TimeSpan.FromSeconds(90))
+                if (!framesAdvanced && grewBytes < 5_000_000 && DateTime.UtcNow - startedUtc > TimeSpan.FromSeconds(90))
                 {
-                    Log.Warn($"WGC capture stalled ({grewBytes / 1024} KB in the last minute); restarting the capture");
+                    Log.Warn($"WGC capture stalled (frame counter parked at {frameNumber}, {grewBytes / 1024} KB in the last minute); restarting the capture");
                     break;
                 }
             }
 
-            if (DateTime.UtcNow - lastClockSample > TimeSpan.FromSeconds(30))
+            if (DateTime.UtcNow - lastClockSample > TimeSpan.FromSeconds(15))
             {
                 lastClockSample = DateTime.UtcNow;
                 if (await GameTimeAsync(ct) is { } gameSec)
                 {
+                    // Wall elapsed IS the stream position here, unlike the
+                    // ffmpeg path: Media Foundation writes VFR frames whose
+                    // durations are the real time between captures, so the
+                    // mp4's clock tracks wall time from the first frame -
+                    // exactly startedUtc's zero point.
                     clockMap.Add(((DateTime.UtcNow - startedUtc).TotalSeconds, gameSec));
                 }
                 activePlayer ??= await ActivePlayerAsync(ct);
-                if (clockMap.Count % 3 == 0 && await PhaseAsync(CancellationToken.None) is not "InProgress" and not null) break;
+                if (clockMap.Count % 6 == 0 && await PhaseAsync(CancellationToken.None) is not "InProgress" and not null) break;
             }
         }
 
@@ -1298,7 +1318,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         string? liveMatchId = null;
         try
         {
-            if (await PhaseAsync(ct) == "InProgress" && LcuClient.TryConnect(leagueRoot) is { } lcu)
+            if (await PhaseAsync(ct) is "InProgress" && LcuClient.TryConnect(leagueRoot) is { } lcu)
             {
                 using (lcu)
                 {

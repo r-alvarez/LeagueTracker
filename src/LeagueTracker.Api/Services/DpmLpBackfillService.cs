@@ -100,9 +100,9 @@ public sealed class DpmLpBackfillService(
         return new
         {
             Imported = rows.Count,
-            From = rows.Count > 0 ? rows.Min(r => r.TimestampUtc).ToString("yyyy-MM-dd") : null,
-            To = rows.Count > 0 ? rows.Max(r => r.TimestampUtc).ToString("yyyy-MM-dd") : null,
-            Message = rows.Count > 0
+            From = rows is { Count: > 0 } ? rows.Min(r => r.TimestampUtc).ToString("yyyy-MM-dd") : null,
+            To = rows is { Count: > 0 } ? rows.Max(r => r.TimestampUtc).ToString("yyyy-MM-dd") : null,
+            Message = rows is { Count: > 0 }
                 ? $"{rows.Count} daily LP snapshots imported from dpm.lol."
                 : "Nothing new to import - all dpm.lol days are already covered.",
         };

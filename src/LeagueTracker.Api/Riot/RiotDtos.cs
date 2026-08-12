@@ -115,9 +115,9 @@ public sealed class MatchParticipantDto
 
     public string ItemsCsv => string.Join(',', new[] { Item0, Item1, Item2, Item3, Item4, Item5, Item6 });
 
-    public int PrimaryStyleId => Perks?.Styles.FirstOrDefault(s => s.Description == "primaryStyle")?.Style ?? 0;
-    public int SubStyleId => Perks?.Styles.FirstOrDefault(s => s.Description == "subStyle")?.Style ?? 0;
-    public int KeystoneId => Perks?.Styles.FirstOrDefault(s => s.Description == "primaryStyle")?.Selections.FirstOrDefault()?.Perk ?? 0;
+    public int PrimaryStyleId => Perks?.Styles.FirstOrDefault(s => s.Description is "primaryStyle")?.Style ?? 0;
+    public int SubStyleId => Perks?.Styles.FirstOrDefault(s => s.Description is "subStyle")?.Style ?? 0;
+    public int KeystoneId => Perks?.Styles.FirstOrDefault(s => s.Description is "primaryStyle")?.Selections.FirstOrDefault()?.Perk ?? 0;
 }
 
 public sealed class PerksDto

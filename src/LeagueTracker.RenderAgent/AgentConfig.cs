@@ -71,7 +71,7 @@ public sealed class AgentConfig
     /// (ScreenRecorderLib + Media Foundation hardware H264) - DWM-composited
     /// capture that mode switches and alt-tab cannot interrupt; falls back
     /// to ddagrab per segment if it won't start.
-    public string CaptureBackend { get; set; } = "ddagrab";
+    public string CaptureBackend { get; set; } = "wgc";
 
     /// Which queue kinds get recorded, comma-separated: ranked-solo,
     /// ranked-flex, normal (draft/blind/swiftplay/quickplay), aram, clash,
@@ -94,6 +94,27 @@ public sealed class AgentConfig
 
     /// unlisted (default), private, or public.
     public string YouTubeVisibility { get; set; } = "unlisted";
+
+    /// Open the finished game's review reel in the browser once it lands on
+    /// its tracker - but only when the next game isn't already being queued
+    /// for. Off by default: it takes over the screen, which is only welcome
+    /// if you asked for it.
+    public bool PostGameReview { get; set; }
+
+    /// How long to let the end-of-game screens settle before deciding whether
+    /// a review is wanted. Long enough that hitting "play again" immediately
+    /// is read as "not now", short enough to still feel like part of the game.
+    public int PostGameReviewDelaySec { get; set; } = 30;
+
+    /// Roll straight into the next moment when a window ends (the default -
+    /// the review plays itself and the hotkeys are the override). False parks
+    /// the replay at every window's end and waits for a key instead.
+    public bool PostGameReviewAutoAdvance { get; set; } = true;
+
+    /// How long to keep waiting for the tracker to import the match (the
+    /// poller lags the game by minutes). Queueing up at any point during the
+    /// wait cancels the review.
+    public int PostGameReviewWaitMin { get; set; } = 8;
 
     /// Cloudflare Access service token (Zero Trust > Access > Service Auth) -
     /// lets the agent through the Access wall the trackers sit behind. Blank =
@@ -130,6 +151,7 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_YOUTUBE_UPLOAD") is { Length: > 0 } yt) config.YouTubeUpload = yt is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_YOUTUBE_CLIENT_ID") is { Length: > 0 } ytId) config.YouTubeClientId = ytId;
         if (Environment.GetEnvironmentVariable("LT_YOUTUBE_CLIENT_SECRET") is { Length: > 0 } ytSecret) config.YouTubeClientSecret = ytSecret;
+        if (Environment.GetEnvironmentVariable("LT_POSTGAME_REVIEW") is { Length: > 0 } review) config.PostGameReview = review is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_ID") is { Length: > 0 } cfId) config.CfAccessClientId = cfId;
         if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_SECRET") is { Length: > 0 } cfSecret) config.CfAccessClientSecret = cfSecret;
 

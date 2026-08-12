@@ -104,6 +104,11 @@ public static class TimelineAnalyzer
     private const int FightChainUnits = 3500;
     private const int FightNearUnits = 2500;
     private const int FightConversionSec = 45;
+    // Covers a death timer at any game length plus the clip's pre-roll: a
+    // fighter who died within this of the fight starting is either still on
+    // their respawn timer when it does, or walking back down a lane while the
+    // clip is meant to be showing the fight forming.
+    private const int RecentDeathSec = 80;
 
     /// One detected fight. Kind: duel (1v1) / skirmish / teamfight (3+ a side).
     /// Result is from my team's perspective; GoldSwing is the team-gold-diff
@@ -221,7 +226,7 @@ public static class TimelineAnalyzer
         var pidToRole = info.Participants.ToDictionary(p => p.ParticipantId, p => RoleLabel(p.TeamPosition));
 
         var enemyJunglerPid = info.Participants.FirstOrDefault(p =>
-            p.TeamId != me.TeamId && p.TeamPosition == "JUNGLE")?.ParticipantId;
+            p.TeamId != me.TeamId && p.TeamPosition is "JUNGLE")?.ParticipantId;
 
         foreach (var death in deaths)
         {
@@ -243,7 +248,7 @@ public static class TimelineAnalyzer
         var f14 = FrameAtMinute(frames, 14);
         var f15 = FrameAtMinute(frames, 15);
         var f20 = FrameAtMinute(frames, 20);
-        var last = frames.Count > 0 ? frames[^1] : null;
+        var last = frames is { Count: > 0 } ? frames[^1] : null;
         FrameStats? My(Frame? f) => f is not null && f.Stats.TryGetValue(me.ParticipantId, out var s) ? s : null;
         FrameStats? Opp(Frame? f) => opp is not null && f is not null && f.Stats.TryGetValue(opp.ParticipantId, out var s) ? s : null;
 
@@ -264,7 +269,7 @@ public static class TimelineAnalyzer
         // taking earliest placements; blue trinket is a sweeper, not vision).
         var visionWards = myWardSecs.Where(w => w.Type is not "TEEMO_MUSHROOM" and not "UNDEFINED").ToList();
         int? firstWardSec = visionWards is { Count: > 0 } ? visionWards.Min(w => w.Sec) : null;
-        var controlWardSecs = myWardSecs.Where(w => w.Type == "CONTROL_WARD").Select(w => w.Sec).ToList();
+        var controlWardSecs = myWardSecs.Where(w => w.Type is "CONTROL_WARD").Select(w => w.Sec).ToList();
         int? firstControlWardSec = controlWardSecs is { Count: > 0 } ? controlWardSecs.Min() : null;
         var wardsFirst10 = visionWards.Count(w => w.Sec < 600);
 
@@ -482,13 +487,13 @@ public static class TimelineAnalyzer
 
         void Flush()
         {
-            if (cluster.Count > 0) fights.Add(BuildFight(cluster, frames, objectives, allyPids, enemyPids, myPid));
+            if (cluster is { Count: > 0 }) fights.Add(BuildFight(cluster, kills, frames, objectives, allyPids, enemyPids, myPid));
             cluster = [];
         }
 
         foreach (var k in kills.OrderBy(k => k.TimeSec))
         {
-            if (cluster.Count > 0)
+            if (cluster is { Count: > 0 })
             {
                 var cx = cluster.Average(c => c.X);
                 var cy = cluster.Average(c => c.Y);
@@ -505,7 +510,7 @@ public static class TimelineAnalyzer
     }
 
     private static Fight BuildFight(
-        List<KillEvent> cluster, List<Frame> frames, List<ObjectiveEvent> objectives,
+        List<KillEvent> cluster, List<KillEvent> allKills, List<Frame> frames, List<ObjectiveEvent> objectives,
         HashSet<int> allyPids, HashSet<int> enemyPids, int myPid)
     {
         var start = cluster[0].TimeSec;
@@ -556,13 +561,25 @@ public static class TimelineAnalyzer
         // best (a dead champion's camera parks at their fountain). Ally POV
         // preferred, busiest fighter first; the last-dying victim is the
         // fallback when nobody survives - an ace still films until the
-        // camera-holder drops.
+        // camera-holder drops. "Outlives it" alone is not enough: a corpse
+        // from the previous fight interpolates as "near the centroid" (dead
+        // bodies don't move) and ranks as a survivor, but its camera sits at
+        // the fountain until the respawn - past the whole fight for a mid-game
+        // death timer (EUW1_7936338594 w16 filmed 39s of aftermath). Fighters
+        // with no death on a possible respawn timer at fight start outrank
+        // recently-dead ones.
         var victims = cluster.Select(k => k.VictimParticipantId).ToHashSet();
         int KillsBy(int pid) => cluster.Count(k => k.KillerParticipantId == pid);
-        var cameraPid = involved.Where(p => (p == myPid || allyPids.Contains(p)) && !victims.Contains(p))
-                .OrderByDescending(KillsBy).ThenBy(p => p).Cast<int?>().FirstOrDefault()
-            ?? involved.Where(p => enemyPids.Contains(p) && !victims.Contains(p))
-                .OrderByDescending(KillsBy).ThenBy(p => p).Cast<int?>().FirstOrDefault()
+        bool RecentlyDead(int pid) => allKills.Any(k =>
+            k.VictimParticipantId == pid && k.TimeSec < start && k.TimeSec >= start - RecentDeathSec);
+        int? Pick(Func<int, bool> onSide, bool allowRecentlyDead) => involved
+            .Where(p => onSide(p) && !victims.Contains(p) && (allowRecentlyDead || !RecentlyDead(p)))
+            .OrderByDescending(KillsBy).ThenBy(p => p).Cast<int?>().FirstOrDefault();
+        bool Ally(int p) => p == myPid || allyPids.Contains(p);
+        var cameraPid = Pick(Ally, allowRecentlyDead: false)
+            ?? Pick(enemyPids.Contains, allowRecentlyDead: false)
+            ?? Pick(Ally, allowRecentlyDead: true)
+            ?? Pick(enemyPids.Contains, allowRecentlyDead: true)
             ?? cluster[^1].VictimParticipantId;
 
         return new Fight(start, end, kind, result, participated, allies, enemies, allyKills, enemyKills, goldSwing, converted, cameraPid);
@@ -708,7 +725,7 @@ public static class TimelineAnalyzer
         return new ObjectiveEvent
         {
             TimeSec = TimeSecOf(ev),
-            Kind = buildingType == "INHIBITOR_BUILDING" ? "INHIBITOR" : "TOWER",
+            Kind = buildingType is "INHIBITOR_BUILDING" ? "INHIBITOR" : "TOWER",
             SubKind = ev.TryGetProperty("towerType", out var tt) ? (tt.GetString() ?? "").Replace("_TURRET", "") : "",
             ByMyTeam = victimTeam != myTeamId,
             KillerParticipantId = ev.TryGetProperty("killerId", out var k) ? k.GetInt32() : 0,

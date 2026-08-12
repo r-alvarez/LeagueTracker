@@ -125,6 +125,20 @@ public sealed class RenderAgent(AgentConfig config)
 
     private async Task<bool> RunOnceAsync(CancellationToken ct)
     {
+        // A between-games review owns the replay client while it runs. This
+        // has to come FIRST, ahead of the orphan sweep below: a review's
+        // replay is API-launched, so gameflow reads "None", and a player
+        // sitting still to think about a moment is indistinguishable from an
+        // idle machine - the orphan rule would kill the very replay they are
+        // watching. Rendering simply waits for the review to end.
+        if (ReplayReview.SessionActive)
+        {
+            if (!_reportedUserActive) Log.Info("Post-game review in progress - rendering waits for it to finish");
+            _reportedUserActive = true;
+            _orphanStrikes = 0;
+            return false;
+        }
+
         // Never fight the player for the machine - judged from THIS machine
         // only: a game client running locally, or the local League client
         // anywhere in the play flow (lobby, queue, champ select, loading,
@@ -148,7 +162,7 @@ public sealed class RenderAgent(AgentConfig config)
                 // at None - verified live), but a human watching one is not
                 // idle. Only an unattended None-phase process qualifies.
                 var unattended = GameWindow.UserIdleTime >= TimeSpan.FromSeconds(config.IdleSeconds);
-                _orphanStrikes = unattended && phaseNow == "None" ? _orphanStrikes + 1 : 0;
+                _orphanStrikes = unattended && phaseNow is "None" ? _orphanStrikes + 1 : 0;
                 if (_orphanStrikes >= 3)
                 {
                     _orphanStrikes = 0;
@@ -343,7 +357,7 @@ public sealed class RenderAgent(AgentConfig config)
         {
             game = await StartReplayAsync();
 
-            // The camera/fog dropdowns are clicked PER WINDOW, after its seek:
+            // The fog/camera dropdowns are clicked PER WINDOW, after its seek:
             // any seek that rewinds (and the engage verification always plays
             // past the point it must return to) reloads the world and silently
             // wipes the dropdown state, so it must be re-applied as the last
@@ -419,6 +433,13 @@ public sealed class RenderAgent(AgentConfig config)
                 var output = Path.Combine(_workDir, $"{job.MatchId}-w{window.Index:00}.mp4");
                 var duration = Math.Max(2, window.EndSec - window.StartSec);
                 var preRoll = Math.Max(0, window.StartSec - EngagePreRollSec);
+                // A fight window's clip must be rolling by the fight moment
+                // itself - a dead camera target whose respawn lands later can
+                // only film the aftermath (EUW1_7936338594 w16: a 25s respawn
+                // wait pushed recording past the whole fight).
+                var fightEventSec = window.Kind is "fight"
+                    ? window.Events is { Count: > 0 } events ? events[0].TimeSec : window.StartSec
+                    : (int?)null;
                 var engaged = false;
                 var frozen = 0;
                 var skippedThis = false;
@@ -429,7 +450,18 @@ public sealed class RenderAgent(AgentConfig config)
                     await WaitForSeekAsync(replayApi, preRoll, ct);
                     await replayApi.SetPlaybackAsync(time: null, paused: false, speed: 1, ct);
 
-                    engaged = await EngageCameraAsync(replayApi, windowSlot, attempt, windowCameraName, ct);
+                    var result = await EngageCameraAsync(replayApi, windowSlot, attempt, windowCameraName, fightEventSec, ct);
+                    if (result is EngageResult.TargetDeadPastFight)
+                    {
+                        // Deterministic per replay timestamp - a retry or a
+                        // postpone replays the same respawn timer. Skip the
+                        // window so the rest render and the job names the gap.
+                        Log.Warn($"Window {window.Index} ({window.Label}): \"{targetChampion}\" is dead until after the fight - no POV to film it from, skipping this window");
+                        skippedWindows.Add(window.Index);
+                        skippedThis = true;
+                        break;
+                    }
+                    engaged = result is EngageResult.Engaged;
                     if (!engaged)
                     {
                         if (attempt >= 3) break;
@@ -505,7 +537,7 @@ public sealed class RenderAgent(AgentConfig config)
                 File.Delete(output);
                 Log.Info($"Window {window.Index}: uploaded");
             }
-            if (skippedWindows.Count > 0)
+            if (skippedWindows is { Count: > 0 })
             {
                 // Partial coverage must not read as complete: fail with the
                 // skipped windows named, so the gap is visible on the Data
@@ -588,18 +620,16 @@ public sealed class RenderAgent(AgentConfig config)
             : throw new InvalidOperationException($"unexpected match id format: {matchId}");
     }
 
-    // Replay UI geometry as ratios of the client area, calibrated at 2560x1440
-    // with default HUD scale (GlobalScaleReplay=1). The camera dropdown lists
-    // 13 entries (FPS, Directed, Manual, then the 10 champions in player-list
-    // order) stacked upward from the box; the fog dropdown lists Blue/Red/All.
-    private const double PanelX = 0.0703;
-    private const double CameraBoxY = 0.9167;
-    private const double CameraListBottomY = 0.90625;
-    private const double DropdownRowH = 0.021806;
-    private const double FogX = 0.114;
-    private const double FogBoxY = 0.948;
-    private const double FogBlueY = 0.8813;
-    private const double FogRedY = 0.9035;
+    // Replay UI geometry lives in ReplayCameraUi - the between-games review
+    // drives the same dropdowns, and one HUD has one set of coordinates.
+    private const double PanelX = ReplayCameraUi.PanelX;
+    private const double CameraBoxY = ReplayCameraUi.CameraBoxY;
+    private const double CameraListBottomY = ReplayCameraUi.CameraListBottomY;
+    private const double DropdownRowH = ReplayCameraUi.DropdownRowH;
+    private const double FogX = ReplayCameraUi.FogX;
+    private const double FogBoxY = ReplayCameraUi.FogBoxY;
+    private const double FogBlueY = ReplayCameraUi.FogBlueY;
+    private const double FogRedY = ReplayCameraUi.FogRedY;
 
     private const int EngagePreRollSec = 10;
     private const int MaxIdenticalPostpones = 3;
@@ -616,12 +646,17 @@ public sealed class RenderAgent(AgentConfig config)
         (12800, 1800),
     ];
 
-    /// Clicks the tracked champion in the camera dropdown and their side in
-    /// the fog dropdown, then verifies the camera really tracks - the Replay
-    /// API has no working equivalent, and the verification cannot
-    /// false-positive while the directed camera is disabled. Runs while the
-    /// replay is playing (the lock only engages during playback).
-    private async Task<bool> EngageCameraAsync(ReplayApiClient replayApi, (int Index, bool Blue) slot, int attempt, string? cameraName, CancellationToken ct)
+    private enum EngageResult { Engaged, Failed, TargetDeadPastFight }
+
+    /// Clicks the filmed champion's side in the fog dropdown, then the
+    /// champion in the camera dropdown, and verifies the camera really
+    /// tracks - the Replay API has no working equivalent, and the
+    /// verification cannot false-positive while the directed camera is
+    /// disabled. Runs while the replay is playing (the lock only engages
+    /// during playback). fightEventSec, set for fight windows, is the game
+    /// second the clip exists to capture: a dead target whose respawn lands
+    /// past it cannot film the fight from anywhere but their fountain.
+    private async Task<EngageResult> EngageCameraAsync(ReplayApiClient replayApi, (int Index, bool Blue) slot, int attempt, string? cameraName, int? fightEventSec, CancellationToken ct)
     {
         // Park the free camera away from where the world-reload leaves it,
         // BEFORE the clicks (render-API writes reset the camera mode). The
@@ -629,11 +664,27 @@ public sealed class RenderAgent(AgentConfig config)
         var spot = CameraParkSpots[(attempt - 1) % CameraParkSpots.Length];
         var parked = await replayApi.ParkCameraAsync(spot.X, 1911, spot.Z, cameraName, ct);
 
-        if (!GameWindow.TryClickAt(GameWindowTitle, PanelX, CameraBoxY))
+        // Fog before camera: the camera lock is the only step with a
+        // verification, so it goes last - no click lands on the UI after the
+        // verified lock, and a fog mis-click (the dropdown has no readback)
+        // gets its stray open list closed by the camera clicks instead of
+        // sitting open through the recording. The freshly-initialized UI
+        // right after a world reload eats the first clicks (previously
+        // absorbed by running fog after the ~5s camera verification), so
+        // give it a beat before clicking.
+        await Task.Delay(TimeSpan.FromMilliseconds(1500), ct);
+        if (!GameWindow.TryClickAt(GameWindowTitle, FogX, FogBoxY))
         {
-            Log.Warn("Could not focus the game window for the camera dropdown");
-            return false;
+            Log.Warn("Could not focus the game window for the fog dropdown");
+            return EngageResult.Failed;
         }
+        await Task.Delay(TimeSpan.FromMilliseconds(900), ct);
+        // The dropdown defaults to All (no fog); pick the filmed champion's
+        // side. Deterministic click, idempotent when already set.
+        GameWindow.TryClickAt(GameWindowTitle, FogX, slot.Blue ? FogBlueY : FogRedY);
+        await Task.Delay(TimeSpan.FromMilliseconds(400), ct);
+
+        GameWindow.TryClickAt(GameWindowTitle, PanelX, CameraBoxY);
         await Task.Delay(TimeSpan.FromMilliseconds(700), ct);
         var championRowY = CameraListBottomY - (10 - slot.Index) * DropdownRowH + DropdownRowH / 2;
         GameWindow.TryClickAt(GameWindowTitle, PanelX, championRowY);
@@ -642,9 +693,6 @@ public sealed class RenderAgent(AgentConfig config)
         await Task.Delay(TimeSpan.FromMilliseconds(400), ct);
         GameWindow.TryMoveCursor(GameWindowTitle, 0.5, 0.35);
 
-        // Camera verification first - its ~5s doubles as settle time for the
-        // freshly-initialized UI, which made a fog click right after the
-        // camera clicks miss on the session's first window.
         var tracks = await CameraTracksAsync(replayApi, parked, ct);
 
         // A locked camera parks a dead champion's view at their fountain -
@@ -654,19 +702,31 @@ public sealed class RenderAgent(AgentConfig config)
         // Playback keeps running, so wait out a short respawn and re-check:
         // a locked camera follows the champion out of the fountain, an
         // unlocked one stays. Recording then starts a few seconds into the
-        // pre-roll cushion, which the 20s window lead absorbs.
+        // pre-roll cushion, which the 20s window lead absorbs - unless this
+        // is a fight window and the respawn lands past the fight itself, in
+        // which case there is nothing left worth filming and waiting would
+        // record the aftermath (EUW1_7936338594 w16).
         if (!tracks && cameraName is { Length: > 0 }
-            && await replayApi.GetPlayerDeathStateAsync(cameraName, ct) is { IsDead: true } death
-            && death.RespawnIn <= 25)
+            && await replayApi.GetPlayerDeathStateAsync(cameraName, ct) is { IsDead: true } death)
         {
-            Log.Info($"Tracked player is dead (respawn in {death.RespawnIn:0}s) - waiting to re-verify the camera lock");
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(death.RespawnIn + 5);
-            while (DateTime.UtcNow < deadline
-                && await replayApi.GetPlayerDeathStateAsync(cameraName, ct) is { IsDead: true })
+            if (fightEventSec is { } eventSec
+                && await replayApi.GetPlaybackAsync(ct) is { } playback
+                && playback.Time + death.RespawnIn > eventSec)
             {
-                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                Log.Warn($"Camera target is dead at {playback.Time:0}s with {death.RespawnIn:0}s respawn - back after the fight moment ({eventSec}s)");
+                return EngageResult.TargetDeadPastFight;
             }
-            tracks = await CameraTracksAsync(replayApi, parked, ct);
+            if (death.RespawnIn <= 25)
+            {
+                Log.Info($"Tracked player is dead (respawn in {death.RespawnIn:0}s) - waiting to re-verify the camera lock");
+                var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(death.RespawnIn + 5);
+                while (DateTime.UtcNow < deadline
+                    && await replayApi.GetPlayerDeathStateAsync(cameraName, ct) is { IsDead: true })
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                }
+                tracks = await CameraTracksAsync(replayApi, parked, ct);
+            }
         }
 
         if (!tracks)
@@ -679,23 +739,13 @@ public sealed class RenderAgent(AgentConfig config)
             var current = await replayApi.GetCameraPositionAsync(ct);
             var selection = await replayApi.GetSelectionAsync(ct);
             Log.Warn($"Camera check failed: parked=({parked?.X:0},{parked?.Z:0}) now=({current?.X:0},{current?.Z:0}) selection='{selection}'");
-            return false;
-        }
-
-        // Fog perspective: the dropdown defaults to All (no fog); pick the
-        // tracked player's side. Deterministic click, no readback available,
-        // idempotent when already set.
-        if (GameWindow.TryClickAt(GameWindowTitle, FogX, FogBoxY))
-        {
-            await Task.Delay(TimeSpan.FromMilliseconds(900), ct);
-            GameWindow.TryClickAt(GameWindowTitle, FogX, slot.Blue ? FogBlueY : FogRedY);
-            await Task.Delay(TimeSpan.FromMilliseconds(400), ct);
+            return EngageResult.Failed;
         }
 
         // Park the cursor away from the panel and screen edges so it neither
         // shows over the HUD in recordings nor edge-scrolls the camera.
         GameWindow.TryMoveCursor(GameWindowTitle, 0.5, 0.35);
-        return true;
+        return EngageResult.Engaged;
     }
 
     /// Not a failure: the conditions for a quality render weren't met (camera
@@ -732,7 +782,7 @@ public sealed class RenderAgent(AgentConfig config)
         {
             ct.ThrowIfCancellationRequested();
             var procs = Process.GetProcessesByName(GameProcessName);
-            if (procs.Length > 0)
+            if (procs is { Length: > 0 })
             {
                 foreach (var extra in procs[1..]) extra.Dispose();
                 return procs[0];
@@ -881,29 +931,7 @@ public sealed class RenderAgent(AgentConfig config)
             : null;
     }
 
-    /// The game persists EnableDirectedCamera in game.cfg's [Replay] section and
-    /// reads it at launch. Idempotent; called while no game runs.
-    private void EnsureDirectedCameraDisabled()
-    {
-        var cfg = Path.Combine(LeagueRoot, "Config", "game.cfg");
-        if (!File.Exists(cfg)) return;
-
-        var lines = File.ReadAllLines(cfg).ToList();
-        var existing = lines.FindIndex(l => l.Trim().StartsWith("EnableDirectedCamera", StringComparison.OrdinalIgnoreCase));
-        if (existing >= 0)
-        {
-            if (lines[existing].Trim().EndsWith("=0")) return;
-            lines[existing] = "EnableDirectedCamera=0";
-        }
-        else
-        {
-            var replay = lines.FindIndex(l => l.Trim().Equals("[Replay]", StringComparison.OrdinalIgnoreCase));
-            if (replay < 0) { lines.Add("[Replay]"); replay = lines.Count - 1; }
-            lines.Insert(replay + 1, "EnableDirectedCamera=0");
-        }
-        File.WriteAllLines(cfg, lines);
-        Log.Info("Disabled the directed replay camera in game.cfg");
-    }
+    private void EnsureDirectedCameraDisabled() => ReplayCameraUi.EnsureDirectedCameraDisabled(LeagueRoot);
 
     /// One-time setup the Replay API needs; idempotent, and the game only reads
     /// the file at launch so editing while no game runs is safe.

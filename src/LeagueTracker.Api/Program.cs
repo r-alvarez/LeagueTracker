@@ -41,6 +41,7 @@ builder.Services.AddScoped<TimelineSeriesService>();
 builder.Services.AddScoped<LensService>();
 builder.Services.AddScoped<FundamentalsService>();
 builder.Services.AddScoped<ReviewService>();
+builder.Services.AddScoped<ReviewReelService>();
 // dpm.lol answers 403 to default HTTP clients; browser-like headers get JSON.
 builder.Services.AddHttpClient<DpmLpBackfillService>(c =>
 {
@@ -497,7 +498,7 @@ app.MapPost("/api/render/next", async (ClipService clips, FullGameService full, 
         // page re-renders just that window, keeping the good ones.
         var missing = plan.Windows.Where(w => clips.ClipPath(matchId, w.Index) is null
             && (!vodCovered || w.Kind is "fight")).ToList();
-        if (missing.Count == 0) continue;
+        if (missing is not { Count: > 0 }) continue;
         if (!leases.TryClaim($"clips:{matchId}", agent)) continue;
         await clips.SavePlanAsync(plan, ct);
         var (myName, myChampion) = await CameraTargetAsync(matchId);
@@ -634,13 +635,13 @@ app.MapGet("/api/matches/{id}", async (string id, LeagueDbContext db, ReplayArch
             .ToListAsync(ct);
     object TeamObjectives(bool mine) => new
     {
-        Towers = match.ObjectiveEvents.Count(o => o.Kind == "TOWER" && o.ByMyTeam == mine),
-        Inhibitors = match.ObjectiveEvents.Count(o => o.Kind == "INHIBITOR" && o.ByMyTeam == mine),
-        Dragons = match.ObjectiveEvents.Count(o => o.Kind == "DRAGON" && o.ByMyTeam == mine),
-        Barons = match.ObjectiveEvents.Count(o => o.Kind == "BARON" && o.ByMyTeam == mine),
-        Heralds = match.ObjectiveEvents.Count(o => o.Kind == "HERALD" && o.ByMyTeam == mine),
-        Grubs = match.ObjectiveEvents.Count(o => o.Kind == "GRUBS" && o.ByMyTeam == mine),
-        Atakhan = match.ObjectiveEvents.Count(o => o.Kind == "ATAKHAN" && o.ByMyTeam == mine),
+        Towers = match.ObjectiveEvents.Count(o => o.Kind is "TOWER" && o.ByMyTeam == mine),
+        Inhibitors = match.ObjectiveEvents.Count(o => o.Kind is "INHIBITOR" && o.ByMyTeam == mine),
+        Dragons = match.ObjectiveEvents.Count(o => o.Kind is "DRAGON" && o.ByMyTeam == mine),
+        Barons = match.ObjectiveEvents.Count(o => o.Kind is "BARON" && o.ByMyTeam == mine),
+        Heralds = match.ObjectiveEvents.Count(o => o.Kind is "HERALD" && o.ByMyTeam == mine),
+        Grubs = match.ObjectiveEvents.Count(o => o.Kind is "GRUBS" && o.ByMyTeam == mine),
+        Atakhan = match.ObjectiveEvents.Count(o => o.Kind is "ATAKHAN" && o.ByMyTeam == mine),
     };
 
     return Results.Ok(new
@@ -747,6 +748,11 @@ app.MapGet("/api/fundamentals", async (FundamentalsService svc, int window = 20,
 // my lane / fights bought the map / stepped with the enemy accounted for.
 app.MapGet("/api/matches/{id}/review", async (string id, ReviewService svc, CancellationToken ct) =>
     await svc.GetAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+
+// The between-games review: the moments the player was in, as replay
+// timestamps, for the agent to drive the game client through.
+app.MapGet("/api/matches/{id}/reel", async (string id, ReviewReelService svc, CancellationToken ct) =>
+    await svc.GetAsync(id, ct) is { } reel ? Results.Ok(reel) : Results.NotFound());
 
 // Verdict triples for a page of matches (the list rows' process chips).
 app.MapGet("/api/reviews", async (string ids, ReviewService svc, CancellationToken ct) =>

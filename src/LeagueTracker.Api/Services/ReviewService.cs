@@ -110,8 +110,8 @@ public sealed class ReviewService(LeagueDbContext db)
     {
         string?[] verdicts = [r.Lane?.Verdict, r.Fights.Verdict, r.Discipline.Verdict, r.Stewardship?.Verdict];
         if (verdicts.All(v => v is null)) return null;
-        var won = verdicts.Count(v => v == "yes");
-        var lost = verdicts.Count(v => v == "no");
+        var won = verdicts.Count(v => v is "yes");
+        var lost = verdicts.Count(v => v is "no");
         return won >= SweepCount && lost == 0 ? "dominated"
             : lost >= SweepCount && won == 0 ? "runover"
             : won > lost ? "won"
@@ -222,7 +222,7 @@ public sealed class ReviewService(LeagueDbContext db)
                 // the fight - the same headcount idea the analyzer uses for me.
                 var oppThere = windowKills.Any(k => k.KillerParticipantId == opp.ParticipantId
                         || k.VictimParticipantId == opp.ParticipantId || AssistedBy(k, opp.ParticipantId))
-                    || (windowKills.Count > 0 && InterpolatedAt(oppPositions, midSec) is { } op
+                    || (windowKills is { Count: > 0 } && InterpolatedAt(oppPositions, midSec) is { } op
                         && Math.Sqrt(Math.Pow(op.X - windowKills.Average(k => k.X), 2)
                             + Math.Pow(op.Y - windowKills.Average(k => k.Y), 2)) <= 2500);
                 if (oppThere) continue;
@@ -238,10 +238,10 @@ public sealed class ReviewService(LeagueDbContext db)
         // outcomes - the Fights and Discipline questions already own those.
         // The duel comparison only counts kills earned while the other was
         // absent by choice (elsewhere or nearby-uninvolved), both ways.
-        var theirCashKills = theirCashIns.Where(x => x.Where != "dead").Sum(x => x.Kills);
-        var myCashKills = myCashIns.Where(x => x.Where != "dead").Sum(x => x.Kills);
-        var myUnpaidAbsences = theirCashIns.Count(x => x.Where == "elsewhere" && !x.Paid);
-        var theirUnpaidAbsences = myCashIns.Count(x => x.Where == "elsewhere" && !x.Paid);
+        var theirCashKills = theirCashIns.Where(x => x.Where is not "dead").Sum(x => x.Kills);
+        var myCashKills = myCashIns.Where(x => x.Where is not "dead").Sum(x => x.Kills);
+        var myUnpaidAbsences = theirCashIns.Count(x => x.Where is "elsewhere" && !x.Paid);
+        var theirUnpaidAbsences = myCashIns.Count(x => x.Where is "elsewhere" && !x.Paid);
 
         var checkpoints = m.LaneDiffsJson is { Length: > 0 }
             ? JsonSerializer.Deserialize<List<TimelineAnalyzer.LaneDiffPoint>>(m.LaneDiffsJson, Json) ?? []
@@ -321,11 +321,11 @@ public sealed class ReviewService(LeagueDbContext db)
         return new Verdicted(verdict, new
         {
             Participated = mine.Count,
-            Won = mine.Count(f => f.Result == "won"),
-            Lost = mine.Count(f => f.Result == "lost"),
-            Draw = mine.Count(f => f.Result == "draw"),
-            Converted = mine.Count(f => f.Result == "won" && f.ConvertedObjective),
-            Conceded = mine.Count(f => f.Result == "lost" && f.ConvertedObjective),
+            Won = mine.Count(f => f.Result is "won"),
+            Lost = mine.Count(f => f.Result is "lost"),
+            Draw = mine.Count(f => f.Result is "draw"),
+            Converted = mine.Count(f => f.Result is "won" && f.ConvertedObjective),
+            Conceded = mine.Count(f => f.Result is "lost" && f.ConvertedObjective),
             Overstays = overstays,
             PaidAbsences = paidAbsences,
         });
@@ -394,8 +394,8 @@ public sealed class ReviewService(LeagueDbContext db)
         var withTeam = 0;
         foreach (var d in deaths)
         {
-            if (d.EnemyJunglerNear == true && d.TimeSec < LaneEndSec) ganked++;
-            else if (d.FollowTeammate is not null && d.FollowPureLoss == false) followInsTraded++;
+            if (d.EnemyJunglerNear is true && d.TimeSec < LaneEndSec) ganked++;
+            else if (d.FollowTeammate is not null && d.FollowPureLoss is false) followInsTraded++;
             else if (d.FollowTeammate is not null) followIns++;
             else if (d is { EnemiesNearDeath: 0 } && d.TimeSec >= LaneEndSec && !InCommittedFight(fights, d.TimeSec)) fogPicks++;
             else if (d is { EnemiesNearDeath: { } e, AlliesNearDeath: { } a } && e >= a + 2) outnumbered++;
@@ -407,12 +407,15 @@ public sealed class ReviewService(LeagueDbContext db)
         // Uncontested concessions are team macro calls, not personal discipline,
         // so they never appear here. "Paid" = I took a structure around that
         // moment (a real trade). Same-kind events within 90s (grub spawns)
-        // collapse into one moment.
+        // collapse into one moment. Laning-phase epics are excluded for the
+        // same reason the Q1 ledger starts at LaneEndSec: the "absent" laner
+        // is holding their lane - payment this check can't see, since it only
+        // recognizes structures.
         var byPid = positions.GroupBy(p => p.ParticipantId)
             .ToDictionary(g => g.Key, g => g.OrderBy(p => p.TimeSec).ToList());
         var myPositions = me is not null ? byPid.GetValueOrDefault(me.ParticipantId) ?? [] : [];
         var concededAbsent = new List<ConcededEpic>();
-        foreach (var o in objectives.Where(o => !o.ByMyTeam && EpicKinds.Contains(o.Kind)).OrderBy(o => o.TimeSec))
+        foreach (var o in objectives.Where(o => !o.ByMyTeam && o.TimeSec >= LaneEndSec && EpicKinds.Contains(o.Kind)).OrderBy(o => o.TimeSec))
         {
             if (concededAbsent.Any(c => c.Kind == o.Kind && o.TimeSec - c.TimeSec <= 90)) continue;
             if (InterpolatedAt(myPositions, o.TimeSec) is not { } p) continue;

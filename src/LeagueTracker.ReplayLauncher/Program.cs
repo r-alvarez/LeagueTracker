@@ -25,7 +25,7 @@ try
         return 0;
     }
 
-    if (args is not [var raw] || !Uri.TryCreate(raw, UriKind.Absolute, out var uri) || uri.Scheme != "leaguereplay")
+    if (args is not [var raw] || !Uri.TryCreate(raw, UriKind.Absolute, out var uri) || uri.Scheme is not "leaguereplay")
     {
         Native.Error("Usage:\n  LeagueTracker.ReplayLauncher --register\n  LeagueTracker.ReplayLauncher leaguereplay://<tracker-host>/<matchId>");
         return 1;

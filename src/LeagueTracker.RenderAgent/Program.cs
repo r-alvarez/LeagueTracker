@@ -36,6 +36,20 @@ try
     var agent = new RenderAgent(config);
     if (!await agent.ValidateAsync(cts.Token)) return 1;
 
+    if (Environment.GetEnvironmentVariable("LT_REVIEW_TEST") is { Length: > 0 } reviewMatch)
+    {
+        // Drives one match's review now instead of waiting for a game to end -
+        // the only way to exercise replay launch, camera lock and hotkeys
+        // without playing a game first.
+        if (agent.ResolvedLeagueRoot is not { } testRoot)
+        {
+            Log.Error("Review test needs a resolved League install");
+            return 1;
+        }
+        await new ReplayReview(config, testRoot).RunForMatchAsync(reviewMatch, cts.Token);
+        return 0;
+    }
+
     // Rendering and live-game recording are independent loops: renders use
     // the PC while nobody plays, the recorder only acts while somebody does.
     var loops = new List<Task> { agent.RunAsync(cts.Token) };
@@ -46,6 +60,16 @@ try
     else if (config.RecordGames)
     {
         Log.Warn("Game recording is on but no League install was resolved (mock mode?) - recorder not started");
+    }
+    // Third loop, same reasoning: it only reads the client and the trackers,
+    // so nothing it does can disturb a recording in flight.
+    if (config.PostGameReview && agent.ResolvedLeagueRoot is { } reviewRoot)
+    {
+        loops.Add(new ReplayReview(config, reviewRoot).RunAsync(cts.Token));
+    }
+    else if (config.PostGameReview)
+    {
+        Log.Warn("Post-game review is on but no League install was resolved (mock mode?) - not started");
     }
     await Task.WhenAll(loops);
     return 0;
