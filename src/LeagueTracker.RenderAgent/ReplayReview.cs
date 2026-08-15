@@ -17,9 +17,12 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnl
 {
     /// Any of these means the player has moved on to the next game. Checked
     /// at every step, not once: the whole feature is "review between games",
-    /// and someone who re-queues has answered the question.
+    /// and someone who re-queues has answered the question. NOT "Lobby": the
+    /// client drops everyone back into the lobby after a game (always, in a
+    /// party), and sitting there is exactly when the review is wanted - it
+    /// skipped every game of a party evening before this was seen.
     private static readonly string[] QueueingPhases =
-        ["Lobby", "Matchmaking", "ReadyCheck", "ChampSelect", "GameStart", "InProgress", "Reconnect"];
+        ["Matchmaking", "ReadyCheck", "ChampSelect", "GameStart", "InProgress", "Reconnect"];
 
     private static int _sessionActive;
 

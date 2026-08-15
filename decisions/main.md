@@ -1258,3 +1258,19 @@ to the poller's round and remembers it in `<DataRoot>/accounts.json`;
 config-seeded accounts stay in the compose and win on a duplicate.
 Deliberately not built: looking up arbitrary summoners on the fly (a
 different product - per-visit Riot calls, no history, a production key).
+
+## 2026-08-15 — The between-games review is complete, and the lobby is not a queue
+
+**"Lobby" stopped counting as queueing.** The client drops everyone back
+into the lobby after a game - always, in a party - and that is precisely
+when the review is wanted; with Lobby in the queueing list every game of a
+party evening was "skipped - next game already being queued" while the
+solo games days earlier had reviewed fine. Matchmaking, ready check, champ
+select, loading, in game: those mean the player has moved on.
+
+**No reel budget.** The impact-ranked cap (max(6, duration/180) fights)
+was my idea of "a game between games"; Ruben's rule is that a review is
+complete or it isn't - every significant fight he was in, every death, and
+now every kill of his (a pick or a solo kill outside any fight gets the
+same 20s approach + 3s as a death). Long games take longer to watch; F9
+skips.

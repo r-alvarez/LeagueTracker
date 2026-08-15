@@ -44,11 +44,9 @@ public sealed class ReviewReelService(LeagueDbContext db)
     /// dead champion's camera at their own fountain, so anything much longer
     /// is empty base; three seconds buys the death itself and no more.
     private const int DeathPostSec = 3;
-    /// How many fights the reel plays: one slot per this many seconds of game,
-    /// so a 45-minute war reviews more than a 20-minute stomp. A game between
-    /// games is still the budget - the reel grows with the game it reviews.
-    private const int FightSlotPerSec = 180;
-    private const int MinFights = 6;
+    /// A kill outside any fight is a pick or a solo kill - the same few beats
+    /// after it as a death gets: the blow lands, the camera moves on.
+    private const int KillPostSec = 3;
 
     /// Teamfights always; skirmishes once they cost two lives. The same
     /// significance gate the fight-clip planner uses.
@@ -72,6 +70,11 @@ public sealed class ReviewReelService(LeagueDbContext db)
             .Include(m => m.DeathEvents.OrderBy(d => d.TimeSec))
             .FirstOrDefaultAsync(m => m.Id == matchId, ct);
         if (match is null) return null;
+        var me = match.Participants.FirstOrDefault(p => p.IsMe);
+        var myKills = me is null ? [] : await db.KillEvents.AsNoTracking()
+            .Where(k => k.MatchId == matchId && k.KillerParticipantId == me.ParticipantId)
+            .OrderBy(k => k.TimeSec)
+            .ToListAsync(ct);
 
         var fights = (match.FightsJson is { Length: > 0 }
                 ? JsonSerializer.Deserialize<List<FightDto>>(match.FightsJson, Json) ?? []
@@ -83,25 +86,17 @@ public sealed class ReviewReelService(LeagueDbContext db)
             .OrderBy(f => f.StartSec)
             .ToList();
 
-        var moments = MergeAdjacent(fights).Select(FightMoment).ToList();
+        // Every significant fight the player was in - no budget. Ruben's rule
+        // (2026-08-15): the review is complete or it is not a review; a long
+        // war simply takes longer to watch, and the hotkeys skip.
+        var chosen = MergeAdjacent(fights).Select(g => FightMoment(g).Moment).ToList();
 
-        // Only fights compete for the cap - deaths are few and each one is its
-        // own question.
-        var maxFights = Math.Max(MinFights, (int)(match.DurationSec / FightSlotPerSec));
-        var keep = moments
-            .OrderByDescending(m => m.Impact)
-            .Take(maxFights)
-            .Select(m => m.Moment)
-            .ToHashSet();
-        var chosen = moments.Where(m => keep.Contains(m.Moment)).Select(m => m.Moment).ToList();
+        // A death or a kill inside a fight IS that fight; one nothing covers is
+        // the pick, the caught-out or the solo kill - the review's best material.
+        bool Covered(int t) => chosen.Any(m => t >= m.StartSec && t <= m.EndSec);
+        chosen.AddRange(match.DeathEvents.Where(d => !Covered(d.TimeSec)).Select(DeathMoment));
+        chosen.AddRange(myKills.Where(k => !Covered(k.TimeSec)).Select(k => KillMoment(k, match)));
 
-        // A death inside a fight IS that fight; a death nothing covers is the
-        // pick or the caught-out, which is the review's best material.
-        chosen.AddRange(match.DeathEvents
-            .Where(d => !chosen.Any(m => d.TimeSec >= m.StartSec && d.TimeSec <= m.EndSec))
-            .Select(DeathMoment));
-
-        var me = match.Participants.FirstOrDefault(p => p.IsMe);
         return new Reel(matchId, me?.RiotId, me?.Champion, Deoverlap([.. chosen.OrderBy(m => m.StartSec)]));
     }
 
@@ -141,6 +136,15 @@ public sealed class ReviewReelService(LeagueDbContext db)
             group[^1].EndSec + FightPostSec,
             name,
             detail), Impact(group));
+    }
+
+    private static Moment KillMoment(KillEvent k, Match match)
+    {
+        var victim = match.Participants.FirstOrDefault(p => p.ParticipantId == k.VictimParticipantId)?.Champion;
+        var assists = k.AssistIds.Split(',', StringSplitOptions.RemoveEmptyEntries).Length;
+        return new Moment("kill", k.TimeSec, Math.Max(0, k.TimeSec - PreRollSec), k.TimeSec + KillPostSec,
+            victim is { Length: > 0 } ? $"Kill - {victim}" : "Kill",
+            assists > 0 ? $"{assists} assist{(assists == 1 ? "" : "s")}" : "solo kill");
     }
 
     private static Moment DeathMoment(Death d)
