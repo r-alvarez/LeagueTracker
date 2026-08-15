@@ -21,7 +21,8 @@ public sealed class AccountRegistry
 
         foreach (var account in list)
         {
-            if (account.Slug is not { Length: > 0 }) throw new InvalidOperationException("Every account needs a Slug");
+            if (account.GameName is not { Length: > 0 } || account.TagLine is not { Length: > 0 }) throw new InvalidOperationException("Every account needs GameName and TagLine");
+            account.Slug = account.UrlSlug;
             if (account.DataDir is not { Length: > 0 })
             {
                 account.DataDir = root is not null
@@ -45,7 +46,6 @@ public sealed class AccountRegistry
 
     private static Account LegacyAccount(RiotOptions legacy) => new()
     {
-        Slug = "main",
         GameName = legacy.GameName,
         TagLine = legacy.TagLine,
         Region = legacy.Region,
@@ -72,6 +72,8 @@ public sealed class AccountContext(AccountRegistry registry)
     public void Bind(Account account) => _current = account;
 
     public string Slug => Current.Slug;
+    /// The slug as it goes into a URL (game names may hold spaces/unicode).
+    public string UrlSegment => Uri.EscapeDataString(Current.Slug);
     public string DataDir => Current.DataDir;
     public AccountRegistry Registry => registry;
 }

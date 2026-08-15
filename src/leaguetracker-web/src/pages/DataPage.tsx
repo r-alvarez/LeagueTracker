@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { account } from '../account'
 import { api } from '../api'
 import type { JobStatus, RenderQueueRow, Status, StorageInfo } from '../types'
 
@@ -186,9 +187,9 @@ export default function DataPage() {
           (the computed dashboard views over all games) - for the coaching workflows.
         </p>
         <div className="filters" style={{ margin: 0, flexWrap: 'wrap' }}>
-          <a className="action primary" href="/api/export/all.zip" download>Download .zip</a>
+          <a className="action primary" href={account.apiUrl('/api/export/all.zip')} download>Download .zip</a>
           {['matches.csv', 'challenges.csv', 'lane-checkpoints.csv', 'ranks.csv', 'deaths.csv', 'objectives.csv', 'lp-history.csv'].map(f => (
-            <a key={f} className="action" href={`/api/export/${f}`} download>{f}</a>
+            <a key={f} className="action" href={account.apiUrl(`/api/export/${f}`)} download>{f}</a>
           ))}
         </div>
       </div>

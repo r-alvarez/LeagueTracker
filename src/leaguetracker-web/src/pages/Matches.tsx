@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from 'react'
+import { account } from '../account'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import type { MatchFacets, MatchSummary, ReviewVerdicts } from '../types'
@@ -129,7 +130,7 @@ function Row({ m, reviews }: { m: MatchSummary; reviews: ReviewVerdicts }) {
 
       <div className="mr-links" onClick={e => e.stopPropagation()}>
         {m.hasReplay && (
-          <a href={`/api/matches/${m.id}/replay`} download title="Download replay (.rofl)">⬇︎</a>
+          <a href={account.apiUrl(`/api/matches/${m.id}/replay`)} download title="Download replay (.rofl)">⬇︎</a>
         )}
       </div>
     </div>

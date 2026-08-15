@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Route, Routes } from 'react-router-dom'
 import { api } from './api'
+import { account } from './account'
 import type { Status } from './types'
 import Dashboard from './pages/Dashboard'
 import Matches from './pages/Matches'
@@ -35,7 +36,13 @@ export default function App() {
     <div className="shell">
       <header className="topbar">
         <h1>LeagueTracker</h1>
-        {status && <span className="player">{status.riotId}</span>}
+        {account.all.length > 1 ? (
+          <label className="player account-switch" title="Switch account">
+            <select value={account.current.slug} onChange={e => account.switchTo(e.target.value)} aria-label="Account">
+              {account.all.map(a => <option key={a.slug} value={a.slug}>{a.label} · {a.riotId}</option>)}
+            </select>
+          </label>
+        ) : status && <span className="player">{status.riotId}</span>}
         {scope && <span className="sub" title={patches.length > 1 ? `patches ${patches.join(', ')}` : undefined}>{scope}</span>}
       </header>
 

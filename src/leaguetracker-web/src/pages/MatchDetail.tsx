@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { account } from '../account'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts, VodMoment, VodStatus } from '../types'
@@ -636,7 +637,7 @@ export default function MatchDetail() {
                     <a href={`leaguereplay://${window.location.host}/${m.id}`}
                       title="Launch in the League client — needs the replay launcher registered on this PC (LeagueTracker.ReplayLauncher --register)">watch replay ▶</a>
                     {' · '}
-                    <a href={`/api/matches/${m.id}/replay`} download
+                    <a href={account.apiUrl(`/api/matches/${m.id}/replay`)} download
                       title="Official .rofl — plays in the client while this patch is live">⬇︎</a>
                   </>
                 )}
@@ -698,7 +699,7 @@ export default function MatchDetail() {
           </h2>
           {fullGame.state === 'done' && (
             <>
-              <video src={`/api/matches/${id}/fullgame`} controls preload="metadata"
+              <video src={account.apiUrl(`/api/matches/${id}/fullgame`)} controls preload="metadata"
                 style={{ width: '100%', maxWidth: 960, borderRadius: 8, background: '#000' }} />
               <p className="mut sm-text" style={{ margin: '8px 0 0' }}>
                 {fullGame.sizeMb} MB{fullGame.renderedUtc && ` · rendered ${new Date(fullGame.renderedUtc).toLocaleDateString()}`}

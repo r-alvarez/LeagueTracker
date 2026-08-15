@@ -107,6 +107,16 @@ a { color: inherit; }
   border-radius: var(--radius-pill); padding: 3px 11px;
 }
 .topbar .sub { color: var(--muted); font-size: 12.5px; }
+/* The account switcher wears the player pill: same colours, native select
+   inside so it works with a thumb and a keyboard alike. */
+.topbar .account-switch { padding: 0; }
+.topbar .account-switch select {
+  appearance: none; -webkit-appearance: none; background: transparent; border: 0; color: inherit; font: inherit;
+  font-weight: 650; padding: 3px 26px 3px 11px; cursor: pointer; border-radius: var(--radius-pill);
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 15px) 55%, calc(100% - 10px) 55%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+}
+.topbar .account-switch select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* The tab strip swipes sideways on narrow screens instead of clipping pages
    off the edge; the scrollbar stays hidden (both syntaxes - scrollbar-width

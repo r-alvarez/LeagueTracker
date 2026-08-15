@@ -4,7 +4,9 @@ namespace LeagueTracker.Api.Accounts;
 /// lives. The process hosts many; nothing about an account is global.
 public sealed class Account
 {
-    /// URL segment and folder name: /api/a/{slug}, /{slug}, <DataRoot>/{slug}.
+    /// URL segment: /{slug}/..., /api/a/{slug}/... - the Riot ID with '-' for
+    /// '#' (op.gg style: /ImRA-87166), Riot IDs being globally unique. Blank
+    /// = derived from GameName/TagLine; set explicitly only to override.
     public string Slug { get; set; } = "";
     public string GameName { get; set; } = "";
     public string TagLine { get; set; } = "";
@@ -24,6 +26,7 @@ public sealed class Account
     public bool HideLp { get; set; }
 
     public string RiotId => $"{GameName}#{TagLine}";
+    public string UrlSlug => Slug is { Length: > 0 } ? Slug : $"{GameName}-{TagLine}";
     public string Label => DisplayName is { Length: > 0 } ? DisplayName : GameName;
     public string[] HostList => [.. Hosts.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)];
 }

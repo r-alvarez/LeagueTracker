@@ -136,9 +136,12 @@ app.UseStaticFiles(staticFiles);
 MapAccountApi(app.MapGroup("/api"));
 MapAccountApi(app.MapGroup("/api/a/{slug}"));
 
-app.MapGet("/api/accounts", (AccountRegistry registry) => Results.Ok(new
+app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct) => Results.Ok(new
 {
     Default = registry.Default.Slug,
+    // The account this request is bound to (Host header on a legacy
+    // hostname, else the default) - the SPA lands there when the URL has no slug.
+    Current = acct.Slug,
     Accounts = registry.All.Select(a => new { a.Slug, a.Label, a.RiotId, a.HideLp }),
 }));
 
@@ -325,7 +328,7 @@ api.MapGet("/matches/{id}/clips", async (AccountContext acct, string id, ClipSer
         : plan.Windows.Select(w => new
         {
             w.Index, w.Label, w.StartSec, w.EndSec, w.Events, w.Kind, w.CameraChampion,
-            Url = $"/api/a/{acct.Slug}/matches/{id}/clips/{w.Index}",
+            Url = $"/api/a/{acct.UrlSegment}/matches/{id}/clips/{w.Index}",
             Ready = clips.ClipPath(id, w.Index) is not null,
         }));
 });
@@ -558,7 +561,7 @@ api.MapPost("/render/next", async (AccountContext acct, ClipService clips, FullG
         {
             Kind = "clips",
             plan.MatchId, plan.GameVersion, plan.DurationSec,
-            ReplayUrl = $"/api/a/{acct.Slug}/matches/{plan.MatchId}/replay",
+            ReplayUrl = $"/api/a/{acct.UrlSegment}/matches/{plan.MatchId}/replay",
             MyName = myName,
             MyChampion = myChampion,
             Windows = missing,
@@ -575,7 +578,7 @@ api.MapPost("/render/next", async (AccountContext acct, ClipService clips, FullG
         {
             Kind = "full",
             MatchId = matchId, match.GameVersion, match.DurationSec,
-            ReplayUrl = $"/api/a/{acct.Slug}/matches/{matchId}/replay",
+            ReplayUrl = $"/api/a/{acct.UrlSegment}/matches/{matchId}/replay",
             MyName = myName,
             MyChampion = myChampion,
             Windows = new[] { new ClipWindow(0, 0, (int)match.DurationSec, "full", []) },
@@ -831,7 +834,7 @@ api.MapPost("/ranks/backfill", (AccountScopes scopes, AccountContext acct, JobSt
             // Already logged and surfaced via job status.
         }
     });
-    return Results.Accepted($"/api/a/{acct.Slug}/jobs/status", jobs.Snapshot());
+    return Results.Accepted($"/api/a/{acct.UrlSegment}/jobs/status", jobs.Snapshot());
 });
 
 api.MapPost("/analytics/reprocess", (AccountScopes scopes, AccountContext acct, JobStatusService jobs) =>
@@ -849,7 +852,7 @@ api.MapPost("/analytics/reprocess", (AccountScopes scopes, AccountContext acct, 
             // Already logged and surfaced via job status.
         }
     });
-    return Results.Accepted($"/api/a/{acct.Slug}/jobs/status", jobs.Snapshot());
+    return Results.Accepted($"/api/a/{acct.UrlSegment}/jobs/status", jobs.Snapshot());
 });
 
 // --- Stop-loss ------------------------------------------------------------------
@@ -947,7 +950,7 @@ api.MapPost("/sync/history", (AccountScopes scopes, AccountContext acct, JobStat
             // Already logged and surfaced via job status.
         }
     });
-    return Results.Accepted($"/api/a/{acct.Slug}/jobs/status", jobs.Snapshot());
+    return Results.Accepted($"/api/a/{acct.UrlSegment}/jobs/status", jobs.Snapshot());
 });
 
 api.MapPost("/import", (string path, AccountScopes scopes, AccountContext acct, JobStatusService jobs) =>
@@ -966,7 +969,7 @@ api.MapPost("/import", (string path, AccountScopes scopes, AccountContext acct, 
             // Already logged and surfaced via job status.
         }
     });
-    return Results.Accepted($"/api/a/{acct.Slug}/jobs/status", jobs.Snapshot());
+    return Results.Accepted($"/api/a/{acct.UrlSegment}/jobs/status", jobs.Snapshot());
 });
 
 api.MapGet("/jobs/status", (JobStatusService jobs) => Results.Ok(jobs.Snapshot()));

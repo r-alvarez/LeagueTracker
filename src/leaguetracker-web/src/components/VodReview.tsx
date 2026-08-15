@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { account } from '../account'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api'
 import type { DeathEvent, VodMoment, VodStatus } from '../types'
@@ -195,8 +196,8 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
           {hasHostedVideo ? (
             <video
               ref={videoRef}
-              src={`/api/matches/${matchId}/vod`}
-              poster={`/api/matches/${matchId}/vod/thumb`}
+              src={account.apiUrl(`/api/matches/${matchId}/vod`)}
+              poster={account.apiUrl(`/api/matches/${matchId}/vod/thumb`)}
               controls
               preload="metadata"
               onLoadedMetadata={e => setDuration(e.currentTarget.duration)}

@@ -53,7 +53,7 @@ public sealed class AccountBindingMiddleware(RequestDelegate next, AccountRegist
 
         if (path.StartsWith("/api/a/", StringComparison.OrdinalIgnoreCase))
         {
-            var slug = path[7..].Split('/', 2)[0];
+            var slug = Uri.UnescapeDataString(path[7..].Split('/', 2)[0]);
             account = registry.BySlug(slug);
             if (account is null)
             {
