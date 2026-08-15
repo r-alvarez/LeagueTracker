@@ -17,25 +17,39 @@ The agent is windowless: no console, ffmpeg hidden, all output in `agent.log`
 next to the exe (self-rotating). The only thing you ever see is the replay
 window itself while a clip records.
 
-## Setup on the gaming PC
+## Setup on a player's PC
 
-1. Copy the published folder (exe + `appsettings.json`) anywhere.
-2. Install ffmpeg: `winget install Gyan.FFmpeg` (or drop `ffmpeg.exe` next to
-   the agent exe).
-3. Edit `appsettings.json`: set `ServerUrl` to the tracker machine, e.g.
-   `http://192.168.1.50:5170`.
-4. Run `LeagueTracker.RenderAgent.exe`. First run auto-detects the League
-   install and adds `EnableReplayApi=1` to `Config/game.cfg` if missing (the
-   Replay API needs it; the game reads it at launch). Progress lands in
-   `agent.log` next to the exe.
+Full walkthrough (owner side included) in `docs/agent-handoff.md`. Short form:
 
-For always-on operation, drop a shortcut to the exe in `shell:startup` (it
-must run in the interactive session - the game has to render to a real
-desktop for capture to work). If no tracker is reachable at startup the agent
-waits and retries forever, so a booting NAS is fine.
+1. Unzip the latest `LeagueTracker.RenderAgent-<version>.zip` (published by
+   `deploy/publish-agent.ps1`; ships ffmpeg) anywhere.
+2. `appsettings.template.json` → `appsettings.json`: `ServerUrl`, the
+   Cloudflare Access service token, and the role - `"RenderReplays": false`
+   for a recorder-only install (a player's PC), `"RecordGames": false` for
+   the dedicated render box. Everything else, YouTube credentials included,
+   arrives from the tracker's agent profile (`GET /api/agent/profile`);
+   any key written locally wins over it.
+3. `LeagueTracker.RenderAgent.exe --install`: registers a per-user run-at-logon
+   entry, starts the agent, and reports in a message box. `--uninstall`
+   reverses it. First run auto-detects the League install and adds
+   `EnableReplayApi=1` to `Config/game.cfg` if missing.
 
-`LeagueTracker.ReplayLauncher.exe --register` (same publish flow) registers
-the `leaguereplay://` protocol so the match pages' "watch replay" links launch
+The agent lives in the tray: the dot by the clock is green idle, red busy
+(recording/uploading/rendering), grey-with-bars paused, amber waiting for
+the tracker, orange when the last thing failed. Right-click for
+**Pause/Resume** (a `paused` file next to the exe - survives reboots; also
+`--pause`/`--resume`), open tracker/recordings/log, check for updates, quit.
+Quit and deploy stops go through `stop.requested`, so nothing is cut short.
+
+Every poll the agent posts a heartbeat (version, role, state, last recording,
+YouTube health) that the tracker's Data page shows under **Agents**. Builds
+dropped in the trackers' release folder install themselves when the agent is
+idle (previous build kept as `*.prev`; `appsettings.json` and
+`youtube-token.json` are never touched); dev builds (version 0.0.0.0) never
+self-update.
+
+`LeagueTracker.ReplayLauncher.exe --register` (in the same zip) registers the
+`leaguereplay://` protocol so the match pages' "watch replay" links launch
 replays through the client too.
 
 ## Behaviour
@@ -118,15 +132,21 @@ forces uploads from unaudited API projects to **private** regardless of
   capture/encode/finalize path, then exit (verifies NVENC without a game).
 - `LT_RECORD=0` / `LT_RECORDINGS_DIR` - recording overrides.
 - `LT_ONCE=1` - process a single job, then exit.
+- `LT_RENDER=0` - RenderReplays override; `LT_NO_TRAY=1` - no tray icon.
 - `LT_MAX_WINDOWS=1` - cap windows per job (quick smoke of a real render).
 - `LT_SERVER_URL` / `LT_LEAGUE_PATH` / `LT_FFMPEG_PATH` - config overrides.
 
 ## Publish (from the dev machine)
 
 ```
-dotnet publish src/LeagueTracker.RenderAgent -c Release
-# output: src/LeagueTracker.RenderAgent/bin/Release/net10.0/win-x64/publish
+deploy\publish-agent.ps1 -ReleaseDir <NAS>pps\leaguetrackergent-releases
 ```
+
+Stamps `yyyy.M.d.HHmm`, zips agent + launcher + ScreenRecorderLib + ffmpeg +
+`appsettings.template.json`, drops it in the shared release folder every
+tracker serves from `/api/agent/release`. Agents update themselves within the
+hour (or on the next heartbeat's version hint), only while idle. Without
+`-ReleaseDir` the zip just lands in `src/LeagueTracker.RenderAgent/bin/`.
 
 ## Deploying over a running agent
 

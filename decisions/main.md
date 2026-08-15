@@ -1094,3 +1094,43 @@ player), the catch-up upload sweep, a review session. The launch chain gets a
 five-minute timed hold because a WoL-woken machine re-sleeps on the UNATTENDED
 idle timeout - two minutes by default, shorter than the client boots. With the
 guards in, the Windows sleep timer finally comes off "never".
+
+## 2026-08-15 — The agent becomes something you can hand to a friend
+
+**One tracker per player stays; the agent splits into roles and stops being
+one machine's tool.** Ben's and Vanessa's PCs will run it unattended, and the
+replay work moves to a dedicated old PC, so the agent grew what an unattended
+install needs: `RenderReplays` next to `RecordGames` (recorder-only on a
+player's PC never touches the replay client; renderer-only on the render box
+serves every tracker over the URL list it already had), a tray icon with
+Pause/Resume/Quit (pause is a file, so it survives reboots - the "off switch"
+the system never had), `--install`/`--uninstall` on a per-user Run key, and a
+heartbeat every poll that the Data page lists under Agents.
+
+**Secrets live on the NAS, not on friends' PCs.** Each tracker serves an
+agent profile (`Agent:Profile` → `/api/agent/profile`): the shared YouTube
+channel's OAuth client + refresh token, title prefix, queues. The agent
+applies it under anything the local `appsettings.json` sets, at start and
+hourly - a rotated token reaches every machine without anyone touching them.
+The uploader's "auth broken" latch is tied to the credential values, so a new
+token un-breaks it without a restart. Consequence for templates: the shipped
+`appsettings.template.json` no longer writes the YouTube keys at all (a
+written key wins over the profile).
+
+**Builds install themselves through the deploy handshake that already
+existed.** `deploy/publish-agent.ps1` stamps `yyyy.M.d.HHmm`, zips agent +
+launcher + ffmpeg, drops it in the shared `agent-releases` folder every
+tracker mounts; the agent downloads when idle (no game process, nothing
+recording/uploading), verifies sha256, stages next to the exe, writes
+`stop.requested` and lets a detached cmd swap files after it exits (previous
+build kept as `*.prev`, settings and tokens never overwritten). Dev builds
+(0.0.0.0) never self-update. Smoke test: a 1.0.0.0 install updated to a
+published build and relaunched in three seconds.
+
+**Multi-account in one process was considered and deferred.** The process
+*is* the account today (`RiotOptions`, `Match` denormalised on "me",
+`IsMe` bool, no account key anywhere); the compose-per-player model gives
+isolation for free and only costs a hostname + Access app per friend. If
+cross-account features ever matter (duo stats, rendering a shared fight
+once), the path is N `DataDir`s/DbContexts behind an account route prefix in
+one process - not a single-DB tenant column.

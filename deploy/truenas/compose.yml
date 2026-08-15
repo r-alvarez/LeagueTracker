@@ -10,6 +10,23 @@ x-lt-build: &lt-build
   context: ../..
   dockerfile: Dockerfile
 
+# What every tracker hands its agents (GET /api/agent/profile): the shared
+# YouTube channel's OAuth client + refresh token, so no Google credential ever
+# sits on a friend's PC, plus the recording defaults. YT_* are Portainer stack
+# env vars, NEVER committed. Per-tracker overrides (a different title prefix,
+# a private channel) go in that service's environment block. Builds published
+# by deploy/publish-agent.ps1 land in the shared agent-releases folder; every
+# agent updates itself from whichever tracker it talks to.
+x-lt-agent-env: &lt-agent-env
+  Agent__ReleaseDir: /agent-releases
+  Agent__Profile__YouTubeUpload: "true"
+  Agent__Profile__YouTubeVisibility: unlisted
+  Agent__Profile__YouTubeClientId: ${YT_CLIENT_ID:-}
+  Agent__Profile__YouTubeClientSecret: ${YT_CLIENT_SECRET:-}
+  Agent__Profile__YouTubeRefreshToken: ${YT_REFRESH_TOKEN:-}
+  Agent__Profile__RecordQueues: ranked-solo,normal
+  Agent__Profile__UploadVodSidecars: "true"
+
 services:
   leaguetracker:
     build: *lt-build
@@ -18,13 +35,16 @@ services:
     container_name: leaguetracker
     user: "568:568"
     environment:
-      - TZ=Europe/London
+      <<: *lt-agent-env
+      TZ: Europe/London
       # Rank/LP display back on (2026-07-16), matching the local compose: the
       # process-first review views exist now, so rank reads as context, not
       # the verdict. Capture never stopped while it was hidden.
-      - Riot__HideLp=false
+      Riot__HideLp: "false"
+      Agent__Profile__RecordNamePrefix: Road to Platinum
     volumes:
       - /mnt/MediaPool/apps/leaguetracker/main:/data
+      - /mnt/MediaPool/apps/leaguetracker/agent-releases:/agent-releases:ro
     networks: [frontend]
     restart: unless-stopped
     labels:
@@ -44,12 +64,15 @@ services:
     container_name: leaguetracker-alt
     user: "568:568"
     environment:
-      - TZ=Europe/London
-      - Riot__GameName=ImRA
-      - Riot__TagLine=5957
-      - Riot__HideLp=false
+      <<: *lt-agent-env
+      TZ: Europe/London
+      Riot__GameName: ImRA
+      Riot__TagLine: "5957"
+      Riot__HideLp: "false"
+      Agent__Profile__RecordNamePrefix: Road to Platinum (alt)
     volumes:
       - /mnt/MediaPool/apps/leaguetracker/alt:/data
+      - /mnt/MediaPool/apps/leaguetracker/agent-releases:/agent-releases:ro
     networks: [frontend]
     restart: unless-stopped
     labels:
@@ -69,11 +92,14 @@ services:
     container_name: leaguetracker-ben
     user: "568:568"
     environment:
-      - TZ=Europe/London
-      - Riot__GameName=TheCosmicPeach
-      - Riot__TagLine=TTV
+      <<: *lt-agent-env
+      TZ: Europe/London
+      Riot__GameName: TheCosmicPeach
+      Riot__TagLine: TTV
+      Agent__Profile__RecordNamePrefix: Ben
     volumes:
       - /mnt/MediaPool/apps/leaguetracker/ben:/data
+      - /mnt/MediaPool/apps/leaguetracker/agent-releases:/agent-releases:ro
     networks: [frontend]
     restart: unless-stopped
     labels:
@@ -85,6 +111,36 @@ services:
       - traefik.http.routers.leaguetracker-ben.tls.certResolver=cloudflare
       - traefik.http.routers.leaguetracker-ben.priority=100
       - traefik.http.routers.leaguetracker-ben.service=leaguetracker-ben
+
+  # Adding a player = one more copy of this block: their Riot id, their own
+  # /data folder, their own hostname (plus DNS + a Cloudflare Access app + a
+  # service token for their agent - see docs/agent-handoff.md).
+  # leaguetracker-vanessa:
+  #   build: *lt-build
+  #   pull_policy: build
+  #   image: leaguetracker:local
+  #   container_name: leaguetracker-vanessa
+  #   user: "568:568"
+  #   environment:
+  #     <<: *lt-agent-env
+  #     TZ: Europe/London
+  #     Riot__GameName: <GameName>
+  #     Riot__TagLine: <TagLine>
+  #     Agent__Profile__RecordNamePrefix: Vanessa
+  #   volumes:
+  #     - /mnt/MediaPool/apps/leaguetracker/vanessa:/data
+  #     - /mnt/MediaPool/apps/leaguetracker/agent-releases:/agent-releases:ro
+  #   networks: [frontend]
+  #   restart: unless-stopped
+  #   labels:
+  #     - traefik.enable=true
+  #     - traefik.docker.network=frontend
+  #     - traefik.http.services.leaguetracker-vanessa.loadbalancer.server.port=5170
+  #     - traefik.http.routers.leaguetracker-vanessa.rule=Host(`league-vanessa.rjav-tech.co.uk`)
+  #     - traefik.http.routers.leaguetracker-vanessa.entrypoints=websecure
+  #     - traefik.http.routers.leaguetracker-vanessa.tls.certResolver=cloudflare
+  #     - traefik.http.routers.leaguetracker-vanessa.priority=100
+  #     - traefik.http.routers.leaguetracker-vanessa.service=leaguetracker-vanessa
 
   # Wakes the render PC while render work waits, so the gaming machine can
   # sleep instead of idling 24/7. The PC (10.10.10.x) and the NAS (10.10.40.x)
