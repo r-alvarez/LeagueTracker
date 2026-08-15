@@ -103,8 +103,8 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
     return sort.dir * (av - bv)
   }), [rows, sort])
 
-  const Th = ({ k, label, num }: { k: SortKey; label: string; num?: boolean }) => (
-    <th className={`sortable ${num ? 'num' : ''} ${sort.key === k ? 'sorted' : ''}`}
+  const Th = ({ k, label, num, extra }: { k: SortKey; label: string; num?: boolean; extra?: boolean }) => (
+    <th className={`sortable ${num ? 'num' : ''} ${extra ? 'col-extra' : ''} ${sort.key === k ? 'sorted' : ''}`}
       onClick={() => setSort(s => (s.key === k ? { key: k, dir: -s.dir as 1 | -1 } : { key: k, dir: k === 'key' ? 1 : -1 }))}>
       {label}<span className="sort-arrow">{sort.key === k ? (sort.dir === -1 ? '▾' : '▴') : ''}</span>
     </th>
@@ -120,8 +120,8 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
               <tr>
                 <Th k="key" label={champIcons ? 'Champion' : 'Role'} /><Th k="games" label="Games" num /><Th k="winRate" label="WR" />
                 <Th k="kda" label="KDA" num />
-                {!compact && <><Th k="kp" label="KP" num /><Th k="csPerMin" label="CS/m" num /><Th k="laneGoldAt10" label="G@10" num /></>}
-                <Th k="deathsPerGame" label="Deaths" num />
+                {!compact && <><Th k="kp" label="KP" num extra /><Th k="csPerMin" label="CS/m" num extra /><Th k="laneGoldAt10" label="G@10" num extra /></>}
+                <Th k="deathsPerGame" label="Deaths" num extra />
               </tr>
             </thead>
             <tbody>
@@ -136,11 +136,11 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
                     <td><WinrateBar wins={r.wins} losses={r.games - r.wins} /></td>
                     <td className="num"><span className={`kda-ratio ${kdaCls(r.kda)}`} style={{ fontSize: 13 }}>{r.kda.toFixed(2)}</span></td>
                     {!compact && <>
-                      <td className="num">{pct(r.kp)}</td>
-                      <td className="num">{r.csPerMin}</td>
-                      <td className="num">{signed(r.laneGoldAt10)}</td>
+                      <td className="num col-extra">{pct(r.kp)}</td>
+                      <td className="num col-extra">{r.csPerMin}</td>
+                      <td className="num col-extra">{signed(r.laneGoldAt10)}</td>
                     </>}
-                    <td className="num">{r.deathsPerGame}</td>
+                    <td className="num col-extra">{r.deathsPerGame}</td>
                   </tr>
                   {open === r.key && r.detail && (
                     <tr className="drill">

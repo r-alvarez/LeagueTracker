@@ -1134,3 +1134,40 @@ isolation for free and only costs a hostname + Access app per friend. If
 cross-account features ever matter (duo stats, rendering a shared fight
 once), the path is N `DataDir`s/DbContexts behind an account route prefix in
 one process - not a single-DB tenant column.
+
+## 2026-08-15 — Every page audited on phones; nothing important hides behind a hidden scrollbar
+
+**Context.** All six routes of the three trackers were driven at 360/390/412
+px with real data (headless Chromium, every button clicked, every tab
+opened) and screenshots read segment by segment. Nothing pushed the page
+sideways - the earlier `overflow-x: hidden` + scroll-strip work held - but
+"fits" and "usable" had drifted apart in a few places.
+
+**What was actually broken.**
+- Match history cards: the K/D/A block sat beside the duel portraits, so at
+  360px the champion names collapsed to zero width and the KDA overlapped the
+  opponent portrait. The KDA now takes its own row under the duel.
+- Match-detail scoreboard: a 920px table in a scroller with a hidden
+  scrollbar - only ring + name were visible, and nothing hinted the rest
+  existed. It restacks into one card per player (portrait/name/KDA on the
+  first line, runes + spells + items on the second, KP/CS/dmg/vision on the
+  third) using grid areas on the same `<tr>`/`<td>` markup.
+- Dashboard champion/role tables: 650px wide, so a champion drill-down
+  (tiles + matchup rows) spanned the whole table and was cut at the card
+  edge. KP, CS/m, G@10 and Deaths are hidden on phones (`col-extra`); the
+  drill-down carries them anyway.
+- Item race: seven slots on two half-width rails were ~10px each. My rail
+  now sits over the opponent's rail at a readable size.
+
+**What changed for discoverability.** The primary nav wraps to a second row
+on phones instead of swiping ("Data & sync" was invisible unless you knew to
+scroll). Segmented chip strips and table scrollers paint an edge shadow on
+whichever side still has content (`background-attachment: local` covers over
+`scroll` shadows - no JS). Wide tables that stay wide (deaths, lane
+checkpoints, objectives) pin their first column so a row never loses its
+label while scrolling.
+
+**Not changed, on purpose.** The 11-chip window selector still scrolls
+rather than wraps (two rows of chips would push every page's content
+further down). The VOD moment strip stays proportional to video time even
+though close moments overlap on a 300px strip - the strip *is* the timeline.

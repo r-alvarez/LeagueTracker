@@ -160,7 +160,7 @@ export default function DataPage() {
           <p style={{ margin: 0 }}>
             {([['raw games', storage.rawGamesMb], ['replays', storage.replaysMb], ['clips', storage.clipsMb],
               ['full games', storage.fullGamesMb], ['database', storage.databaseMb]] as const).map(([label, mb]) => (
-              <span key={label} style={{ marginRight: 16 }}>
+              <span key={label} style={{ marginRight: 16, whiteSpace: 'nowrap' }}>
                 <strong>{mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`}</strong> <span className="mut">{label}</span>
               </span>
             ))}
