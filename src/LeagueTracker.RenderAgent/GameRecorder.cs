@@ -59,6 +59,49 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// list of publishable mp4s.
     public string MetaDir => Path.Combine(RecordingsDir, "metadata");
 
+    /// Where in-progress .part.mp4 segments are written. The encoder's sink
+    /// writer blocks on every disk write, so a stall on the recordings drive
+    /// (a spinning/SMR disk absorbing the previous game's remux, an upload
+    /// reading it, another recorder sharing it) becomes a run of duplicated
+    /// frames - the 0.3-0.9s freezes seen 15 Aug 2026 landed exactly like
+    /// that. Parts therefore go to a local fast drive by default and only
+    /// the finished file lands in RecordingsDir. Blank config = the agent's
+    /// LocalAppData (the system drive); an unwritable scratch dir falls back
+    /// to RecordingsDir itself.
+    public string PartsDir
+    {
+        get
+        {
+            if (_partsDir is not null) return _partsDir;
+            var dir = config.RecordScratchDir is { Length: > 0 } cfg
+                ? cfg
+                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeagueTracker", "recording-parts");
+            try
+            {
+                Directory.CreateDirectory(dir);
+                var probe = Path.Combine(dir, $".write-test-{Environment.ProcessId}");
+                File.WriteAllText(probe, "");
+                File.Delete(probe);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Scratch dir {dir} is not writable ({ex.Message}) - recording parts go to {RecordingsDir}");
+                dir = RecordingsDir;
+            }
+            return _partsDir = dir;
+        }
+    }
+    private string? _partsDir;
+
+    /// Full path of a segment file: parts live in PartsDir, but segments
+    /// recorded before the scratch dir existed (or finalized/preexisting
+    /// chunks) sit in RecordingsDir - whichever actually has the file wins.
+    private string SegPath(string file)
+    {
+        var scratch = Path.Combine(PartsDir, file);
+        return File.Exists(scratch) ? scratch : Path.Combine(RecordingsDir, file);
+    }
+
     /// Everything the recorder must remember about a game while it is still
     /// being played: identity, the allocated name, and each capture segment
     /// so far. Persisted as {BaseName}.inflight.json after every segment -
@@ -100,7 +143,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         try { await FinalizeOrphansAsync(ct); }
         catch (OperationCanceledException) { return; }
         catch (Exception ex) { Log.Warn($"Orphan finalize failed: {ex.Message}"); }
-        Log.Info($"Game recorder on - live games land in {RecordingsDir} ({config.RecordFramerate}fps, " +
+        Log.Info($"Game recorder on - live games land in {RecordingsDir}, parts written to {PartsDir} ({config.RecordFramerate}fps, " +
                  (config.CaptureBackend.Trim().Equals("wgc", StringComparison.OrdinalIgnoreCase)
                      ? $"WGC + MF quality {Math.Clamp(96 - config.RecordQuality, 40, 95)})"
                      : $"ddagrab + NVENC cq {config.RecordQuality})"));
@@ -245,7 +288,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
             var segNo = state.Segments.Count + 1;
             var segBase = $"{state.BaseName}.seg{segNo:00}";
-            var partPath = Path.Combine(RecordingsDir, $"{segBase}.part.mp4");
+            var partPath = Path.Combine(PartsDir, $"{segBase}.part.mp4");
             var eventsPath = Path.Combine(MetaDir, $"{segBase}.events.csv.gz");
             Log.Info($"Recording {state.BaseName} segment {segNo} ({state.MatchId ?? "id unknown"}): {g.Rect.Width}x{g.Rect.Height}");
             AgentStatus.Set("recording", state.BaseName);
@@ -352,7 +395,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         foreach (var path in Directory.EnumerateFiles(MetaDir, "*.inflight.json"))
         {
             if (TryLoadInflight(path) is not { } state || state.MatchId != matchId) continue;
-            state.Segments.RemoveAll(seg => !File.Exists(Path.Combine(RecordingsDir, seg.File)));
+            state.Segments.RemoveAll(seg => !File.Exists(SegPath(seg.File)));
             return state;
         }
         foreach (var sidecar in Directory.EnumerateFiles(MetaDir, "*.json"))
@@ -1096,7 +1139,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var ready = new List<(SegmentState Seg, string Path)>();
         foreach (var seg in state.Segments)
         {
-            var src = Path.Combine(RecordingsDir, seg.File);
+            var src = SegPath(seg.File);
             if (!File.Exists(src)) continue;
             var usable = src;
             if (!seg.Preexisting)
@@ -1104,7 +1147,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 var tmp = Path.Combine(RecordingsDir, seg.File[..^".part.mp4".Length] + ".remux.mp4");
                 try
                 {
-                    await RunFfmpegAsync(RemuxArgs(src, tmp), ct);
+                    await RunFfmpegAsync(await RemuxArgsAsync(src, tmp, ct), ct);
                     usable = tmp;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1192,7 +1235,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         // sidecars and remux intermediates are redundant.
         foreach (var (seg, path) in ready)
         {
-            var orig = Path.Combine(RecordingsDir, seg.File);
+            var orig = SegPath(seg.File);
             foreach (var leftover in new[] { orig, Path.ChangeExtension(orig, ".pcm"), path })
             {
                 if (!leftover.Equals(finalPath, StringComparison.OrdinalIgnoreCase)) TryDelete(leftover);
@@ -1333,7 +1376,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     {
         try
         {
-            await RunFfmpegAsync(RemuxArgs(partPath, finalPath), ct);
+            await RunFfmpegAsync(await RemuxArgsAsync(partPath, finalPath, ct), ct);
             File.Delete(partPath);
             TryDelete(Path.ChangeExtension(partPath, ".pcm"));
         }
@@ -1376,7 +1419,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 Log.Info($"Recording {state.BaseName} belongs to the game still in progress - resuming it");
                 continue;
             }
-            state.Segments.RemoveAll(seg => !File.Exists(Path.Combine(RecordingsDir, seg.File)));
+            state.Segments.RemoveAll(seg => !File.Exists(SegPath(seg.File)));
             if (state.Segments.Count == 0 || state.Segments.All(seg => seg.Preexisting)) { TryDelete(path); continue; }
             Log.Warn($"Finalizing interrupted recording: {state.BaseName} ({state.Segments.Count} segment(s))");
             try
@@ -1393,10 +1436,11 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         // Stray parts with no state file (recordings from before segmented
         // capture, or a lost .inflight.json): finalized one-to-one so the
         // footage survives, even if under a .segNN name.
-        foreach (var part in Directory.EnumerateFiles(RecordingsDir, "*.part.mp4"))
+        var partDirs = PartsDir.Equals(RecordingsDir, StringComparison.OrdinalIgnoreCase) ? [RecordingsDir] : new[] { PartsDir, RecordingsDir };
+        foreach (var part in partDirs.SelectMany(dir => Directory.EnumerateFiles(dir, "*.part.mp4")))
         {
             if (claimed.Contains(Path.GetFileName(part))) continue;
-            var final = part[..^".part.mp4".Length] + ".mp4";
+            var final = Path.Combine(RecordingsDir, Path.GetFileName(part)[..^".part.mp4".Length] + ".mp4");
             Log.Warn($"Finalizing stray recording: {Path.GetFileName(part)}");
             try
             {
@@ -1425,7 +1469,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         for (var i = 1; i <= 2; i++)
         {
             var segBase = $"{state.BaseName}.seg{i:00}";
-            var part = Path.Combine(recorder.RecordingsDir, $"{segBase}.part.mp4");
+            var part = Path.Combine(recorder.PartsDir, $"{segBase}.part.mp4");
             var events = Path.Combine(recorder.MetaDir, $"{segBase}.events.csv.gz");
             var startedUtc = DateTime.UtcNow;
             using (config.RecordInputs ? InputLogger.TryStart(events) : null)
@@ -1470,7 +1514,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var fps = Math.Clamp(config.RecordFramerate, 15, 120);
         var quality = Math.Clamp(96 - config.RecordQuality, 40, 95);
         var state = new RecordingState { BaseName = $"wgc-test-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}" };
-        var part = Path.Combine(recorder.RecordingsDir, $"{state.BaseName}.seg01.part.mp4");
+        var part = Path.Combine(recorder.PartsDir, $"{state.BaseName}.seg01.part.mp4");
         var events = Path.Combine(recorder.MetaDir, $"{state.BaseName}.seg01.events.csv.gz");
         Log.Info($"WGC test: 10s of the primary desktop at {fps}fps (MF quality {quality})...");
         Process? noise = null;
@@ -1534,7 +1578,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         Directory.CreateDirectory(recorder.RecordingsDir);
         Directory.CreateDirectory(recorder.MetaDir);
         var baseName = $"record-test-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}";
-        var part = Path.Combine(recorder.RecordingsDir, $"{baseName}.part.mp4");
+        var part = Path.Combine(recorder.PartsDir, $"{baseName}.part.mp4");
         var fps = Math.Clamp(config.RecordFramerate, 15, 120);
         Log.Info($"Record test: 10s of the primary desktop at {fps}fps...");
         var events = Path.Combine(recorder.MetaDir, $"{baseName}.events.csv.gz");
@@ -1635,13 +1679,44 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// the matrix tag stays as written since the encoders really do convert
     /// BT.601). A {segment}.pcm beside the video (the WGC path's game audio)
     /// becomes the AAC track here.
-    private string RemuxArgs(string src, string dst)
+    private async Task<string> RemuxArgsAsync(string src, string dst, CancellationToken ct)
     {
         var pcm = Path.ChangeExtension(src, ".pcm");
-        const string bsf = "-bsf:v h264_metadata=colour_primaries=1:transfer_characteristics=1";
+        // NVENC stamps sRGB transfer (YouTube darkens for it) and a genuine
+        // BT.601 matrix; the Media Foundation (WGC) encoder leaves the matrix
+        // untagged although it converts BT.709 (measured against Ascent's
+        // tagged capture of the same game, 15 Aug 2026) - untagged 1440p is
+        // read as BT.601 by browsers/YouTube's transcoder, which lifts and
+        // yellows the greens. Tag what each encoder actually did.
+        var bsf = "-bsf:v h264_metadata=colour_primaries=1:transfer_characteristics=1";
+        if (await MatrixUntaggedAsync(src, ct)) bsf += ":matrix_coefficients=1";
         return File.Exists(pcm)
             ? $"-y -i \"{src}\" -f s16le -ar {ProcessAudioCapture.SampleRate} -ch_layout stereo -i \"{pcm}\" -map 0:v -map 1:a -c:v copy -c:a aac -b:a 160k -shortest {bsf} -movflags +faststart \"{dst}\""
             : $"-y -i \"{src}\" -c copy {bsf} -movflags +faststart \"{dst}\"";
+    }
+
+    /// True when the video stream carries no colour-matrix tag: ffmpeg's
+    /// stream line reads "yuv420p(tv, unknown/bt709/bt709, ...)" then.
+    private async Task<bool> MatrixUntaggedAsync(string src, CancellationToken ct)
+    {
+        try
+        {
+            var info = await ProbeAsync(src, ct);
+            var video = info.Split('\n').FirstOrDefault(l => l.Contains("Video:", StringComparison.Ordinal)) ?? "";
+            // The colour block after the pixel format reads e.g.
+            // "yuv420p(tv, bt470bg/bt709/iec61966-2-1, progressive)" (NVENC),
+            // "yuv420p(tv, unknown/bt709/bt709, progressive)" (retagged WGC),
+            // "yuv420p(tv, progressive)" (raw WGC - nothing tagged at all) or
+            // "yuv420p(tv, bt709, progressive)" (all three agree). Untagged =
+            // no colour token at all, or a triple whose matrix is unknown.
+            var block = Regex.Match(video, @"yuv\w+\(([^)]*)\)");
+            if (!block.Success) return false;
+            var tokens = block.Groups[1].Value.Split(',', StringSplitOptions.TrimEntries);
+            var colour = tokens.FirstOrDefault(t => t is not ("tv" or "pc" or "progressive" or "interlaced" or "top first" or "bottom first"));
+            return colour is null || colour.StartsWith("unknown/", StringComparison.Ordinal) || colour == "unknown";
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return false; }
     }
 
     /// ffmpeg -i with no output exits nonzero by design; the interesting

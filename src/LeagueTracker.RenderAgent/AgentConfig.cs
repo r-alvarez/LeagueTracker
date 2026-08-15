@@ -44,6 +44,12 @@ public sealed class AgentConfig
     /// Blank = <My Videos>\LeagueTracker.
     public string RecordingsDir { get; set; } = "";
 
+    /// Where in-progress recording segments are written before the finished
+    /// file moves to RecordingsDir. Blank = LocalAppData\LeagueTracker    /// recording-parts on the system drive. Keep this on an SSD: the encoder
+    /// blocks on every write, and a stalling (spinning/SMR) recordings drive
+    /// shows up as frozen frames in the VOD.
+    public string RecordScratchDir { get; set; } = "";
+
     /// Live-game recording framerate. 60 reads better for mechanics review;
     /// 30 halves the file size.
     public int RecordFramerate { get; set; } = 60;
