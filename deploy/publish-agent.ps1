@@ -42,6 +42,9 @@ if ($LASTEXITCODE -ne 0) { throw "replay launcher publish failed" }
 Move-Item (Join-Path $out "appsettings.json") (Join-Path $out "appsettings.template.json") -Force
 
 $ffmpeg = (Get-Command ffmpeg -ErrorAction SilentlyContinue).Source
+# A package-manager shim (chocolatey, scoop) is a few KB that launches the
+# real exe elsewhere - copying it ships nothing. Real ffmpeg is tens of MB.
+if ($ffmpeg -and (Get-Item $ffmpeg).Length -lt 5MB) { Write-Warning "$ffmpeg looks like a shim, not ffmpeg itself - not bundling it"; $ffmpeg = $null }
 if ($ffmpeg) { Copy-Item $ffmpeg (Join-Path $out "ffmpeg.exe") -Force; Write-Host "  bundled ffmpeg from $ffmpeg" }
 else { Write-Warning "ffmpeg not on PATH - the zip ships without it (friends then need winget install Gyan.FFmpeg)" }
 

@@ -33,9 +33,17 @@ jobs:
           dotnet-version: 10.0.x
 
       # publish-agent.ps1 bundles ffmpeg from PATH so a friend's PC needs
-      # nothing else installed.
-      - name: Install ffmpeg
-        run: choco install ffmpeg --no-progress -y
+      # nothing else installed. Not choco: its ffmpeg on PATH is a shim that
+      # only works on the machine it was installed on. Gyan's full build is a
+      # single static exe (NVENC included), same as the owner's machines use.
+      - name: Fetch ffmpeg
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z -OutFile ffmpeg.7z
+          7z x ffmpeg.7z -offmpeg-dist | Out-Null
+          $bin = (Get-ChildItem ffmpeg-dist -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
+          "$bin" >> $env:GITHUB_PATH
+          & "$binfmpeg.exe" -version | Select-Object -First 1
 
       - name: Build and zip
         id: build
