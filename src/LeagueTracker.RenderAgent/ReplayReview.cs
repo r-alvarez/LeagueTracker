@@ -56,6 +56,11 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot)
                     // once the game has ended the client has forgotten it.
                     lastMatchId ??= await MatchIdAsync(ct);
                 }
+                else if (wasInGame && RenderAgent.Paused)
+                {
+                    wasInGame = false;
+                    lastMatchId = null;
+                }
                 else if (wasInGame)
                 {
                     wasInGame = false;

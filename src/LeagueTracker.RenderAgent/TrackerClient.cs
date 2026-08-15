@@ -19,6 +19,8 @@ public sealed record ReviewReel(
 public sealed record ClipWindow(int Index, int StartSec, int EndSec, string Label, List<ClipEvent> Events,
     string Kind = "moment", string? CameraName = null, string? CameraChampion = null);
 
+public sealed record AgentRelease(string Version, string File, long SizeBytes, string Sha256);
+
 public sealed record RenderJob(
     string Kind, string MatchId, string GameVersion, double DurationSec, string ReplayUrl,
     string? MyName, string? MyChampion, List<ClipWindow> Windows)
@@ -136,6 +138,65 @@ public sealed class TrackerClient
 
     private static bool IsJson(HttpResponseMessage resp) =>
         resp.Content.Headers.ContentType?.MediaType is "application/json";
+
+    /// The tracker's defaults + secrets for its agents (AgentConfig keys ->
+    /// string values). Null when unreachable or not yet redeployed with the
+    /// endpoint - the local file then stands alone, as it always did.
+    public async Task<Dictionary<string, string>?> GetProfileAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _http.GetAsync($"{ServerUrl}/api/agent/profile", ct);
+            if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(await resp.Content.ReadAsStringAsync(ct), Json);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    /// Tells the tracker this agent is alive and what it is doing. Returns
+    /// the newest published agent version the tracker knows of (null = none
+    /// or an old tracker).
+    public async Task<string?> HeartbeatAsync(object beat, CancellationToken ct)
+    {
+        try
+        {
+            using var content = new StringContent(JsonSerializer.Serialize(beat), System.Text.Encoding.UTF8, "application/json");
+            using var resp = await _http.PostAsync($"{ServerUrl}/api/agent/heartbeat", content, ct);
+            if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            return doc.RootElement.TryGetProperty("latest", out var v) && v.ValueKind is JsonValueKind.String ? v.GetString() : null;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    public async Task<AgentRelease?> GetReleaseAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _http.GetAsync($"{ServerUrl}/api/agent/release", ct);
+            if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
+            return JsonSerializer.Deserialize<AgentRelease>(await resp.Content.ReadAsStringAsync(ct), Json);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    public async Task DownloadReleaseAsync(AgentRelease release, string targetPath, CancellationToken ct)
+    {
+        using var resp = await _http.GetAsync($"{ServerUrl}/api/agent/release/{Uri.EscapeDataString(release.File)}", HttpCompletionOption.ResponseHeadersRead, ct);
+        resp.EnsureSuccessStatusCode();
+        await using var source = await resp.Content.ReadAsStreamAsync(ct);
+        await using var target = File.Create(targetPath);
+        await source.CopyToAsync(target, ct);
+    }
 
     public async Task DownloadReplayAsync(RenderJob job, string targetPath, CancellationToken ct)
     {

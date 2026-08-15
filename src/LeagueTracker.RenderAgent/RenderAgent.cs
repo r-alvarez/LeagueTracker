@@ -30,6 +30,28 @@ public sealed class RenderAgent(AgentConfig config)
     public static string StopSentinelPath => Path.Combine(AppContext.BaseDirectory, "stop.requested");
     public static bool StopRequested => File.Exists(StopSentinelPath);
 
+    /// The off switch. A file so it survives restarts and reboots: a friend
+    /// who pauses before a tournament stays paused until they say otherwise.
+    /// Paused = no new recordings, renders or reviews; uploads already in
+    /// flight finish (they are invisible and stopping them only loses work).
+    public static string PausedSentinelPath => Path.Combine(AppContext.BaseDirectory, "paused");
+    public static bool Paused => File.Exists(PausedSentinelPath);
+    public static void SetPaused(bool paused)
+    {
+        try
+        {
+            if (paused) File.WriteAllText(PausedSentinelPath, DateTime.Now.ToString("s"));
+            else File.Delete(PausedSentinelPath);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Could not {(paused ? "write" : "remove")} the paused sentinel: {ex.Message}");
+            return;
+        }
+        Log.Info(paused ? "Paused - no new recordings, renders or reviews until resumed" : "Resumed");
+        AgentStatus.Set(paused ? "paused" : "idle");
+    }
+
     /// MockRender skips the game entirely and renders test-pattern clips with
     /// ffmpeg - lets the whole queue/upload pipeline be verified on a machine
     /// without League installed.
@@ -53,13 +75,14 @@ public sealed class RenderAgent(AgentConfig config)
                 else Log.Warn($"Tracker unreachable: {tracker.ServerUrl} (will keep retrying)");
             }
             if (reachable > 0) { Log.Info($"{reachable}/{_trackers.Count} tracker server(s) reachable"); break; }
+            AgentStatus.Set("waiting", "Waiting for the tracker (unreachable)");
             await Task.Delay(TimeSpan.FromSeconds(60), ct);
         }
 
         // A previous incarnation of this agent may have died holding leases
         // (crash, hard kill mid-render) - free them so those jobs re-queue
         // now rather than after the 30-minute lease.
-        foreach (var tracker in _trackers)
+        foreach (var tracker in _trackers.Where(_ => config.RenderReplays))
         {
             if (await tracker.ReleaseStaleLeasesAsync(ct) is { Count: > 0 } released)
             {
@@ -78,6 +101,7 @@ public sealed class RenderAgent(AgentConfig config)
         if (MockRender)
         {
             Log.Warn("LT_MOCK_RENDER is on - rendering test patterns instead of the game");
+            AgentStatus.Set(Paused ? "paused" : "idle");
             return true;
         }
 
@@ -90,8 +114,11 @@ public sealed class RenderAgent(AgentConfig config)
         Log.Info($"League: {_gameExe} (client {InstalledPatch() ?? "unknown"})");
 
         EnsureReplayApiEnabled();
+        AgentStatus.Set(Paused ? "paused" : "idle");
         return true;
     }
+
+    public IReadOnlyList<TrackerClient> Trackers => _trackers;
 
     public async Task RunAsync(CancellationToken ct)
     {
@@ -127,6 +154,8 @@ public sealed class RenderAgent(AgentConfig config)
 
     private async Task<bool> RunOnceAsync(CancellationToken ct)
     {
+        if (Paused) return false;
+
         // A between-games review owns the replay client while it runs. This
         // has to come FIRST, ahead of the orphan sweep below: a review's
         // replay is API-launched, so gameflow reads "None", and a player
@@ -341,6 +370,7 @@ public sealed class RenderAgent(AgentConfig config)
         Log.Info($"Job {job.MatchId} ({job.Kind}) from {tracker.ServerUrl}: {windows.Count} window(s), following \"{job.MyName}\" ({job.MyChampion})");
 
         var postponeKey = $"{tracker.ServerUrl}|{job.Kind}:{job.MatchId}";
+        AgentStatus.Set("rendering", $"{job.MatchId} ({windows.Count} window(s))");
         try
         {
             if (MockRender) await MockRenderJobAsync(tracker, job, windows, ct);
@@ -377,7 +407,12 @@ public sealed class RenderAgent(AgentConfig config)
         {
             _postpones.Remove(postponeKey);
             Log.Error($"Job {job.MatchId} failed: {ex.Message}");
+            AgentStatus.LastError = $"render {job.MatchId}: {ex.Message}";
             await tracker.FailAsync(job, ex.Message, CancellationToken.None);
+        }
+        finally
+        {
+            AgentStatus.Set("idle");
         }
         return true;
     }

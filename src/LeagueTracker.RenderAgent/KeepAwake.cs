@@ -19,7 +19,7 @@ public static class KeepAwake
 
     private static readonly object Gate = new();
     private static readonly TimeSpan PulseEvery = TimeSpan.FromSeconds(50);
-    private static readonly Timer Pulse = new(_ => OnPulse());
+    private static readonly System.Threading.Timer Pulse = new(_ => OnPulse());
     private static int _holds;
     private static DateTime _holdUntilUtc = DateTime.MinValue;
 

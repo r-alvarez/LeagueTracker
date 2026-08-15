@@ -55,7 +55,16 @@ public sealed class YouTubeUploader(AgentConfig config)
 
     private string? _accessToken;
     private DateTime _accessTokenExpiresUtc;
-    private bool _authBroken;          // refresh token revoked/expired - only --youtube-auth fixes it
+    // The credentials that were found broken (blank client, missing or revoked
+    // refresh token). Tied to the values, not a flag: a new token arriving from
+    // the tracker's profile un-breaks the uploader without a restart.
+    private string? _brokenCredentials;
+    private bool _authBroken
+    {
+        get => _brokenCredentials is not null && _brokenCredentials == Credentials;
+        set => _brokenCredentials = value ? Credentials : null;
+    }
+    private string Credentials => $"{config.YouTubeClientId}|{config.YouTubeClientSecret}|{LoadRefreshToken()}";
     private DateTime _backoffUntilUtc; // quota spent - retrying sooner cannot succeed
 
     public bool Enabled => config.YouTubeUpload && !_authBroken;
@@ -75,7 +84,7 @@ public sealed class YouTubeUploader(AgentConfig config)
         if (LoadRefreshToken() is null)
         {
             _authBroken = true;
-            Log.Error($"YouTubeUpload is on but {Path.GetFileName(TokenPath)} is missing - run the agent once with --youtube-auth to authorize the channel");
+            Log.Error($"YouTubeUpload is on but there is no refresh token - the tracker's agent profile supplies one (YouTubeRefreshToken), or run --youtube-auth here once to authorize the channel");
             return;
         }
         Log.Info($"YouTube uploads on ({Visibility}) - finished recordings publish to the authorized channel");
@@ -286,8 +295,9 @@ public sealed class YouTubeUploader(AgentConfig config)
         return _accessToken;
     }
 
-    private static string? LoadRefreshToken()
+    private string? LoadRefreshToken()
     {
+        if (config.YouTubeRefreshToken is { Length: > 0 } fromProfile) return fromProfile;
         try
         {
             return JsonDocument.Parse(File.ReadAllText(TokenPath)).RootElement

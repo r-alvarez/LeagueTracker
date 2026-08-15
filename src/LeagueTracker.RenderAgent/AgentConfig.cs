@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 
 namespace LeagueTracker.RenderAgent;
@@ -25,6 +26,19 @@ public sealed class AgentConfig
     /// Record live games (Ascent-style auto-VOD): capture the game window
     /// while the local player is in a real game.
     public bool RecordGames { get; set; } = true;
+
+    /// Turn archived replays into clips for the trackers. Off = a recorder-only
+    /// agent (a friend's gaming PC: record, publish, done); on without
+    /// RecordGames = the dedicated render box that serves every tracker.
+    public bool RenderReplays { get; set; } = true;
+
+    public string Role => (RecordGames, RenderReplays) switch
+    {
+        (true, true) => "full",
+        (true, false) => "recorder",
+        (false, true) => "renderer",
+        _ => "idle",
+    };
 
     /// Where finished recordings (mp4 + sidecar json + thumbnail) land.
     /// Blank = <My Videos>\LeagueTracker.
@@ -92,6 +106,12 @@ public sealed class AgentConfig
     public string YouTubeClientId { get; set; } = "";
     public string YouTubeClientSecret { get; set; } = "";
 
+    /// Refresh token for the channel. Normally arrives from the tracker's
+    /// agent profile (the channel owner authorized once, the token lives on
+    /// the NAS); youtube-token.json next to the exe (--youtube-auth) is the
+    /// fallback for the machine that did the authorizing.
+    public string YouTubeRefreshToken { get; set; } = "";
+
     /// unlisted (default), private, or public.
     public string YouTubeVisibility { get; set; } = "unlisted";
 
@@ -129,6 +149,12 @@ public sealed class AgentConfig
     public string CfAccessClientId { get; set; } = "";
     public string CfAccessClientSecret { get; set; } = "";
 
+    /// The keys appsettings.json set explicitly - the tracker's profile fills
+    /// in around them, never over them.
+    private readonly HashSet<string> _localKeys = new(StringComparer.OrdinalIgnoreCase);
+
+    public static string Version => Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "0.0.0.0";
+
     /// appsettings.json next to the exe, then LT_* environment variables on top.
     public static AgentConfig Load()
     {
@@ -142,7 +168,10 @@ public sealed class AgentConfig
                 ReadCommentHandling = JsonCommentHandling.Skip,
                 AllowTrailingCommas = true,
             };
-            config = JsonSerializer.Deserialize<AgentConfig>(File.ReadAllText(path), options) ?? config;
+            var text = File.ReadAllText(path);
+            config = JsonSerializer.Deserialize<AgentConfig>(text, options) ?? config;
+            using var doc = JsonDocument.Parse(text, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+            foreach (var property in doc.RootElement.EnumerateObject()) config._localKeys.Add(property.Name);
         }
 
         if (Environment.GetEnvironmentVariable("LT_SERVER_URL") is { Length: > 0 } server) config.ServerUrl = server;
@@ -150,6 +179,7 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_FFMPEG_PATH") is { Length: > 0 } ffmpeg) config.FfmpegPath = ffmpeg;
         if (Environment.GetEnvironmentVariable("LT_MAX_WINDOWS") is { Length: > 0 } max && int.TryParse(max, out var m)) config.MaxWindowsPerJob = m;
         if (Environment.GetEnvironmentVariable("LT_RECORD") is { Length: > 0 } record) config.RecordGames = record is not ("0" or "false");
+        if (Environment.GetEnvironmentVariable("LT_RENDER") is { Length: > 0 } render) config.RenderReplays = render is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_RECORDINGS_DIR") is { Length: > 0 } recDir) config.RecordingsDir = recDir;
         if (Environment.GetEnvironmentVariable("LT_RECORD_INPUTS") is { Length: > 0 } inputs) config.RecordInputs = inputs is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_RECORD_QUEUES") is { Length: > 0 } queues) config.RecordQueues = queues;
@@ -165,6 +195,65 @@ public sealed class AgentConfig
 
         if (config.AgentName is not { Length: > 0 }) config.AgentName = Environment.MachineName;
         return config;
+    }
+
+    /// The tracker's agent profile: string values keyed by property name.
+    /// Local settings and environment overrides stay; only unset keys take the
+    /// server's value. Returns the names that changed.
+    public List<string> ApplyProfile(IReadOnlyDictionary<string, string> profile)
+    {
+        var applied = new List<string>();
+        foreach (var (key, value) in profile)
+        {
+            if (_localKeys.Contains(key)) continue;
+            if (typeof(AgentConfig).GetProperty(key, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase) is not { CanWrite: true } property) continue;
+            object converted;
+            try
+            {
+                converted = property.PropertyType == typeof(bool) ? value is "1" or "true" or "True"
+                    : property.PropertyType == typeof(int) ? int.Parse(value)
+                    : value;
+            }
+            catch (FormatException)
+            {
+                Log.Warn($"Profile value for {key} is not a {property.PropertyType.Name}: \"{value}\"");
+                continue;
+            }
+            if (Equals(property.GetValue(this), converted)) continue;
+            property.SetValue(this, converted);
+            applied.Add(property.Name);
+        }
+        return applied;
+    }
+}
+
+/// What the agent is doing right now - one place the tray menu, the log and
+/// the heartbeat all read from. Loops set it at their natural boundaries.
+public static class AgentStatus
+{
+    private static readonly object Gate = new();
+    private static string _state = "starting";
+    private static string? _detail;
+
+    public static DateTime? LastRecordingUtc { get; set; }
+    public static string? LastError { get; set; }
+    public static bool YouTubeReady { get; set; } = true;
+    public static event Action? Changed;
+
+    public static (string State, string? Detail) Current
+    {
+        get { lock (Gate) return (_state, _detail); }
+    }
+
+    public static void Set(string state, string? detail = null)
+    {
+        lock (Gate)
+        {
+            if (_state == state && _detail == detail) return;
+            _state = state;
+            _detail = detail;
+        }
+        Changed?.Invoke();
     }
 }
 

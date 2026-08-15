@@ -106,6 +106,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                      ? $"WGC + MF quality {Math.Clamp(96 - config.RecordQuality, 40, 95)})"
                      : $"ddagrab + NVENC cq {config.RecordQuality})"));
         _youtube.ValidateAtStartup();
+        AgentStatus.YouTubeReady = _youtube.Enabled;
         _lastSweep = DateTime.UtcNow;
         try { await SweepUnuploadedAsync(ct); }
         catch (OperationCanceledException) { return; }
@@ -117,6 +118,12 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             try
             {
                 var phase = await PhaseAsync(ct);
+                if (phase is "InProgress" && RenderAgent.Paused)
+                {
+                    Log.Info("Paused - not recording this game");
+                    while (!RenderAgent.StopRequested && RenderAgent.Paused && await PhaseAsync(ct) is "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
+                    continue;
+                }
                 if (phase is "InProgress")
                 {
                     var gaveUp = !await RecordGameAsync(ct);
@@ -242,6 +249,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             var partPath = Path.Combine(RecordingsDir, $"{segBase}.part.mp4");
             var eventsPath = Path.Combine(MetaDir, $"{segBase}.events.csv.gz");
             Log.Info($"Recording {state.BaseName} segment {segNo} ({state.MatchId ?? "id unknown"}): {g.Rect.Width}x{g.Rect.Height}");
+            AgentStatus.Set("recording", state.BaseName);
 
             // Backend order: wgc tries Windows Graphics Capture and falls
             // back to ffmpeg ddagrab+NVENC; ddagrab tries NVENC and falls
@@ -312,6 +320,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         {
             await FinalizeGameAsync(state, ct);
             Log.Info($"Recording complete: {state.BaseName}.mp4 ({state.Segments.Sum(seg => seg.VideoSec) / 60:0} min, {state.Segments.Count} segment(s))");
+            AgentStatus.LastRecordingUtc = DateTime.UtcNow;
+            AgentStatus.Set("finalizing", state.BaseName);
             // Customs/Practice Tool have no Riot match for a tracker to own -
             // those recordings are local-only, not eternal upload retries.
             // A deploy stop skips the deliveries; the startup sweep catches up.
@@ -549,8 +559,11 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             // The title is the file name minus its separators - "Road to
             // Platinum 03 Aug 2026 Game 2", the exact style the channel's
             // hand-made uploads already use.
+            AgentStatus.Set("uploading", baseName);
             var result = await _youtube.UploadAsync(mp4, baseName.Replace(" - ", " "), $"Match {matchId}",
                 M(".ytsession.json"), holdOff: () => GameProcessRunning, ct);
+            AgentStatus.Set(RenderAgent.Paused ? "paused" : "idle");
+            AgentStatus.YouTubeReady = _youtube.Enabled;
             switch (result.Outcome)
             {
                 case UploadOutcome.Uploaded:
@@ -566,6 +579,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 case UploadOutcome.Failed:
                     File.WriteAllText(M(".ytfailed.txt"), result.Error);
                     Log.Error($"YouTube rejected {baseName}: {result.Error} - not retrying (delete {baseName}.ytfailed.txt to try again)");
+                    AgentStatus.LastError = $"YouTube rejected {baseName}: {result.Error}";
                     return true;
             }
         }
