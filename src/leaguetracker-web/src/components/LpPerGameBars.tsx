@@ -4,7 +4,7 @@ import type { LpPerGame, LpPoint } from '../types'
 interface Props {
   games: LpPerGame[]
   /// LP snapshots for the same queue - lets days without per-game LP derive
-  /// their net from consecutive daily closes (the dpm.lol back-fill included).
+  /// their net from consecutive daily closes (imported daily closes included).
   points?: LpPoint[]
 }
 

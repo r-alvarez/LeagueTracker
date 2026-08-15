@@ -11,7 +11,7 @@ import { RelTime, tierClass } from '../components/Stats'
 
 type Tab = 'general' | 'details' | 'runes' | 'timeline'
 
-// dpm.lol-style carry score: each player's stats normalized against the game's
+// Carry score: each player's stats normalized against the game's
 // best, weighted toward damage and KDA. Purely relative within this one match.
 function carryScores(players: Participant[]): Record<number, { score: number; ord: number }> {
   const max = (f: (p: Participant) => number) => Math.max(1, ...players.map(f))

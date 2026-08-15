@@ -200,7 +200,7 @@ app.MapGet("/api/matches", async (LeagueDbContext db, ReplayArchiveService repla
         .ToListAsync(ct);
 
     // Per-row participant context: my loadout, plus the role companions for the
-    // dpm-style matchup block (mid/top pair with junglers, bot with supports,
+    // matchup block (mid/top pair with junglers, bot with supports,
     // support with bot carries, junglers with mid).
     var ids = items.Select(m => m.Id).ToList();
     var participants = (await db.Participants.AsNoTracking()

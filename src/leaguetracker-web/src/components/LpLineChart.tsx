@@ -14,7 +14,7 @@ interface TooltipProps {
 function LpTooltip({ active, payload }: TooltipProps) {
   if (!active || !payload?.length) return null
   const p = payload[0].payload
-  // Back-filled history (imported from dpm.lol) has no cumulative win/loss
+  // Back-filled history (imported daily closes) has no cumulative win/loss
   // counters - it's a day's closing rank, not a live snapshot.
   const backfilled = p.wins + p.losses === 0
   return (

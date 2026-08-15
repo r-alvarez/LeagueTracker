@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useChampionIcons } from '../champions'
 import type { ChampionFacet } from '../types'
 
-/// dpm-style champion filter: a portrait button that opens a searchable list.
+/// Champion filter: a portrait button that opens a searchable list.
 /// Options come from the facets endpoint, so only champions with games appear.
 export default function ChampPicker({ placeholder, value, options, onChange }: {
   placeholder: string

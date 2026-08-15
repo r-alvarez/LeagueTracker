@@ -771,14 +771,14 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 }
 
 /* Match-row fixes: the meta column must never bleed into the portraits, and
-   the matchup reads dpm-style - my portrait vs the lane opponent's. */
+   the matchup reads as a head-to-head - my portrait vs the lane opponent's. */
 .mr-meta { min-width: 0; }
 .mr-meta .sub { overflow: hidden; text-overflow: ellipsis; }
 .mr-duel { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; }
 .vs-badge { font-size: 10px; font-weight: 800; color: var(--muted); text-transform: uppercase; }
 .mr-portrait.sm img, .mr-portrait.sm .champ-mono { width: 34px; height: 34px; border-radius: 8px; opacity: 0.9; }
 
-/* dpm-style compact loadout inside rows: the two summoner spells stack in a
+/* Compact loadout inside rows: the two summoner spells stack in a
    column and the seven item slots wrap into a 4x2 block - half the width of
    one long strip, so items never crowd the stat columns. */
 .match-row .loadout { gap: 6px; }
@@ -860,7 +860,7 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .ld-compare { display: flex; align-items: center; gap: 14px; font-size: 15px; }
 
 /* ============================================================================
-   Lens restyle: dpm-grade depth - layered gradient surfaces, iconography,
+   Lens restyle: layered gradient surfaces, iconography,
    glow-selected states. Overrides the first-pass .lens-* rules.
    ========================================================================== */
 .lens-shell { display: flex; flex-direction: column; gap: 12px; }
@@ -972,7 +972,7 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 .trend { width: 100%; height: 130px; margin: 10px 0 8px; }
 .ld-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 
-/* Coach detail: dpm footer shape - hero left, win/loss chips + NEW vs OLD right. */
+/* Coach detail footer: hero left, win/loss chips + NEW vs OLD right. */
 .ld-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .wl-split { display: inline-flex; gap: 8px; }
 .wl-split .obj-chip strong { font-variant-numeric: tabular-nums; }
@@ -1183,7 +1183,7 @@ tr.obj-row-loss td:first-child { box-shadow: inset 3px 0 var(--lp-loss); }
 @media (max-width: 900px) { .review-grid { grid-template-columns: 1fr; } }
 
 /* ============================================================================
-   Match-list filters (dpm-style) and day/session group headers.
+   Match-list filters and day/session group headers.
    ========================================================================== */
 .patch-select {
   background: var(--panel-2); color: var(--ink); border: 1px solid var(--border);

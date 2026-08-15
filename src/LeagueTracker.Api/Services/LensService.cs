@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LeagueTracker.Api.Services;
 
-/// The Lens: dpm-style coaching scores, computed honestly against the player's
+/// The Lens: coaching scores, computed honestly against the player's
 /// OWN history rather than an invented cohort. A score of 73 means "the recent
 /// window averages at your personal 73rd percentile"; the Challenges card
 /// stays the external ladder anchor.

@@ -58,7 +58,7 @@ export function RichTip({ children, tip }: { children: ReactNode; tip: ReactNode
   )
 }
 
-/// Item slot with the dpm.lol-style tooltip: name, cost, stat lines, passive.
+/// Item slot with a rich tooltip: name, cost, stat lines, passive.
 export function ItemIcon({ id, size, dim }: { id: number; size?: number; dim?: boolean }) {
   const icons = useLoadoutIcons()
   const url = icons.item(id)
