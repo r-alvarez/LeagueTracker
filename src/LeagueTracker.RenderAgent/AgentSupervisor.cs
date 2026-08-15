@@ -94,10 +94,12 @@ public sealed class AgentSupervisor(AgentConfig config, IReadOnlyList<TrackerCli
             Machine = Environment.MachineName,
             User = Environment.UserName,
         };
+        // Every tracker gets the beat; the first version hint wins.
         string? latest = null;
         foreach (var tracker in trackers)
         {
-            latest ??= await tracker.HeartbeatAsync(beat, ct);
+            var hint = await tracker.HeartbeatAsync(beat, ct);
+            latest ??= hint;
         }
         return latest;
     }
