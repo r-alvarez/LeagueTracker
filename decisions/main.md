@@ -1171,3 +1171,15 @@ label while scrolling.
 rather than wraps (two rows of chips would push every page's content
 further down). The VOD moment strip stays proportional to video time even
 though close moments overlap on a 300px strip - the strip *is* the timeline.
+
+## 2026-08-15 — The dpm.lol back-fill leaves the repo
+
+**`DpmLpBackfillService` and `POST /api/lp/backfill` are deleted.** They were
+a one-time import of daily LP history from an unofficial third-party source
+for the months before this tracker existed; the import ran, the rows live in
+the database and the lp-history.csv mirror, and nothing has called the
+endpoint since. Every live source of data - LP snapshots, matches,
+timelines, analytics - is Riot's API plus our own poller, and a public
+product should have exactly that and no scraper in the tree. The imported
+rows stay as they are (Wins=0/Losses=0, chart-only, never attributable), so
+nothing visible changes.
