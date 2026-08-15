@@ -1048,3 +1048,24 @@ imported AND its replay archived, so it opens minutes after the game rather
 than at the honor screen (the agent waits `PostGameReviewWaitMin`, 8 by
 default, then gives up loudly); and replays are patch-locked, so this only ever
 works for a game just played, which is exactly the use case.
+
+## 2026-08-15 — Recording parts write to a fast local drive; WGC files get their BT.709 matrix tag
+
+**Frozen frames were the recordings drive, not the game.** Game 3 that day
+froze for 0.3-0.9s some twenty times in its first seven minutes (freezedetect
+on the local file: 55 back-to-back 124-byte duplicate frames at 108.0s while
+the game ran at 119 fps), yet Ascent's capture of the same game had none. The
+recordings folder sits on a spinning SMR disk that was, at capture start,
+still absorbing Game 2's 2.2 GB remux and its YouTube read - and the encoder's
+sink writer blocks on every write, so a disk stall is a run of duplicated
+frames. In-progress segments now go to `RecordScratchDir` (blank =
+LocalAppData on the system drive; unwritable = RecordingsDir as before) and
+only the finished mp4 lands in RecordingsDir. Segment lookups resolve to
+whichever dir has the file, so parts left on the old path still finalize.
+
+**The colour shift on YouTube was a missing tag.** Decoded as BT.709, the WGC
+file's HUD colours match Ascent's tagged capture within a few levels, but the
+Media Foundation encoder leaves the matrix untagged and browsers/YouTube read
+untagged 1440p as BT.601 - lifted, yellowed greens. The finalize remux now adds
+`matrix_coefficients=1` when (and only when) the source carries no matrix tag;
+NVENC's genuine bt470bg is left alone, as decided 24 Jul.
