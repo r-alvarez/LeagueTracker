@@ -157,10 +157,10 @@ export default function DataPage() {
             What the tracker's data folder holds. Clips are small and permanent; full-game renders are the heavy tier
             and expire automatically unless marked keep on their match page.
           </p>
-          <p style={{ margin: 0 }}>
+          <p style={{ margin: 0, display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
             {([['raw games', storage.rawGamesMb], ['replays', storage.replaysMb], ['clips', storage.clipsMb],
               ['full games', storage.fullGamesMb], ['database', storage.databaseMb]] as const).map(([label, mb]) => (
-              <span key={label} style={{ marginRight: 16, whiteSpace: 'nowrap' }}>
+              <span key={label} style={{ whiteSpace: 'nowrap' }}>
                 <strong>{mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`}</strong> <span className="mut">{label}</span>
               </span>
             ))}
