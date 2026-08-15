@@ -7,8 +7,8 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <!-- WinForms only for the tray icon (NotifyIcon) and the install message box. -->
     <UseWindowsForms>true</UseWindowsForms>
-    <!-- deploy/publish-agent.ps1 stamps the real version (yyyy.M.d.HHmm);
-         a dev build is 0.0.0.0 and never self-updates over a published one. -->
+    <!-- deploy/publish-agent.ps1 stamps the real version (yyyy.M.d.HHmmss)
+         (UTC, to the second); a dev build is 0.0.0.0 and never self-updates over a published one. -->
     <Version Condition="'$(Version)' == ''">0.0.0.0</Version>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
