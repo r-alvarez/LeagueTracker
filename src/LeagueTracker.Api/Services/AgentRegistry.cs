@@ -17,6 +17,11 @@ public sealed class AgentOptions
     /// <DataDir>/agent-releases. Shared across the tracker containers on the
     /// NAS so one publish updates every agent.
     public string ReleaseDir { get; set; } = "";
+
+    /// Mirror the newest agent build from GitHub Releases into ReleaseDir.
+    /// One tracker per shared folder - the others just read.
+    public bool SyncReleases { get; set; }
+    public string GitHubRepo { get; set; } = "r-alvarez/LeagueTracker";
 }
 
 public sealed record AgentHeartbeat(

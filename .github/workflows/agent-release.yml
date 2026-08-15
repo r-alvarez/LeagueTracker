@@ -1,0 +1,57 @@
+# Builds the Windows agent whenever its code changes on main and publishes
+# the zip as a GitHub Release (tag agent-<version>). The trackers on TrueNAS
+# poll these releases (AgentReleaseSyncService) and drop the newest zip in
+# the shared agent-releases folder, from which every agent updates itself -
+# so a push to main is the whole agent deploy, the same as it is for the API.
+name: agent-release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/LeagueTracker.RenderAgent/**
+      - src/LeagueTracker.ReplayLauncher/**
+      - deploy/publish-agent.ps1
+      - .github/workflows/agent-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # publish-agent.ps1 bundles ffmpeg from PATH so a friend's PC needs
+      # nothing else installed.
+      - name: Install ffmpeg
+        run: choco install ffmpeg --no-progress -y
+
+      - name: Build and zip
+        id: build
+        shell: pwsh
+        run: |
+          .\deploy\publish-agent.ps1
+          $zip = Get-ChildItem src\LeagueTracker.RenderAgent\bin\LeagueTracker.RenderAgent-*.zip | Select-Object -First 1
+          $version = $zip.BaseName -replace '^.*-', ''
+          "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "agent-${{ steps.build.outputs.version }}" "${{ steps.build.outputs.zip }}" `
+            --title "Agent ${{ steps.build.outputs.version }}" `
+            --notes "Render/recorder agent build from ${{ github.sha }}. Trackers pick it up automatically; agents update when idle."

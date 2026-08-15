@@ -42,9 +42,12 @@ services:
       # the verdict. Capture never stopped while it was hidden.
       Riot__HideLp: "false"
       Agent__Profile__RecordNamePrefix: Road to Platinum
+      # This one mirrors GitHub agent releases into the shared folder
+      # (writer); the other trackers mount it read-only.
+      Agent__SyncReleases: "true"
     volumes:
       - /mnt/MediaPool/apps/leaguetracker/main:/data
-      - /mnt/MediaPool/apps/leaguetracker/agent-releases:/agent-releases:ro
+      - /mnt/MediaPool/apps/leaguetracker/agent-releases:/agent-releases
     networks: [frontend]
     restart: unless-stopped
     labels:

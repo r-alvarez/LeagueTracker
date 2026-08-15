@@ -53,6 +53,13 @@ builder.Services.AddHttpClient<DpmLpBackfillService>(c =>
 });
 builder.Services.AddSingleton<RenderLeaseService>();
 builder.Services.AddSingleton<AgentRegistry>();
+builder.Services.AddHttpClient("github", c =>
+{
+    c.Timeout = TimeSpan.FromMinutes(10);   // a 130 MB asset on a slow day
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("LeagueTracker/1.0 (+https://github.com/r-alvarez/LeagueTracker)");
+    c.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+});
+builder.Services.AddHostedService<AgentReleaseSyncService>();
 builder.Services.AddSingleton<VodService>();
 builder.Services.AddSingleton<LiveGameState>();
 builder.Services.AddHostedService<MatchPollerService>();

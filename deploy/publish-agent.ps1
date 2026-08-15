@@ -28,7 +28,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
-$version = Get-Date -Format "yyyy.M.d.HHmm"
+$version = (Get-Date).ToUniversalTime().ToString("yyyy.M.d.HHmm")   # UTC: CI and local publishes must sort together
 $out = Join-Path $root "src\LeagueTracker.RenderAgent\bin\publish-$version"
 
 Write-Host "Publishing agent $version"
