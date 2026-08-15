@@ -23,22 +23,25 @@ Full walkthrough (owner side included) in `docs/agent-handoff.md`. Short form:
 
 1. Unzip the latest `LeagueTracker.RenderAgent-<version>.zip` (published by
    `deploy/publish-agent.ps1`; ships ffmpeg) anywhere.
-2. `appsettings.template.json` → `appsettings.json`: `ServerUrl`, the
-   Cloudflare Access service token, and the role - `"RenderReplays": false`
-   for a recorder-only install (a player's PC), `"RecordGames": false` for
-   the dedicated render box. Everything else, YouTube credentials included,
-   arrives from the tracker's agent profile (`GET /api/agent/profile`);
-   any key written locally wins over it.
-3. `LeagueTracker.RenderAgent.exe --install`: registers a per-user run-at-logon
-   entry, starts the agent, and reports in a message box. `--uninstall`
-   reverses it. First run auto-detects the League install and adds
-   `EnableReplayApi=1` to `Config/game.cfg` if missing.
+2. Double-click the exe. Without settings it opens the setup window: tracker
+   URL, Cloudflare Access service token, the role (Recorder for a player's
+   PC, Renderer for the dedicated render box, Both), recordings folder; Test
+   connection, Save. Save writes `appsettings.json` (only those keys - other
+   keys already in the file survive), registers a per-user run-at-logon
+   entry, starts the agent and reports in a message box. Everything else,
+   YouTube credentials included, arrives from the tracker's agent profile
+   (`GET /api/agent/profile`); any key written locally wins over it.
+   `--install` forces the window + registration, `--setup` just the window
+   (restarts a running agent on save), `--uninstall` reverses it. First run
+   auto-detects the League install and adds `EnableReplayApi=1` to
+   `Config/game.cfg` if missing.
 
 The agent lives in the tray: the dot by the clock is green idle, red busy
 (recording/uploading/rendering), grey-with-bars paused, amber waiting for
 the tracker, orange when the last thing failed. Right-click for
 **Pause/Resume** (a `paused` file next to the exe - survives reboots; also
-`--pause`/`--resume`), open tracker/recordings/log, check for updates, quit.
+`--pause`/`--resume`), open tracker/recordings/log, Settings…, check for
+updates, quit.
 Quit and deploy stops go through `stop.requested`, so nothing is cut short.
 
 Every poll the agent posts a heartbeat (version, role, state, last recording,

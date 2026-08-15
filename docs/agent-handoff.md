@@ -57,23 +57,21 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
 
 1. Unzip the latest `LeagueTracker.RenderAgent-<version>.zip` anywhere
    (e.g. `C:\LeagueTrackerAgent`).
-2. Rename `appsettings.template.json` → `appsettings.json` and set **only**:
-   ```jsonc
-   "ServerUrl": "https://league-ben.rjav-tech.co.uk",
-   "CfAccessClientId": "<their service token id>",
-   "CfAccessClientSecret": "<their service token secret>",
-   "RenderReplays": false,          // recorder-only: never drives the replay client
-   "RecordingsDir": "D:\\League\\Recordings"   // optional; default = My Videos\LeagueTracker
-   ```
+2. Double-click `LeagueTracker.RenderAgent.exe`. With no settings yet it opens
+   the **setup window**: tracker URL (`https://league-ben.rjav-tech.co.uk`),
+   the Access token ID + secret you gave them, "This machine is: Recorder",
+   optional recordings folder. **Test connection** proves the tracker answers
+   and that YouTube is configured on it; **Save** writes `appsettings.json`,
+   registers run-at-logon (per-user Run key), starts the agent, and shows a
+   message box with anything still missing. (Same window later via the tray's
+   **Settings…** or `--setup`; `--install` forces it.)
    Everything else (YouTube, queues, title prefix) comes from the tracker.
    Leave `PostGameReview` off unless they ask for it - it takes the screen.
-3. Run `LeagueTracker.RenderAgent.exe --install`. It registers itself to start
-   at logon (per-user Run key), starts now, and shows a message box with
-   anything missing. Look for the dot by the clock:
+3. Look for the tracker's bolt by the clock; the small dot is the state:
    - green = idle/watching, red = recording/uploading/rendering, grey with
      bars = paused, amber = waiting for the tracker, orange = last thing failed
    - right-click: **Pause/Resume** (the off switch - survives reboots),
-     open tracker / recordings / log, check for updates, quit.
+     open tracker / recordings / log, Settings…, check for updates, quit.
 4. Check the tracker's **Data page → Agents**: their machine should be
    `online · recorder`, `YouTube` not flagged. Play a normal or ranked game;
    the VOD lands under their match page within minutes of the game ending
@@ -83,8 +81,8 @@ Uninstall: `LeagueTracker.RenderAgent.exe --uninstall` (recordings stay).
 
 ## D. The render box (owner's old PC)
 
-Same zip. `appsettings.json`: all tracker URLs comma-separated, one service
-token, `"RecordGames": false` (renderer-only), `"PostGameReview": false`,
+Same zip, same setup window: all tracker URLs comma-separated, one service
+token, "This machine is: Renderer" (RecordGames off), `PostGameReview` off,
 League installed and a client logged in (Vanguard only allows replays through
 the client; any account works), and `IdleSeconds` can drop to ~10 since
 nobody uses it. `--install` as above. Renders run whenever no game process

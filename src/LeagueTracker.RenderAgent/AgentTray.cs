@@ -48,6 +48,12 @@ public sealed class AgentTray : IDisposable
         menu.Items.Add(new ToolStripMenuItem("Open tracker", null, (_, _) => Open(_config.ServerUrls.FirstOrDefault() ?? "")));
         menu.Items.Add(new ToolStripMenuItem("Open recordings folder", null, (_, _) => Open(RecordingsDir())));
         menu.Items.Add(new ToolStripMenuItem("Open log", null, (_, _) => Open(Path.Combine(AppContext.BaseDirectory, "agent.log"))));
+        menu.Items.Add(new ToolStripMenuItem("Settings…", null, (_, _) =>
+        {
+            // The setup window runs in a fresh process (it restarts this one
+            // when saved), so the running loops never see half-applied values.
+            Process.Start(new ProcessStartInfo(Environment.ProcessPath ?? "LeagueTracker.RenderAgent.exe", "--setup") { UseShellExecute = true, WorkingDirectory = AppContext.BaseDirectory });
+        }));
         menu.Items.Add(new ToolStripMenuItem("Check for updates", null, async (_, _) =>
         {
             try { await _checkForUpdates(); }

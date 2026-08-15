@@ -177,6 +177,35 @@ public sealed class AgentSupervisor(AgentConfig config, IReadOnlyList<TrackerCli
         return true;
     }
 
+    /// Asks the running agent to stop (sentinel) and leaves a detached cmd
+    /// that relaunches it once it has gone - for settings changes made from
+    /// a second process (--install's setup window).
+    public static void RestartRunningAgent()
+    {
+        var exe = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "LeagueTracker.RenderAgent.exe");
+        var running = Installer.OtherInstance(exe);
+        if (running is null) return;
+        File.WriteAllText(RenderAgent.StopSentinelPath, "restart for new settings");
+        var staging = Path.Combine(Path.GetTempPath(), "leaguetracker-agent");
+        Directory.CreateDirectory(staging);
+        var script = Path.Combine(staging, "restart.cmd");
+        File.WriteAllLines(script,
+        [
+            "@echo off",
+            $"set PID={running.Id}",
+            ":wait",
+            "tasklist /FI \"PID eq %PID%\" 2>nul | find \"%PID%\" >nul",
+            "if not errorlevel 1 (",
+            "  ping -n 3 127.0.0.1 >nul",
+            "  goto wait",
+            ")",
+            $"cd /d \"{AppContext.BaseDirectory.TrimEnd('\\')}\"",
+            "del /f /q stop.requested 2>nul",
+            $"start \"\" \"{exe}\"",
+        ]);
+        Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"{script}\"") { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = staging });
+    }
+
     /// A detached cmd that outlives this process: waits for our PID to go,
     /// swaps the staged files in (previous build kept as *.prev, the way
     /// manual deploys do), and relaunches. Written outside UpdateDir so it

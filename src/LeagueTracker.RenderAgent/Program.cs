@@ -8,7 +8,12 @@ Log.Info($"LeagueTracker agent {AgentConfig.Version} ({config.Role}) · server {
 
 // Side commands talk to a running agent through the sentinels; only the
 // agent proper owns them.
-if (args.Contains("--install")) return Installer.Install(config);
+// A bare unzip that gets double-clicked is a setup, not a start.
+if (args.Contains("--install") || (SetupForm.NeedsSetup(config) && !args.Contains("--youtube-auth") && Environment.GetEnvironmentVariable("LT_SERVER_URL") is not { Length: > 0 }))
+{
+    return Installer.Install(config);
+}
+if (args.Contains("--setup")) return Installer.Setup(config);
 if (args.Contains("--uninstall")) return Installer.Uninstall();
 if (args.Contains("--pause")) { RenderAgent.SetPaused(true); return 0; }
 if (args.Contains("--resume")) { RenderAgent.SetPaused(false); return 0; }
