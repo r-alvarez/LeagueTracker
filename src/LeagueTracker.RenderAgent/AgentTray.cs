@@ -156,12 +156,22 @@ public sealed class AgentTray : IDisposable
 
     private static string Truncate(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "…";
 
+    /// Synchronous on purpose: Main returns right after this, and an icon
+    /// that is only scheduled for removal outlives the process as a ghost by
+    /// the clock until someone hovers it.
     public void Dispose()
     {
-        _ui?.Post(_ =>
+        try
         {
-            if (_icon is not null) { _icon.Visible = false; _icon.Dispose(); }
-            Application.ExitThread();
-        }, null);
+            _ui?.Send(_ =>
+            {
+                if (_icon is not null) { _icon.Visible = false; _icon.Dispose(); }
+                Application.ExitThread();
+            }, null);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Tray icon did not close cleanly: {ex.Message}");
+        }
     }
 }

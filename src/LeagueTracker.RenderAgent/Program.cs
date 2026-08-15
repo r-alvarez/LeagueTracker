@@ -45,6 +45,26 @@ try
         return 0;
     }
 
+    // Single instance per install: two agents on one machine fight over the
+    // game client and double-record. A second copy (an update's relaunch
+    // whose predecessor has not left yet, a double-click on a running
+    // install) asks the other to stop and waits - the newest start wins,
+    // which is what an update needs and what a double-click means.
+    if (Installer.OtherInstance(Environment.ProcessPath ?? "") is { } other)
+    {
+        Log.Warn($"Another agent from this folder is running (pid {other.Id}) - asking it to stop first");
+        AgentStatus.Set("waiting", "Waiting for the previous agent to stop");
+        File.WriteAllText(RenderAgent.StopSentinelPath, $"superseded by pid {Environment.ProcessId}");
+        var gone = other.WaitForExit(TimeSpan.FromMinutes(5));
+        try { File.Delete(RenderAgent.StopSentinelPath); } catch { /* best-effort */ }
+        if (!gone)
+        {
+            Log.Error($"The previous agent (pid {other.Id}) did not stop within 5 minutes - this one exits");
+            return 1;
+        }
+        Log.Info("Previous agent stopped - continuing");
+    }
+
     var agent = new RenderAgent(config);
     var supervisor = new AgentSupervisor(config, agent.Trackers);
 
