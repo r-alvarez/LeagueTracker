@@ -43,7 +43,7 @@ jobs:
           7z x ffmpeg.7z -offmpeg-dist | Out-Null
           $bin = (Get-ChildItem ffmpeg-dist -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
           "$bin" >> $env:GITHUB_PATH
-          & "$binfmpeg.exe" -version | Select-Object -First 1
+          & (Join-Path $bin ffmpeg.exe) -version | Select-Object -First 1
 
       - name: Build and zip
         id: build
