@@ -7,8 +7,12 @@ public sealed class RenderAgent(AgentConfig config)
     private const string GameWindowTitle = "League of Legends (TM) Client";
     private const string GameProcessName = "League of Legends";
 
-    private readonly List<TrackerClient> _trackers =
-        [.. config.ServerUrls.Select(url => new TrackerClient(url, config))];
+    /// The servers as configured (agent endpoints live at their roots)...
+    private readonly List<TrackerClient> _servers =
+        [.. config.ServerUrls.Select(url => TrackerClient.ForServer(url, config))];
+    /// ...and the trackers: one per tracked account they host, discovered
+    /// in ValidateAsync. A legacy single-account server is its own tracker.
+    private readonly List<TrackerClient> _trackers = [];
     private readonly HashSet<string> _reportedClaimFailures = [];
     // Postpone history per (tracker, job): a reason that repeats identically
     // is a deterministic failure wearing a transient's clothes.
@@ -69,15 +73,36 @@ public sealed class RenderAgent(AgentConfig config)
         while (true)
         {
             var reachable = 0;
-            foreach (var tracker in _trackers)
+            foreach (var server in _servers)
             {
-                if (await tracker.PingAsync(ct)) { reachable++; }
-                else Log.Warn($"Tracker unreachable: {tracker.ServerUrl} (will keep retrying)");
+                if (await server.PingAsync(ct)) { reachable++; }
+                else Log.Warn($"Tracker unreachable: {server.ServerUrl} (will keep retrying)");
             }
-            if (reachable > 0) { Log.Info($"{reachable}/{_trackers.Count} tracker server(s) reachable"); break; }
+            if (reachable > 0) { Log.Info($"{reachable}/{_servers.Count} tracker server(s) reachable"); break; }
             AgentStatus.Set("waiting", "Waiting for the tracker (unreachable)");
             await Task.Delay(TimeSpan.FromSeconds(60), ct);
         }
+
+        // One tracker per account. The same account reachable through two
+        // configured URLs (the legacy hostnames of a one-site server) counts
+        // once - the first URL that lists it.
+        _trackers.Clear();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var server in _servers)
+        {
+            if (await server.GetAccountsAsync(ct) is { } accounts)
+            {
+                foreach (var account in accounts.Where(a => seen.Add(a.RiotId)))
+                {
+                    _trackers.Add(TrackerClient.ForAccount(server.ServerUrl, account, config));
+                }
+            }
+            else if (seen.Add(server.ServerUrl))
+            {
+                _trackers.Add(server);   // legacy single-account server
+            }
+        }
+        Log.Info($"Tracking {_trackers.Count} account(s): {string.Join(", ", _trackers.Select(t => t.Account?.RiotId ?? t.ServerUrl))}");
 
         // A previous incarnation of this agent may have died holding leases
         // (crash, hard kill mid-render) - free them so those jobs re-queue
@@ -86,7 +111,7 @@ public sealed class RenderAgent(AgentConfig config)
         {
             if (await tracker.ReleaseStaleLeasesAsync(ct) is { Count: > 0 } released)
             {
-                Log.Info($"Released stale lease(s) on {tracker.ServerUrl}: {string.Join(", ", released)}");
+                Log.Info($"Released stale lease(s) on {tracker.Name}: {string.Join(", ", released)}");
             }
         }
 
@@ -119,6 +144,7 @@ public sealed class RenderAgent(AgentConfig config)
     }
 
     public IReadOnlyList<TrackerClient> Trackers => _trackers;
+    public IReadOnlyList<TrackerClient> Servers => _servers;
 
     public async Task RunAsync(CancellationToken ct)
     {
@@ -255,7 +281,7 @@ public sealed class RenderAgent(AgentConfig config)
             try
             {
                 job = await tracker.ClaimNextAsync(ct);
-                _reportedClaimFailures.Remove(tracker.ServerUrl);
+                _reportedClaimFailures.Remove(tracker.Name);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -266,9 +292,9 @@ public sealed class RenderAgent(AgentConfig config)
                 // Down or misbehaving tracker - try the next one, but say so:
                 // a swallowed claim failure looks exactly like an empty queue.
                 // Warned once per outage, or every poll would repeat it.
-                if (_reportedClaimFailures.Add(tracker.ServerUrl))
+                if (_reportedClaimFailures.Add(tracker.Name))
                 {
-                    Log.Warn($"Claiming from {tracker.ServerUrl} failed: {ex.Message} (not repeated until it recovers)");
+                    Log.Warn($"Claiming from {tracker.Name} failed: {ex.Message} (not repeated until it recovers)");
                 }
                 continue;
             }
@@ -367,9 +393,9 @@ public sealed class RenderAgent(AgentConfig config)
         using var awake = KeepAwake.Hold();
 
         var windows = config.MaxWindowsPerJob > 0 ? job.Windows.Take(config.MaxWindowsPerJob).ToList() : job.Windows;
-        Log.Info($"Job {job.MatchId} ({job.Kind}) from {tracker.ServerUrl}: {windows.Count} window(s), following \"{job.MyName}\" ({job.MyChampion})");
+        Log.Info($"Job {job.MatchId} ({job.Kind}) from {tracker.Name}: {windows.Count} window(s), following \"{job.MyName}\" ({job.MyChampion})");
 
-        var postponeKey = $"{tracker.ServerUrl}|{job.Kind}:{job.MatchId}";
+        var postponeKey = $"{tracker.Name}|{job.Kind}:{job.MatchId}";
         AgentStatus.Set("rendering", $"{job.MatchId} ({windows.Count} window(s))");
         try
         {

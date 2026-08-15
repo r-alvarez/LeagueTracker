@@ -1183,3 +1183,41 @@ timelines, analytics - is Riot's API plus our own poller, and a public
 product should have exactly that and no scraper in the tree. The imported
 rows stay as they are (Wins=0/Losses=0, chart-only, never attributable), so
 nothing visible changes.
+
+## 2026-08-15 — One website, every account: /{RiotId}/... on one process
+
+**The process stopped being the account.** Three containers on three
+hostnames became one process hosting an `Accounts` list, each with its own
+data folder (the old volumes plug in unmoved: /data/main, /data/alt,
+/data/ben) and its own SQLite; a scoped `AccountContext` binds every request
+or background job to one account, and DataPaths, the DbContext connection,
+Riot regional routing, the tracked player, live-game state, the running job
+and render leases all read through it (`PerAccount<T>` gives process-wide
+state a per-account life without consumers changing). The poller walks the
+accounts in turn on one key and one limiter - which also ends the "three
+processes each think they own the key" budget lie.
+
+**URLs are Riot IDs, op.gg style.** `/ImRA-87166/matches`,
+`/TheCosmicPeach-TTV/data` - the Riot ID with '-' for '#', globally unique,
+so no invented slugs (Ruben's call: follow the systems people already know).
+The SPA resolves the account before it renders, mounts under it, prefixes
+every API call with `/api/a/{RiotId}` in one place, and the header's player
+pill became the switcher; switching is a full navigation because the whole
+app is scoped. Every account route is also served under plain `/api` where
+the Host header (the legacy hostnames, still routed to the process and bound
+via `Accounts:List:N:Hosts`) or the default account decides - agents and
+bookmarks from the three-container era keep working unchanged.
+
+**Agents get one URL and discover the accounts.** `/api/accounts` lists
+them; the agent makes one tracker per account (`/api/a/{RiotId}`), so the
+existing "404 = not my match" ownership probe is untouched, and a recording
+is offered first to the account whose Riot ID the live client reported as
+the active player - which is what makes duo games land on the right page
+(both players' trackers hold the match; each PC's VOD belongs to whoever
+sat at it). Adding a player is now one `Accounts__List__N` block in the
+compose - no hostname, no DNS, no Access application.
+
+Deferred, on purpose: per-account visibility by Access email (friends see
+each other's pages for now), an "add account" form on the Data page, and
+anything cross-account (a shared-lobby fight rendered once, duo stats),
+which would need a shared DB.

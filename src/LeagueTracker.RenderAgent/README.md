@@ -24,7 +24,9 @@ Full walkthrough (owner side included) in `docs/agent-handoff.md`. Short form:
 1. Unzip the latest `LeagueTracker.RenderAgent-<version>.zip` (published by
    `deploy/publish-agent.ps1`; ships ffmpeg) anywhere.
 2. Double-click the exe. Without settings it opens the setup window: tracker
-   URL, Cloudflare Access service token, the role (Recorder for a player's
+   URL (one - the agent asks the server which accounts it hosts and treats
+   each as a tracker, so a recording lands on the account that was playing
+   and the renderer serves all of them), Cloudflare Access service token, the role (Recorder for a player's
    PC, Renderer for the dedicated render box, Both), recordings folder; Test
    connection, Save. Save writes `appsettings.json` (only those keys - other
    keys already in the file survive), registers a per-user run-at-logon

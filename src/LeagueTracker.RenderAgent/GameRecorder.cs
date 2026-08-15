@@ -28,7 +28,7 @@ namespace LeagueTracker.RenderAgent;
 /// the game ends. A sidecar .json carries what the review UI needs: the match
 /// id, queue, who played, and a video-time -> game-clock map sampled from the
 /// Live Client API while recording.
-public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagueRoot)
+public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagueRoot, IReadOnlyList<TrackerClient> trackers)
 {
     private const string GameProcessName = "League of Legends";
 
@@ -37,8 +37,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     private static readonly string[] NearGamePhases =
         ["Lobby", "Matchmaking", "ReadyCheck", "ChampSelect", "GameStart"];
 
-    private readonly List<TrackerClient> _trackers =
-        [.. config.ServerUrls.Select(url => new TrackerClient(url, config))];
+    private readonly IReadOnlyList<TrackerClient> _trackers = trackers;
 
     private DateTime _lastSweep;
 
@@ -490,10 +489,28 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// it (one agent, several account instances). A .uploaded stamp next to
     /// the mp4 keeps the startup sweep from re-sending gigabytes; failure
     /// just leaves the stamp missing, and the next agent start retries.
+    /// The trackers in the order to try for this recording: the account the
+    /// live client said was playing first (a duo game exists on both
+    /// players' trackers - the VOD belongs to whoever sat at this PC), the
+    /// rest as fallback for older sidecars without a player name.
+    private IEnumerable<TrackerClient> TrackersFor(string baseName)
+    {
+        string? player = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(MetaDir, baseName + ".json")));
+            if (doc.RootElement.TryGetProperty("activePlayer", out var ap)) player = ap.GetString();
+        }
+        catch { /* no sidecar yet, or unreadable - plain order */ }
+        if (player is null) return _trackers;
+        var mine = _trackers.Where(t => t.IsPlayer(player)).ToList();
+        return mine.Count > 0 ? mine.Concat(_trackers.Except(mine)) : _trackers;
+    }
+
     private async Task TryUploadVodAsync(string matchId, string baseName, CancellationToken ct)
     {
         string M(string ext) => Path.Combine(MetaDir, baseName + ext);
-        foreach (var tracker in _trackers)
+        foreach (var tracker in TrackersFor(baseName))
         {
             try
             {
@@ -505,8 +522,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 {
                     continue; // tracker doesn't know this match - not its account
                 }
-                File.WriteAllText(M(".uploaded"), tracker.ServerUrl);
-                Log.Info($"VOD {matchId} uploaded to {tracker.ServerUrl}");
+                File.WriteAllText(M(".uploaded"), tracker.Name);
+                Log.Info($"VOD {matchId} uploaded to {tracker.Name}");
                 return;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -515,7 +532,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             }
             catch (Exception ex)
             {
-                Log.Warn($"VOD upload to {tracker.ServerUrl} failed: {ex.Message} (retried at next agent start)");
+                Log.Warn($"VOD upload to {tracker.Name} failed: {ex.Message} (retried at next agent start)");
             }
         }
         // No tracker knew the match: normal for a brand-new game - the
@@ -541,13 +558,13 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             // adopt that link instead of minting a duplicate video. Learned
             // live 04 Aug 2026: the first sweep re-uploaded a hand-published
             // backlog game before this guard existed.
-            foreach (var tracker in _trackers)
+            foreach (var tracker in TrackersFor(baseName))
             {
                 if (await tracker.GetVodLinkAsync(matchId, ct) is { Length: > 0 } existing)
                 {
                     File.WriteAllText(M(".youtube.txt"), existing);
-                    File.WriteAllText(M(".linked"), tracker.ServerUrl);
-                    Log.Info($"Adopted existing YouTube link for {baseName} from {tracker.ServerUrl}");
+                    File.WriteAllText(M(".linked"), tracker.Name);
+                    Log.Info($"Adopted existing YouTube link for {baseName} from {tracker.Name}");
                     break;
                 }
             }
@@ -598,13 +615,13 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         try { url = File.ReadAllText(M(".youtube.txt")).Trim(); }
         catch { return; }
         if (url.Length == 0) return;
-        foreach (var tracker in _trackers)
+        foreach (var tracker in TrackersFor(baseName))
         {
             try
             {
                 if (!await tracker.SetVodLinkAsync(matchId, url, ct)) continue;
-                File.WriteAllText(M(".linked"), tracker.ServerUrl);
-                Log.Info($"VOD link for {matchId} registered on {tracker.ServerUrl}");
+                File.WriteAllText(M(".linked"), tracker.Name);
+                Log.Info($"VOD link for {matchId} registered on {tracker.Name}");
                 return;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -613,7 +630,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             }
             catch (Exception ex)
             {
-                Log.Warn($"VOD link post to {tracker.ServerUrl} failed: {ex.Message} (retried at next sweep)");
+                Log.Warn($"VOD link post to {tracker.Name} failed: {ex.Message} (retried at next sweep)");
             }
         }
         Log.Info($"VOD link for {matchId}: no tracker accepted it yet (match not imported) - will retry");
@@ -1399,7 +1416,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// mp4 with merged telemetry and a sidecar that knows both segments.
     public static async Task SegmentTestAsync(AgentConfig config, string ffmpeg, CancellationToken ct)
     {
-        var recorder = new GameRecorder(config, ffmpeg, leagueRoot: "");
+        var recorder = new GameRecorder(config, ffmpeg, leagueRoot: "", []);
         Directory.CreateDirectory(recorder.RecordingsDir);
         Directory.CreateDirectory(recorder.MetaDir);
         var fps = Math.Clamp(config.RecordFramerate, 15, 120);
@@ -1447,7 +1464,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// before it is ever flipped on for real games.
     public static async Task WgcTestAsync(AgentConfig config, string ffmpeg, CancellationToken ct)
     {
-        var recorder = new GameRecorder(config, ffmpeg, leagueRoot: "");
+        var recorder = new GameRecorder(config, ffmpeg, leagueRoot: "", []);
         Directory.CreateDirectory(recorder.RecordingsDir);
         Directory.CreateDirectory(recorder.MetaDir);
         var fps = Math.Clamp(config.RecordFramerate, 15, 120);
@@ -1513,7 +1530,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// through the exact capture/encode/finalize path (LT_RECORD_TEST=1).
     public static async Task RecordTestAsync(AgentConfig config, string ffmpeg, CancellationToken ct)
     {
-        var recorder = new GameRecorder(config, ffmpeg, leagueRoot: "");
+        var recorder = new GameRecorder(config, ffmpeg, leagueRoot: "", []);
         Directory.CreateDirectory(recorder.RecordingsDir);
         Directory.CreateDirectory(recorder.MetaDir);
         var baseName = $"record-test-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}";

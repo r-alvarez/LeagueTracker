@@ -66,7 +66,7 @@ try
     }
 
     var agent = new RenderAgent(config);
-    var supervisor = new AgentSupervisor(config, agent.Trackers);
+    var supervisor = new AgentSupervisor(config, agent.Servers);
 
     // Quit from the tray goes through the stop sentinel like a deploy does:
     // an in-flight render postpones and a recording finalizes before exit.
@@ -93,7 +93,7 @@ try
             Log.Error("Review test needs a resolved League install");
             return 1;
         }
-        await new ReplayReview(config, testRoot).RunForMatchAsync(reviewMatch, cts.Token);
+        await new ReplayReview(config, testRoot, agent.Trackers).RunForMatchAsync(reviewMatch, cts.Token);
         return 0;
     }
 
@@ -106,7 +106,7 @@ try
     else Log.Info("Replay rendering is off (RenderReplays=false) - this agent only records");
     if (config.RecordGames && agent.ResolvedLeagueRoot is { } leagueRoot)
     {
-        loops.Add(new GameRecorder(config, agent.ResolvedFfmpeg, leagueRoot).RunAsync(cts.Token));
+        loops.Add(new GameRecorder(config, agent.ResolvedFfmpeg, leagueRoot, agent.Trackers).RunAsync(cts.Token));
     }
     else if (config.RecordGames)
     {
@@ -116,7 +116,7 @@ try
     // so nothing it does can disturb a recording in flight.
     if (config.PostGameReview && agent.ResolvedLeagueRoot is { } reviewRoot)
     {
-        loops.Add(new ReplayReview(config, reviewRoot).RunAsync(cts.Token));
+        loops.Add(new ReplayReview(config, reviewRoot, agent.Trackers).RunAsync(cts.Token));
     }
     else if (config.PostGameReview)
     {

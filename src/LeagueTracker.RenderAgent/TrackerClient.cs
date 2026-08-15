@@ -28,16 +28,24 @@ public sealed record RenderJob(
     public bool IsFullGame => Kind is "full";
 }
 
+public sealed record TrackerAccount(string Slug, string Label, string RiotId);
+
 /// The agent's half of the pull-based render queue on the tracker server.
+/// One instance per tracked ACCOUNT: on a one-site server that is
+/// {Api}/a/{RiotId}, on a legacy single-account server it is
+/// {ServerUrl}/api - either way "does this tracker know the match" (404)
+/// is the ownership probe, exactly as it was with one host per account.
 public sealed class TrackerClient
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly string _agentName;
 
-    public TrackerClient(string serverUrl, AgentConfig config)
+    private TrackerClient(string serverUrl, string api, TrackerAccount? account, AgentConfig config)
     {
         ServerUrl = serverUrl;
+        Api = api;
+        Account = account;
         _agentName = config.AgentName;
         if (config is { CfAccessClientId.Length: > 0, CfAccessClientSecret.Length: > 0 })
         {
@@ -46,13 +54,56 @@ public sealed class TrackerClient
         }
     }
 
+    /// The server itself (agent endpoints, discovery) - also the tracker for
+    /// a legacy single-account server.
+    public static TrackerClient ForServer(string serverUrl, AgentConfig config) =>
+        new(serverUrl, $"{serverUrl}/api", null, config);
+
+    public static TrackerClient ForAccount(string serverUrl, TrackerAccount account, AgentConfig config) =>
+        new(serverUrl, $"{serverUrl}/api/a/{Uri.EscapeDataString(account.Slug)}", account, config);
+
+    /// The tracked accounts a one-site server hosts; null for a legacy
+    /// single-account server (no /api/accounts) or when unreachable.
+    public async Task<List<TrackerAccount>?> GetAccountsAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _http.GetAsync($"{ServerUrl}/api/accounts", ct);
+            if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            return [.. doc.RootElement.GetProperty("accounts").EnumerateArray().Select(a => new TrackerAccount(
+                a.GetProperty("slug").GetString() ?? "",
+                a.TryGetProperty("label", out var l) ? l.GetString() ?? "" : "",
+                a.GetProperty("riotId").GetString() ?? ""))];
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
     public string ServerUrl { get; }
+    /// Base of every account-scoped call.
+    public string Api { get; }
+    public TrackerAccount? Account { get; }
+    /// For logs and markers: "https://league.example [ImRA#87166]".
+    public string Name => Account is { } a ? $"{ServerUrl} [{a.RiotId}]" : ServerUrl;
+
+    /// Does this tracker's account match the player the live client says
+    /// is playing? Riot ID first ("Name#TAG"), bare game name as fallback
+    /// for older clients that only expose the name.
+    public bool IsPlayer(string? activePlayer)
+    {
+        if (Account is not { } a || activePlayer is not { Length: > 0 }) return false;
+        if (activePlayer.Contains('#')) return string.Equals(a.RiotId, activePlayer, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(a.RiotId.Split('#')[0], activePlayer, StringComparison.OrdinalIgnoreCase);
+    }
 
     public async Task<bool> PingAsync(CancellationToken ct)
     {
         try
         {
-            using var resp = await _http.GetAsync($"{ServerUrl}/api/status", ct);
+            using var resp = await _http.GetAsync($"{Api}/status", ct);
             if (resp.IsSuccessStatusCode && !IsJson(resp))
             {
                 // Cloudflare Access answers walled-off requests with a 200
@@ -76,7 +127,7 @@ public sealed class TrackerClient
     {
         try
         {
-            using var resp = await _http.GetAsync($"{ServerUrl}/api/matches/{Uri.EscapeDataString(matchId)}/reel", ct);
+            using var resp = await _http.GetAsync($"{Api}/matches/{Uri.EscapeDataString(matchId)}/reel", ct);
             if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
             return JsonSerializer.Deserialize<ReviewReel>(await resp.Content.ReadAsStringAsync(ct), Json);
         }
@@ -88,7 +139,7 @@ public sealed class TrackerClient
 
     public async Task<RenderJob?> ClaimNextAsync(CancellationToken ct)
     {
-        using var resp = await _http.PostAsync($"{ServerUrl}/api/render/next?agent={Uri.EscapeDataString(_agentName)}", null, ct);
+        using var resp = await _http.PostAsync($"{Api}/render/next?agent={Uri.EscapeDataString(_agentName)}", null, ct);
         if (resp.StatusCode == HttpStatusCode.NoContent) return null;
         resp.EnsureSuccessStatusCode();
         if (!IsJson(resp))
@@ -106,7 +157,7 @@ public sealed class TrackerClient
     {
         try
         {
-            using var resp = await _http.PostAsync($"{ServerUrl}/api/render/release-stale?agent={Uri.EscapeDataString(_agentName)}", null, ct);
+            using var resp = await _http.PostAsync($"{Api}/render/release-stale?agent={Uri.EscapeDataString(_agentName)}", null, ct);
             if (!resp.IsSuccessStatusCode || !IsJson(resp)) return [];
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
             return [.. doc.RootElement.GetProperty("released").EnumerateArray().Select(e => e.GetString()).OfType<string>()];
@@ -124,7 +175,7 @@ public sealed class TrackerClient
     {
         try
         {
-            using var resp = await _http.GetAsync($"{ServerUrl}/api/render/queue", ct);
+            using var resp = await _http.GetAsync($"{Api}/render/queue", ct);
             if (!resp.IsSuccessStatusCode || !IsJson(resp)) return 0;
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
             return doc.RootElement.EnumerateArray().Count(row =>
@@ -211,7 +262,7 @@ public sealed class TrackerClient
     public async Task<bool> TryDownloadReplayAsync(string matchId, string targetPath, CancellationToken ct)
     {
         using var resp = await _http.GetAsync(
-            $"{ServerUrl}/api/matches/{Uri.EscapeDataString(matchId)}/replay",
+            $"{Api}/matches/{Uri.EscapeDataString(matchId)}/replay",
             HttpCompletionOption.ResponseHeadersRead, ct);
         if (!resp.IsSuccessStatusCode) return false;
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
@@ -223,8 +274,8 @@ public sealed class TrackerClient
     public async Task UploadAsync(RenderJob job, int index, string mp4Path, CancellationToken ct)
     {
         var url = job.IsFullGame
-            ? $"{ServerUrl}/api/render/{job.MatchId}/full"
-            : $"{ServerUrl}/api/render/{job.MatchId}/clips/{index}";
+            ? $"{Api}/render/{job.MatchId}/full"
+            : $"{Api}/render/{job.MatchId}/clips/{index}";
         await using var file = File.OpenRead(mp4Path);
         using var content = new StreamContent(file);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("video/mp4");
@@ -245,7 +296,7 @@ public sealed class TrackerClient
         // not 64MB into an upload it was never going to accept.
         try
         {
-            using var probe = await _http.GetAsync($"{ServerUrl}/api/matches/{matchId}/vod/status", ct);
+            using var probe = await _http.GetAsync($"{Api}/matches/{matchId}/vod/status", ct);
             if (!probe.IsSuccessStatusCode || !IsJson(probe)) return false;
         }
         catch (Exception) when (!ct.IsCancellationRequested)
@@ -268,7 +319,7 @@ public sealed class TrackerClient
                 if (read == 0) break;
                 using var content = new ByteArrayContent(buffer, 0, read);
                 content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
-                using var resp = await _http.PutAsync($"{ServerUrl}/api/vods/{matchId}/chunk?offset={offset}", content, ct);
+                using var resp = await _http.PutAsync($"{Api}/vods/{matchId}/chunk?offset={offset}", content, ct);
                 if (resp.StatusCode == HttpStatusCode.NotFound) return false;
                 if (resp.StatusCode == HttpStatusCode.Conflict)
                 {
@@ -282,7 +333,7 @@ public sealed class TrackerClient
                 resp.EnsureSuccessStatusCode();
                 offset += read;
             }
-            using var commit = await _http.PostAsync($"{ServerUrl}/api/vods/{matchId}/commit?size={file.Length}", null, ct);
+            using var commit = await _http.PostAsync($"{Api}/vods/{matchId}/commit?size={file.Length}", null, ct);
             commit.EnsureSuccessStatusCode();
         }
         foreach (var (name, path, type) in new[]
@@ -296,7 +347,7 @@ public sealed class TrackerClient
             await using var side = File.OpenRead(path);
             using var content = new StreamContent(side);
             content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(type);
-            using var resp = await _http.PutAsync($"{ServerUrl}/api/vods/{matchId}/{name}", content, ct);
+            using var resp = await _http.PutAsync($"{Api}/vods/{matchId}/{name}", content, ct);
             // In sidecars-only mode the first sidecar is also the ownership
             // test: 404 = this tracker doesn't know the match.
             if (resp.StatusCode == HttpStatusCode.NotFound) return false;
@@ -312,7 +363,7 @@ public sealed class TrackerClient
     {
         try
         {
-            using var resp = await _http.GetAsync($"{ServerUrl}/api/matches/{matchId}/vod/status", ct);
+            using var resp = await _http.GetAsync($"{Api}/matches/{matchId}/vod/status", ct);
             if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
             return doc.RootElement.TryGetProperty("youtubeUrl", out var url) ? url.GetString() : null;
@@ -330,7 +381,7 @@ public sealed class TrackerClient
     {
         using var content = new StringContent(JsonSerializer.Serialize(new { url }),
             System.Text.Encoding.UTF8, "application/json");
-        using var resp = await _http.PostAsync($"{ServerUrl}/api/matches/{matchId}/vod/link", content, ct);
+        using var resp = await _http.PostAsync($"{Api}/matches/{matchId}/vod/link", content, ct);
         if (resp.StatusCode == HttpStatusCode.NotFound) return false;
         resp.EnsureSuccessStatusCode();
         return true;
@@ -338,7 +389,7 @@ public sealed class TrackerClient
 
     public async Task CompleteAsync(RenderJob job, CancellationToken ct)
     {
-        using var resp = await _http.PostAsync($"{ServerUrl}/api/render/{job.MatchId}/complete?kind={job.Kind}", null, ct);
+        using var resp = await _http.PostAsync($"{Api}/render/{job.MatchId}/complete?kind={job.Kind}", null, ct);
         resp.EnsureSuccessStatusCode();
     }
 
@@ -346,7 +397,7 @@ public sealed class TrackerClient
     {
         try
         {
-            using var resp = await _http.PostAsync($"{ServerUrl}/api/render/{job.MatchId}/fail?kind={job.Kind}", new StringContent(error), ct);
+            using var resp = await _http.PostAsync($"{Api}/render/{job.MatchId}/fail?kind={job.Kind}", new StringContent(error), ct);
         }
         catch
         {

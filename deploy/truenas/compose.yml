@@ -28,6 +28,14 @@ x-lt-agent-env: &lt-agent-env
   Agent__Profile__UploadVodSidecars: "true"
 
 services:
+  # One process, every tracked account: /data is the parent of the per-account
+  # folders (main/alt/ben - the three former containers' volumes, unmoved) plus
+  # agent-releases. league.rjav-tech.co.uk/{RiotId}/... is the site; the old
+  # per-account hostnames still resolve here and bind to their account via
+  # Accounts:List:N:Hosts, so agents and bookmarks from the three-container
+  # era keep working. Adding a player = one more Accounts__List__N block
+  # (GameName, TagLine, DataDir; DisplayName/HideLp/Region/Platform optional)
+  # - no hostname, no DNS, no extra Access application.
   leaguetracker:
     build: *lt-build
     pull_policy: build
@@ -37,113 +45,44 @@ services:
     environment:
       <<: *lt-agent-env
       TZ: Europe/London
-      # Rank/LP display back on (2026-07-16), matching the local compose: the
-      # process-first review views exist now, so rank reads as context, not
-      # the verdict. Capture never stopped while it was hidden.
-      Riot__HideLp: "false"
-      Agent__Profile__RecordNamePrefix: Road to Platinum
-      # This one mirrors GitHub agent releases into the shared folder
-      # (writer); the other trackers mount it read-only.
+      Riot__ApiKeyFile: /data/main/riot-api-key.txt
+      Accounts__DataRoot: /data
+      Accounts__Default: ImRA-87166
+      Accounts__List__0__GameName: ImRA
+      Accounts__List__0__TagLine: "87166"
+      Accounts__List__0__DataDir: /data/main
+      Accounts__List__0__Hosts: league.rjav-tech.co.uk
+      Accounts__List__0__DisplayName: Ruben
+      Accounts__List__1__GameName: ImRA
+      Accounts__List__1__TagLine: "5957"
+      Accounts__List__1__DataDir: /data/alt
+      Accounts__List__1__Hosts: league-alt.rjav-tech.co.uk
+      Accounts__List__1__DisplayName: Ruben (alt)
+      Accounts__List__2__GameName: TheCosmicPeach
+      Accounts__List__2__TagLine: TTV
+      Accounts__List__2__DataDir: /data/ben
+      Accounts__List__2__Hosts: league-ben.rjav-tech.co.uk
+      Accounts__List__2__DisplayName: Ben
+      # Accounts__List__3__GameName: <Vanessa's game name>
+      # Accounts__List__3__TagLine: <tag>
+      # Accounts__List__3__DataDir: /data/vanessa
+      # Accounts__List__3__DisplayName: Vanessa
+      Agent__ReleaseDir: /data/agent-releases
       Agent__SyncReleases: "true"
+      Agent__Profile__RecordNamePrefix: Road to Platinum
     volumes:
-      - /mnt/MediaPool/apps/leaguetracker/main:/data
-      - /mnt/MediaPool/apps/leaguetracker/agent-releases:/agent-releases
+      - /mnt/MediaPool/apps/leaguetracker:/data
     networks: [frontend]
     restart: unless-stopped
     labels:
       - traefik.enable=true
       - traefik.docker.network=frontend
       - traefik.http.services.leaguetracker.loadbalancer.server.port=5170
-      - traefik.http.routers.leaguetracker.rule=Host(`league.rjav-tech.co.uk`)
+      - traefik.http.routers.leaguetracker.rule=Host(`league.rjav-tech.co.uk`) || Host(`league-alt.rjav-tech.co.uk`) || Host(`league-ben.rjav-tech.co.uk`)
       - traefik.http.routers.leaguetracker.entrypoints=websecure
       - traefik.http.routers.leaguetracker.tls.certResolver=cloudflare
       - traefik.http.routers.leaguetracker.priority=100
       - traefik.http.routers.leaguetracker.service=leaguetracker
-
-  leaguetracker-alt:
-    build: *lt-build
-    pull_policy: build
-    image: leaguetracker:local
-    container_name: leaguetracker-alt
-    user: "568:568"
-    environment:
-      <<: *lt-agent-env
-      TZ: Europe/London
-      Riot__GameName: ImRA
-      Riot__TagLine: "5957"
-      Riot__HideLp: "false"
-      Agent__Profile__RecordNamePrefix: Road to Platinum (alt)
-    volumes:
-      - /mnt/MediaPool/apps/leaguetracker/alt:/data
-      - /mnt/MediaPool/apps/leaguetracker/agent-releases:/agent-releases:ro
-    networks: [frontend]
-    restart: unless-stopped
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=frontend
-      - traefik.http.services.leaguetracker-alt.loadbalancer.server.port=5170
-      - traefik.http.routers.leaguetracker-alt.rule=Host(`league-alt.rjav-tech.co.uk`)
-      - traefik.http.routers.leaguetracker-alt.entrypoints=websecure
-      - traefik.http.routers.leaguetracker-alt.tls.certResolver=cloudflare
-      - traefik.http.routers.leaguetracker-alt.priority=100
-      - traefik.http.routers.leaguetracker-alt.service=leaguetracker-alt
-
-  leaguetracker-ben:
-    build: *lt-build
-    pull_policy: build
-    image: leaguetracker:local
-    container_name: leaguetracker-ben
-    user: "568:568"
-    environment:
-      <<: *lt-agent-env
-      TZ: Europe/London
-      Riot__GameName: TheCosmicPeach
-      Riot__TagLine: TTV
-      Agent__Profile__RecordNamePrefix: Ben
-    volumes:
-      - /mnt/MediaPool/apps/leaguetracker/ben:/data
-      - /mnt/MediaPool/apps/leaguetracker/agent-releases:/agent-releases:ro
-    networks: [frontend]
-    restart: unless-stopped
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=frontend
-      - traefik.http.services.leaguetracker-ben.loadbalancer.server.port=5170
-      - traefik.http.routers.leaguetracker-ben.rule=Host(`league-ben.rjav-tech.co.uk`)
-      - traefik.http.routers.leaguetracker-ben.entrypoints=websecure
-      - traefik.http.routers.leaguetracker-ben.tls.certResolver=cloudflare
-      - traefik.http.routers.leaguetracker-ben.priority=100
-      - traefik.http.routers.leaguetracker-ben.service=leaguetracker-ben
-
-  # Adding a player = one more copy of this block: their Riot id, their own
-  # /data folder, their own hostname (plus DNS + a Cloudflare Access app + a
-  # service token for their agent - see docs/agent-handoff.md).
-  # leaguetracker-vanessa:
-  #   build: *lt-build
-  #   pull_policy: build
-  #   image: leaguetracker:local
-  #   container_name: leaguetracker-vanessa
-  #   user: "568:568"
-  #   environment:
-  #     <<: *lt-agent-env
-  #     TZ: Europe/London
-  #     Riot__GameName: <GameName>
-  #     Riot__TagLine: <TagLine>
-  #     Agent__Profile__RecordNamePrefix: Vanessa
-  #   volumes:
-  #     - /mnt/MediaPool/apps/leaguetracker/vanessa:/data
-  #     - /mnt/MediaPool/apps/leaguetracker/agent-releases:/agent-releases:ro
-  #   networks: [frontend]
-  #   restart: unless-stopped
-  #   labels:
-  #     - traefik.enable=true
-  #     - traefik.docker.network=frontend
-  #     - traefik.http.services.leaguetracker-vanessa.loadbalancer.server.port=5170
-  #     - traefik.http.routers.leaguetracker-vanessa.rule=Host(`league-vanessa.rjav-tech.co.uk`)
-  #     - traefik.http.routers.leaguetracker-vanessa.entrypoints=websecure
-  #     - traefik.http.routers.leaguetracker-vanessa.tls.certResolver=cloudflare
-  #     - traefik.http.routers.leaguetracker-vanessa.priority=100
-  #     - traefik.http.routers.leaguetracker-vanessa.service=leaguetracker-vanessa
 
   # Wakes the render PC while render work waits, so the gaming machine can
   # sleep instead of idling 24/7. The PC (10.10.10.x) and the NAS (10.10.40.x)

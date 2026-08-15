@@ -13,7 +13,7 @@ namespace LeagueTracker.RenderAgent;
 /// client, so the render loop stands down for the length of a session
 /// (SessionActive) - otherwise a machine that looks idle because someone is
 /// watching would have a second replay launched over the top of this one.
-public sealed class ReplayReview(AgentConfig config, string leagueRoot)
+public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnlyList<TrackerClient> trackers)
 {
     /// Any of these means the player has moved on to the next game. Checked
     /// at every step, not once: the whole feature is "review between games",
@@ -26,8 +26,7 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot)
     /// True while a review owns the replay client. Read by the render loop.
     public static bool SessionActive => Volatile.Read(ref _sessionActive) != 0;
 
-    private readonly List<TrackerClient> _trackers =
-        [.. config.ServerUrls.Select(url => new TrackerClient(url, config))];
+    private readonly IReadOnlyList<TrackerClient> _trackers = trackers;
 
     /// Games already reviewed, so a phase that flickers back out of a game
     /// can't reopen the same session twice.
@@ -100,7 +99,7 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot)
             if (await tracker.GetReelAsync(matchId, ct) is not { } reel) continue;
             if (reel.Moments.Count == 0)
             {
-                Log.Warn($"Review test: {tracker.ServerUrl} has {matchId} but the reel is empty " +
+                Log.Warn($"Review test: {tracker.Name} has {matchId} but the reel is empty " +
                          "(no fights the player was in, no deaths - or analytics not processed)");
                 return;
             }

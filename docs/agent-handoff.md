@@ -1,16 +1,28 @@
 # Handing the tracker to another player
 
-One tracker instance per player on the NAS; one **recorder** agent on each
-player's gaming PC; one **renderer** agent on the dedicated replay box that
-serves every tracker. Nobody but the tracker owner touches credentials.
+One website - `league.rjav-tech.co.uk/{RiotId}/...` (op.gg style:
+`/ImRA-87166/matches`, `/TheCosmicPeach-TTV/data`) - one process hosting
+every tracked account with its own data folder; one **recorder** agent on
+each player's gaming PC; one **renderer** agent on the dedicated replay box
+that serves every account. Nobody but the tracker owner touches credentials.
 
 ```
- Ben's PC ──recorder──▶ league-ben ─┐
- Vanessa's PC ─recorder─▶ league-vanessa ├─▶ renderer (old PC) pulls replay jobs from all
- Ruben's PC ──recorder──▶ league / league-alt ┘      and uploads clips back
-                 │
-                 └──▶ YouTube (one shared channel; token lives on the NAS)
+ Ben's PC ──recorder──┐                                         ┌─ /ImRA-87166
+ Vanessa's PC ─recorder┼─▶ league.rjav-tech.co.uk (one process) ├─ /ImRA-5957
+ Ruben's PC ──recorder─┘              ▲                         ├─ /TheCosmicPeach-TTV
+                                      │                         └─ /...
+                      renderer (old PC) pulls replay jobs for every account
+                                      │
+                                      └──▶ YouTube (one shared channel; token on the NAS)
 ```
+
+An agent is given ONE URL; it asks the server for its accounts and treats
+each as a tracker (`/api/a/{RiotId}`), so a recording lands on the account
+that was playing (the live client's Riot ID decides - a duo game exists on
+both players' pages, each PC's VOD goes to its own player) and the renderer
+pulls jobs from all of them. The old per-account hostnames still resolve to
+the same process and mean "that account", so nothing from the
+three-container era breaks.
 
 What a friend gets, automatically, once their agent runs: their games recorded
 and published to YouTube with the link on their match page, review data
@@ -31,7 +43,7 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
      (own project → own quota) via per-service `Agent__Profile__YouTube*`
      overrides - all still authorized against the same channel.
 2. **Release folder.** `mkdir /mnt/MediaPool/apps/leaguetracker/agent-releases`
-   (mounted read-only into every tracker as `/agent-releases`).
+   (`/data/agent-releases` in the container; the tracker also mirrors GitHub releases into it).
 3. **Publish the agent** from the dev machine:
    `deploy\publish-agent.ps1 -ReleaseDir <NAS>\apps\leaguetracker\agent-releases`
    - version = `yyyy.M.d.HHmm`, zip bundles ffmpeg; agents update themselves
@@ -41,24 +53,26 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
 
 ## B. Per new player (owner) - "the upgrade to multi-account"
 
-1. Copy the `leaguetracker-vanessa` block in `deploy/truenas/compose.yml`,
-   fill `Riot__GameName` / `Riot__TagLine` (+ `Riot__Region`/`Riot__Platform`
-   if not EUW), pick a `RecordNamePrefix`; create the `/data` folder; push
-   (Portainer redeploys).
-2. DNS: `league-<name>.rjav-tech.co.uk` → tunnel/NAS (split-horizon too).
-3. Cloudflare Access: application for the hostname (their email allowed), and
-   a **service token per agent** (Zero Trust → Access → Service Auth) so one
-   friend's token can be revoked without touching the others.
-4. First run: `POST /api/analytics/reprocess` isn't needed for a fresh
-   tracker; history sync from the Data page pulls their past games.
-5. Add the new hostname to the **renderer's** `ServerUrl` list.
+1. One more `Accounts__List__N__*` block in `deploy/truenas/compose.yml`
+   (`GameName`, `TagLine`, `DataDir: /data/<name>`, `DisplayName`; `Region`/
+   `Platform` if not EUW), create the folder under
+   `/mnt/MediaPool/apps/leaguetracker/`, push (Portainer redeploys). Their
+   page is `league.rjav-tech.co.uk/<GameName>-<TagLine>/` at once - no
+   hostname, no DNS.
+2. Cloudflare Access: add their email to the `league.rjav-tech.co.uk`
+   application (they see every account's pages - fine among friends;
+   per-account visibility by email is a later step), and create a **service
+   token per agent** (Zero Trust → Access → Service Auth) so one friend's
+   token can be revoked without touching the others.
+3. First run: history sync from their Data page pulls their past games.
 
 ## C. Per player's PC (5 minutes, no admin rights)
 
 1. Unzip the latest `LeagueTracker.RenderAgent-<version>.zip` anywhere
    (e.g. `C:\LeagueTrackerAgent`).
 2. Double-click `LeagueTracker.RenderAgent.exe`. With no settings yet it opens
-   the **setup window**: tracker URL (`https://league-ben.rjav-tech.co.uk`),
+   the **setup window**: tracker URL (`https://league.rjav-tech.co.uk` - the one
+   site; the agent finds their account by itself),
    the Access token ID + secret you gave them, "This machine is: Recorder",
    optional recordings folder. **Test connection** proves the tracker answers
    and that YouTube is configured on it; **Save** writes `appsettings.json`,
@@ -81,7 +95,7 @@ Uninstall: `LeagueTracker.RenderAgent.exe --uninstall` (recordings stay).
 
 ## D. The render box (owner's old PC)
 
-Same zip, same setup window: all tracker URLs comma-separated, one service
+Same zip, same setup window: the one URL (every account is discovered), one service
 token, "This machine is: Renderer" (RecordGames off), `PostGameReview` off,
 League installed and a client logged in (Vanguard only allows replays through
 the client; any account works), and `IdleSeconds` can drop to ~10 since

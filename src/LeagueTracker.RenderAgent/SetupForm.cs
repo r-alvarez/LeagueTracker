@@ -15,6 +15,7 @@ public sealed class SetupForm : Form
     private readonly TextBox _cfSecret = new() { Width = 420, UseSystemPasswordChar = true };
     private readonly ComboBox _role = new() { Width = 420, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly TextBox _recordings = new() { Width = 340 };
+    private readonly TextBox _prefix = new() { Width = 420 };
     private readonly Label _verdict = new() { AutoSize = true, MaximumSize = new Size(560, 0), ForeColor = Color.DimGray };
     private readonly Button _test = new() { Text = "Test connection", Width = 130 };
     private readonly Button _save = new() { Text = "Save", Width = 100, DialogResult = DialogResult.OK };
@@ -68,6 +69,7 @@ public sealed class SetupForm : Form
         _role.SelectedIndex = NeedsSetup(current) ? 0
             : Array.FindIndex(Roles, r => r.Record == current.RecordGames && r.Render == current.RenderReplays) is >= 0 and var i ? i : 0;
         _recordings.Text = current.RecordingsDir;
+        _prefix.Text = current.RecordNamePrefix;
 
         Row("Tracker URL", _server, "Your tracker's address, e.g. https://league-ben.rjav-tech.co.uk (several: comma-separated).");
         Row("Access token ID", _cfId, "The Cloudflare Access service token you were given for this machine.");
@@ -84,6 +86,7 @@ public sealed class SetupForm : Form
         recRow.Controls.Add(_recordings);
         recRow.Controls.Add(browse);
         Row("Recordings folder", recRow, "Blank = Videos\\LeagueTracker. Games are 1.5-3 GB each at 1440p60 - pick a drive with room.");
+        Row("Video title prefix", _prefix, "Recordings and YouTube titles: \"<prefix> - 15 Aug 2026 - Game 2\". Blank = the tracker's default.");
 
         var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Dock = DockStyle.Top, Margin = new Padding(0, 12, 0, 0) };
         buttons.Controls.Add(_test);
@@ -132,6 +135,7 @@ public sealed class SetupForm : Form
             RecordGames = record,
             RenderReplays = render,
             RecordingsDir = _recordings.Text.Trim(),
+            RecordNamePrefix = _prefix.Text.Trim(),
         };
     }
 
@@ -145,11 +149,12 @@ public sealed class SetupForm : Form
         var results = new List<string>();
         foreach (var url in draft.ServerUrls)
         {
-            var client = new TrackerClient(url, draft);
+            var client = TrackerClient.ForServer(url, draft);
             var ok = await client.PingAsync(CancellationToken.None);
             var profile = ok ? await client.GetProfileAsync(CancellationToken.None) : null;
+            var accounts = ok ? await client.GetAccountsAsync(CancellationToken.None) : null;
             results.Add(ok
-                ? $"{url}: OK{(profile is { Count: > 0 } ? $" (profile: {profile.Count} setting(s), YouTube {(profile.ContainsKey("YouTubeRefreshToken") ? "ready" : "not configured")})" : "")}"
+                ? $"{url}: OK{(accounts is { Count: > 0 } ? $" - {accounts.Count} account(s): {string.Join(", ", accounts.Select(a => a.RiotId))}" : "")}{(profile is { Count: > 0 } ? $" (YouTube {(profile.ContainsKey("YouTubeRefreshToken") ? "ready" : "not configured")})" : "")}"
                 : $"{url}: no answer - wrong address, or the Access token is not allowed here");
         }
         var allOk = results.All(r => r.Contains(": OK"));
@@ -182,6 +187,10 @@ public sealed class SetupForm : Form
         Set("RecordGames", draft.RecordGames);
         Set("RenderReplays", draft.RenderReplays);
         Set("RecordingsDir", draft.RecordingsDir);
+        // Only when given: an empty prefix written locally would win over
+        // the tracker's default (a written key beats the profile).
+        if (draft.RecordNamePrefix is { Length: > 0 }) Set("RecordNamePrefix", draft.RecordNamePrefix);
+        else settings.Remove("RecordNamePrefix");
 
         var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(ConfigPath,
