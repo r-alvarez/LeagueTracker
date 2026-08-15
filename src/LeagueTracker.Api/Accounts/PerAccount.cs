@@ -41,7 +41,8 @@ public static class AccountServiceCollectionExtensions
 }
 
 /// Binds the request's account before any scoped service is built:
-/// /api/a/{slug}/... and /{slug}/... name it; otherwise the Host header
+/// /api/a/{region}/{slug}/... (canonical), /api/a/{slug}/... (the first
+/// one-site build; kept for agents mid-update); otherwise the Host header
 /// (legacy per-account hostnames); otherwise the default account.
 public sealed class AccountBindingMiddleware(RequestDelegate next, AccountRegistry registry)
 {
@@ -53,13 +54,28 @@ public sealed class AccountBindingMiddleware(RequestDelegate next, AccountRegist
 
         if (path.StartsWith("/api/a/", StringComparison.OrdinalIgnoreCase))
         {
-            var slug = Uri.UnescapeDataString(path[7..].Split('/', 2)[0]);
-            account = registry.BySlug(slug);
-            if (account is null)
+            var parts = path[7..].Split('/', 3);
+            var first = Uri.UnescapeDataString(parts[0]);
+            if (Platforms.ByCode(first) is not null && parts.Length > 1)
             {
-                http.Response.StatusCode = StatusCodes.Status404NotFound;
-                await http.Response.WriteAsync($"unknown account '{slug}'");
-                return;
+                var slug = Uri.UnescapeDataString(parts[1]);
+                account = registry.ByPath(first, slug);
+                if (account is null)
+                {
+                    http.Response.StatusCode = StatusCodes.Status404NotFound;
+                    await http.Response.WriteAsync($"unknown account '{first}/{slug}'");
+                    return;
+                }
+            }
+            else
+            {
+                account = registry.BySlug(first);
+                if (account is null)
+                {
+                    http.Response.StatusCode = StatusCodes.Status404NotFound;
+                    await http.Response.WriteAsync($"unknown account '{first}'");
+                    return;
+                }
             }
         }
         account ??= registry.ByHost(http.Request.Host.Host) ?? registry.Default;

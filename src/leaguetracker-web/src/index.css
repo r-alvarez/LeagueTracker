@@ -117,6 +117,15 @@ a { color: inherit; }
   background-position: calc(100% - 15px) 55%, calc(100% - 10px) 55%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
 }
 .topbar .account-switch select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.topbar .account-control { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* The add form sits inline in the header row: one line on desktop, wraps on phones. */
+.account-add { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.account-add input, .account-add select {
+  background: var(--panel-2); color: var(--ink); border: 1px solid var(--border); border-radius: 8px;
+  padding: 5px 9px; font: inherit; font-size: 13px;
+}
+.account-add input { width: 170px; }
+.account-add-error { color: var(--lp-loss); font-size: 12.5px; }
 
 /* The tab strip swipes sideways on narrow screens instead of clipping pages
    off the edge; the scrollbar stays hidden (both syntaxes - scrollbar-width

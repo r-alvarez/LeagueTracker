@@ -28,7 +28,12 @@ public sealed record RenderJob(
     public bool IsFullGame => Kind is "full";
 }
 
-public sealed record TrackerAccount(string Slug, string Label, string RiotId);
+/// Path is the server's canonical address ("euw/ImRA-87166"); a server from
+/// before regions only gives the slug, which still resolves.
+public sealed record TrackerAccount(string Slug, string Label, string RiotId, string? Path = null)
+{
+    public string UrlPath => Path is { Length: > 0 } ? string.Join('/', Path.Split('/').Select(Uri.EscapeDataString)) : Uri.EscapeDataString(Slug);
+}
 
 /// The agent's half of the pull-based render queue on the tracker server.
 /// One instance per tracked ACCOUNT: on a one-site server that is
@@ -60,7 +65,7 @@ public sealed class TrackerClient
         new(serverUrl, $"{serverUrl}/api", null, config);
 
     public static TrackerClient ForAccount(string serverUrl, TrackerAccount account, AgentConfig config) =>
-        new(serverUrl, $"{serverUrl}/api/a/{Uri.EscapeDataString(account.Slug)}", account, config);
+        new(serverUrl, $"{serverUrl}/api/a/{account.UrlPath}", account, config);
 
     /// The tracked accounts a one-site server hosts; null for a legacy
     /// single-account server (no /api/accounts) or when unreachable.
@@ -74,7 +79,8 @@ public sealed class TrackerClient
             return [.. doc.RootElement.GetProperty("accounts").EnumerateArray().Select(a => new TrackerAccount(
                 a.GetProperty("slug").GetString() ?? "",
                 a.TryGetProperty("label", out var l) ? l.GetString() ?? "" : "",
-                a.GetProperty("riotId").GetString() ?? ""))];
+                a.GetProperty("riotId").GetString() ?? "",
+                a.TryGetProperty("path", out var p) ? p.GetString() : null))];
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {

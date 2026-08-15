@@ -1241,3 +1241,20 @@ Media Foundation encoder leaves the matrix untagged and browsers/YouTube read
 untagged 1440p as BT.601 - lifted, yellowed greens. The finalize remux now adds
 `matrix_coefficients=1` when (and only when) the source carries no matrix tag;
 NVENC's genuine bt470bg is left alone, as decided 24 Jul.
+
+## 2026-08-15 — Region in the URL, and accounts added from the site
+
+**`/euw/ImRA-87166/…`, not `/ImRA-87166/…`.** Ruben's point: op.gg has the
+region because League lives on a platform shard, and a real site resolves
+the region before anything else. One table (`Platforms`) ties URL code,
+platform id and regional route together; the account's `Platform` decides
+its code; the slug alone still resolves (kept for agents mid-update and
+old links, which redirect to the canonical address).
+
+**Accounts are typed, not deployed.** The header switcher gained "Add
+account…": Riot ID + region → the server verifies with account-v1
+(canonical casing, puuid cached), creates the folder and database, adds it
+to the poller's round and remembers it in `<DataRoot>/accounts.json`;
+config-seeded accounts stay in the compose and win on a duplicate.
+Deliberately not built: looking up arbitrary summoners on the fly (a
+different product - per-visit Riot calls, no history, a production key).

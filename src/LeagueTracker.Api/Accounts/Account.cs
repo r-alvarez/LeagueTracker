@@ -25,8 +25,17 @@ public sealed class Account
     public string DisplayName { get; set; } = "";
     public bool HideLp { get; set; }
 
+    /// Seeded from configuration (cannot be removed at runtime) vs added
+    /// through the site (accounts.json).
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool FromConfig { get; set; }
+
     public string RiotId => $"{GameName}#{TagLine}";
     public string UrlSlug => Slug is { Length: > 0 } ? Slug : $"{GameName}-{TagLine}";
+    /// URL region: euw, eune, na... derived from Platform.
+    public string RegionCode => Platforms.CodeFor(Platform);
+    /// "euw/ImRA-87166" - the canonical address.
+    public string UrlPath => $"{RegionCode}/{UrlSlug}";
     public string Label => DisplayName is { Length: > 0 } ? DisplayName : GameName;
     public string[] HostList => [.. Hosts.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)];
 }

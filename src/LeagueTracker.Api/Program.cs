@@ -72,7 +72,11 @@ builder.Services.AddResponseCompression(o => o.EnableForHttps = true);
 
 var app = builder.Build();
 
-foreach (var account in app.Services.GetRequiredService<AccountRegistry>().All)
+foreach (var account in app.Services.GetRequiredService<AccountRegistry>().All) InitializeAccount(account);
+
+// Creates/upgrades an account's SQLite - at startup for every configured
+// account, and again for each one added through the site.
+void InitializeAccount(Account account)
 {
     using var scope = app.Services.GetRequiredService<AccountScopes>().Create(account);
     var db = scope.ServiceProvider.GetRequiredService<LeagueDbContext>();
@@ -134,7 +138,14 @@ app.UseStaticFiles(staticFiles);
 // keep working). The binding middleware has already chosen the account by
 // the time a handler runs.
 MapAccountApi(app.MapGroup("/api"));
-MapAccountApi(app.MapGroup("/api/a/{slug}"));
+MapAccountApi(app.MapGroup("/api/a/{region:regex(^[a-z]{{2,4}}$)}/{slug}"));   // canonical: /api/a/euw/ImRA-87166/...
+MapAccountApi(app.MapGroup("/api/a/{slug}"));                                    // first one-site build; agents mid-update
+
+static object AccountView(Account a) => new
+{
+    a.Slug, a.Label, a.RiotId, a.GameName, a.TagLine, a.HideLp, a.Platform,
+    Region = a.RegionCode, Path = a.UrlPath, a.FromConfig,
+};
 
 app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct) => Results.Ok(new
 {
@@ -142,8 +153,66 @@ app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct) => R
     // The account this request is bound to (Host header on a legacy
     // hostname, else the default) - the SPA lands there when the URL has no slug.
     Current = acct.Slug,
-    Accounts = registry.All.Select(a => new { a.Slug, a.Label, a.RiotId, a.HideLp }),
+    registry.CanAdd,
+    Regions = Platforms.All.Select(p => new { Code = p.Code, p.Label, p.Platform }),
+    Accounts = registry.All.Select(AccountView),
 }));
+
+// The "add account" box: a Riot ID typed by a person, checked against Riot
+// (account-v1 answers with the canonical casing and the puuid), then given a
+// folder, a database and a place in the poller's round - no redeploy.
+app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry registry, AccountScopes scopes, IRiotKeyProvider keys, CancellationToken ct) =>
+{
+    if (!registry.CanAdd) return Results.Problem("This deployment takes accounts from configuration only (Accounts:DataRoot is not set)", statusCode: 409);
+    var (gameName, tagLine) = ParseRiotId(request.RiotId);
+    if (gameName is null || tagLine is null) return Results.BadRequest(new { error = "Type the Riot ID as GameName#TAG" });
+    var platform = Platforms.ByCode(request.Region) ?? Platforms.ByPlatform(request.Region);
+    if (platform is null) return Results.BadRequest(new { error = $"Unknown region '{request.Region}'" });
+    if (registry.BySlug($"{gameName}-{tagLine}") is { } existing) return Results.Conflict(new { error = $"{existing.RiotId} is already tracked", account = AccountView(existing) });
+    if (keys.GetKey() is null) return Results.Problem("No Riot API key configured - the account cannot be verified", statusCode: 503);
+
+    // Resolve through a scope bound to a throwaway account with the target
+    // routing: account-v1 is regional, and the typed casing may be off.
+    var probe = new Account { GameName = gameName, TagLine = tagLine, Platform = platform.Platform, Region = platform.Region, DataDir = Path.GetTempPath() };
+    AccountDto resolved;
+    using (var scope = scopes.Create(probe))
+    {
+        try
+        {
+            resolved = await scope.ServiceProvider.GetRequiredService<RiotApiClient>().GetAccountAsync(gameName, tagLine, ct);
+        }
+        catch (RiotApiException ex) when (ex.StatusCode == 404)
+        {
+            return Results.NotFound(new { error = $"Riot knows no account {gameName}#{tagLine} in {platform.Label}" });
+        }
+        catch (RiotApiException ex)
+        {
+            return Results.Problem($"Riot answered {ex.StatusCode} while checking the account{(ex.IsAuthFailure ? " - the API key is invalid or expired" : "")}", statusCode: 502);
+        }
+    }
+    var account = registry.Add(resolved.GameName ?? gameName, resolved.TagLine ?? tagLine, platform.Platform, request.DisplayName);
+    InitializeAccount(account);
+    using (var scope = scopes.Create(account))
+    {
+        await scope.ServiceProvider.GetRequiredService<TrackedPlayerService>().StorePuuidAsync(resolved.Puuid, ct);
+    }
+    return Results.Created($"/{account.UrlPath}/", AccountView(account));
+});
+
+// Untrack (the folder stays on the NAS). Configured accounts say no.
+app.MapDelete("/api/accounts/{slug}", (string slug, AccountRegistry registry) =>
+    registry.Remove(Uri.UnescapeDataString(slug)) ? Results.NoContent() : Results.NotFound());
+
+static (string? GameName, string? TagLine) ParseRiotId(string? riotId)
+{
+    if (riotId is not { Length: > 0 }) return (null, null);
+    var hash = riotId.LastIndexOf('#');
+    if (hash <= 0 || hash == riotId.Length - 1) return (null, null);
+    var name = riotId[..hash].Trim();
+    var tag = riotId[(hash + 1)..].Trim();
+    return name.Length is >= 3 and <= 16 && tag.Length is >= 3 and <= 5 ? (name, tag) : (null, null);
+}
+
 
 // --- Agents ---------------------------------------------------------------------
 // The agents on the players' PCs are the moving parts nobody watches: they
@@ -1085,3 +1154,5 @@ static object MatchListItem(Match m, string? items = null, int? summoner1Id = nu
 
 static IResult CsvFile(string fileName, string csv) =>
     Results.File(Encoding.UTF8.GetBytes(csv), "text/csv", fileName);
+
+public sealed record AddAccountRequest(string RiotId, string Region, string? DisplayName);

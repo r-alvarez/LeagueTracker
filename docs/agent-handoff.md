@@ -1,7 +1,7 @@
 # Handing the tracker to another player
 
-One website - `league.rjav-tech.co.uk/{RiotId}/...` (op.gg style:
-`/ImRA-87166/matches`, `/TheCosmicPeach-TTV/data`) - one process hosting
+One website - `league.rjav-tech.co.uk/{region}/{RiotId}/...` (op.gg style:
+`/euw/ImRA-87166/matches`, `/euw/TheCosmicPeach-TTV/data`) - one process hosting
 every tracked account with its own data folder; one **recorder** agent on
 each player's gaming PC; one **renderer** agent on the dedicated replay box
 that serves every account. Nobody but the tracker owner touches credentials.
@@ -17,7 +17,7 @@ that serves every account. Nobody but the tracker owner touches credentials.
 ```
 
 An agent is given ONE URL; it asks the server for its accounts and treats
-each as a tracker (`/api/a/{RiotId}`), so a recording lands on the account
+each as a tracker (`/api/a/{region}/{RiotId}`), so a recording lands on the account
 that was playing (the live client's Riot ID decides - a duo game exists on
 both players' pages, each PC's VOD goes to its own player) and the renderer
 pulls jobs from all of them. The old per-account hostnames still resolve to
@@ -53,12 +53,16 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
 
 ## B. Per new player (owner) - "the upgrade to multi-account"
 
-1. One more `Accounts__List__N__*` block in `deploy/truenas/compose.yml`
-   (`GameName`, `TagLine`, `DataDir: /data/<name>`, `DisplayName`; `Region`/
-   `Platform` if not EUW), create the folder under
-   `/mnt/MediaPool/apps/leaguetracker/`, push (Portainer redeploys). Their
-   page is `league.rjav-tech.co.uk/<GameName>-<TagLine>/` at once - no
-   hostname, no DNS.
+1. On the site, open the account switcher → **＋ Add account…**, type their
+   Riot ID (`GameName#TAG`) and pick the region, **Track**. The server checks
+   it with Riot (canonical casing, puuid), creates
+   `/mnt/MediaPool/apps/leaguetracker/<GameName>-<TAG>/`, its database, and
+   adds it to the poller's round; it lands you on their page
+   (`league.rjav-tech.co.uk/euw/<GameName>-<TAG>/`). Runtime-added accounts
+   are remembered in `/data/accounts.json` (survive redeploys); the three
+   original ones stay in the compose (`Accounts__List__N`) - both sources
+   are fine, config wins on a duplicate. `DELETE /api/accounts/{slug}`
+   untracks a runtime-added one (folder kept).
 2. Cloudflare Access: add their email to the `league.rjav-tech.co.uk`
    application (they see every account's pages - fine among friends;
    per-account visibility by email is a later step), and create a **service
