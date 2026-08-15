@@ -87,37 +87,55 @@ public sealed class AgentTray : IDisposable
         _ => detail is { Length: > 0 } ? $"{state} {detail}" : state,
     };
 
+    /// The tracker's logo with a status dot in the corner - the same mark as
+    /// the site's tab, so the tray reads as "LeagueTracker" at a glance and
+    /// the dot alone carries the state.
     private Icon IconFor(string kind)
     {
         if (_icons.TryGetValue(kind, out var cached)) return cached;
         var color = kind switch
         {
             "busy" => Color.FromArgb(240, 85, 106),      // recording red
-            "paused" => Color.FromArgb(120, 120, 130),
+            "paused" => Color.FromArgb(150, 150, 160),
             "waiting" => Color.FromArgb(230, 180, 60),
             "warn" => Color.FromArgb(230, 140, 40),
             _ => Color.FromArgb(63, 185, 80),
         };
-        using var bitmap = new Bitmap(32, 32);
+        const int size = 32;
+        using var bitmap = new Bitmap(size, size);
         using (var g = Graphics.FromImage(bitmap))
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.Clear(Color.Transparent);
+            g.DrawImage(Logo, new Rectangle(0, 0, size, size));
+            // Bottom-right dot, ringed in near-black so it separates from the
+            // logo and from either taskbar theme.
+            const int dot = 14;
+            var rect = new Rectangle(size - dot - 1, size - dot - 1, dot, dot);
             using var fill = new SolidBrush(color);
-            g.FillEllipse(fill, 3, 3, 26, 26);
-            using var pen = new Pen(Color.FromArgb(200, 20, 20, 25), 2);
-            g.DrawEllipse(pen, 3, 3, 26, 26);
+            using var ring = new Pen(Color.FromArgb(230, 20, 20, 25), 2);
+            g.FillEllipse(fill, rect);
+            g.DrawEllipse(ring, rect);
             if (kind is "paused")
             {
                 using var bar = new SolidBrush(Color.White);
-                g.FillRectangle(bar, 10, 9, 4, 14);
-                g.FillRectangle(bar, 18, 9, 4, 14);
+                g.FillRectangle(bar, rect.X + 4, rect.Y + 3, 2, 8);
+                g.FillRectangle(bar, rect.X + 8, rect.Y + 3, 2, 8);
             }
         }
         var icon = Icon.FromHandle(bitmap.GetHicon());
         _icons[kind] = icon;
         return icon;
     }
+
+    private static readonly Lazy<Image> LogoLazy = new(() =>
+    {
+        using var stream = typeof(AgentTray).Assembly.GetManifestResourceStream("logo.png")
+            ?? throw new InvalidOperationException("logo.png resource missing");
+        return Image.FromStream(stream);
+    });
+    private static Image Logo => LogoLazy.Value;
 
     private string RecordingsDir() => _config.RecordingsDir is { Length: > 0 } dir
         ? dir

@@ -22,10 +22,13 @@
     <Platform>x64</Platform>
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
+    <ApplicationIcon>Assets/app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The site's favicon, rasterized: exe icon and the tray icon's base. -->
+    <EmbeddedResource Include="Assets\logo.png" LogicalName="logo.png" />
   </ItemGroup>
 
   <ItemGroup>
