@@ -33,6 +33,23 @@ export interface Status {
   hideLp: boolean
   ranks: RankInfo[]
   job: JobStatus
+  agents: AgentInfo[]
+}
+
+export interface AgentInfo {
+  agent: string
+  version: string
+  role: string
+  paused: boolean
+  state: string
+  detail: string | null
+  lastRecordingUtc: string | null
+  youTubeReady: boolean
+  lastError: string | null
+  machine: string | null
+  user: string | null
+  seenUtc: string
+  online: boolean
 }
 
 export interface MatchSummary {

@@ -9,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddWindowsService(o => o.ServiceName = "LeagueTracker");
 builder.Services.Configure<RiotOptions>(builder.Configuration.GetSection("Riot"));
+builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection("Agent"));
 
 var riotOptions = builder.Configuration.GetSection("Riot").Get<RiotOptions>() ?? new RiotOptions();
 var dataDir = Path.IsPathRooted(riotOptions.DataDir) ? riotOptions.DataDir : Path.Combine(builder.Environment.ContentRootPath, riotOptions.DataDir);
@@ -51,6 +52,7 @@ builder.Services.AddHttpClient<DpmLpBackfillService>(c =>
     c.DefaultRequestHeaders.Add("Referer", "https://dpm.lol/");
 });
 builder.Services.AddSingleton<RenderLeaseService>();
+builder.Services.AddSingleton<AgentRegistry>();
 builder.Services.AddSingleton<VodService>();
 builder.Services.AddSingleton<LiveGameState>();
 builder.Services.AddHostedService<MatchPollerService>();
@@ -124,7 +126,7 @@ app.UseStaticFiles(staticFiles);
 
 // --- Status ---------------------------------------------------------------------
 
-app.MapGet("/api/status", async (LeagueDbContext db, LpService lp, TrackedPlayerService player, IRiotKeyProvider keys, JobStatusService jobs, ReplayArchiveService replays, CancellationToken ct) =>
+app.MapGet("/api/status", async (LeagueDbContext db, LpService lp, TrackedPlayerService player, IRiotKeyProvider keys, JobStatusService jobs, ReplayArchiveService replays, AgentRegistry agents, CancellationToken ct) =>
 {
     var solo = await lp.GetLatestAsync("Solo/Duo", ct);
     var flex = await lp.GetLatestAsync("Flex", ct);
@@ -149,6 +151,7 @@ app.MapGet("/api/status", async (LeagueDbContext db, LpService lp, TrackedPlayer
             AsOfUtc = s.TimestampUtc,
         }),
         Job = jobs.Snapshot(),
+        Agents = agents.Snapshot(),
     });
 });
 
@@ -595,6 +598,31 @@ app.MapPost("/api/render/{matchId}/fail", async (string matchId, HttpRequest req
 // waiting out the 30-minute lease.
 app.MapPost("/api/render/release-stale", (string agent, RenderLeaseService leases) =>
     Results.Ok(new { released = leases.ReleaseAgent(agent) }));
+
+// --- Agents ---------------------------------------------------------------------
+// The agents on the players' PCs are the moving parts nobody watches: they
+// announce themselves every poll, take their defaults + secrets from here (so
+// a friend's install is ServerUrl + Access token and nothing else), and pull
+// new builds from ReleaseDir - one publish on the NAS updates every machine.
+
+app.MapGet("/api/agent/profile", (AgentRegistry agents) => Results.Ok(agents.Profile));
+
+app.MapPost("/api/agent/heartbeat", (AgentHeartbeat beat, AgentRegistry agents) =>
+{
+    if (beat is not { Agent.Length: > 0 }) return Results.BadRequest("agent name required");
+    agents.Record(beat);
+    return Results.Ok(new { latest = agents.Latest()?.Version });
+});
+
+app.MapGet("/api/agent/agents", (AgentRegistry agents) => Results.Ok(agents.Snapshot()));
+
+app.MapGet("/api/agent/release", (AgentRegistry agents) =>
+    agents.Latest() is { } release ? Results.Ok(release) : Results.NoContent());
+
+app.MapGet("/api/agent/release/{file}", (string file, AgentRegistry agents) =>
+    agents.ReleasePath(file) is { } path
+        ? Results.File(path, "application/zip", file, enableRangeProcessing: true)
+        : Results.NotFound());
 
 // Re-queues the match: clears the failed marker AND deletes any existing
 // clips, so both failed and badly-rendered matches get picked up again.

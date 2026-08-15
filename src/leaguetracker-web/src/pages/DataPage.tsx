@@ -103,6 +103,31 @@ export default function DataPage() {
         </button>
       </div>
 
+      {status && status.agents.length > 0 && (
+        <div className="card">
+          <h2>Agents</h2>
+          <p className="mut" style={{ marginTop: 0 }}>
+            The recorder/render agents that report to this tracker. Recorders capture the player's own games and publish them;
+            the renderer cuts replay clips for every tracker. Each one pauses from its tray icon.
+          </p>
+          {status.agents.map(a => (
+            <p key={a.agent} style={{ margin: '4px 0' }}>
+              <span className={`badge ${a.online ? (a.paused ? 'remake' : 'win') : 'loss'}`}>
+                {a.online ? (a.paused ? 'paused' : 'online') : 'offline'}
+              </span>{' '}
+              <strong>{a.agent}</strong> <span className="mut">v{a.version} · {a.role}{a.user ? ` · ${a.user}` : ''}</span>
+              {' — '}{a.state}{a.detail ? `: ${a.detail}` : ''}
+              <span className="mut sm-text">
+                {' · '}seen {new Date(a.seenUtc).toLocaleTimeString()}
+                {a.lastRecordingUtc ? ` · last recording ${new Date(a.lastRecordingUtc).toLocaleString()}` : ''}
+                {!a.youTubeReady ? ' · YouTube not authorized' : ''}
+              </span>
+              {a.lastError && <><br /><span className="mut sm-text">last error: {a.lastError}</span></>}
+            </p>
+          ))}
+        </div>
+      )}
+
       {renderQueue.length > 0 && (
         <div className="card">
           <h2>Clip rendering</h2>
