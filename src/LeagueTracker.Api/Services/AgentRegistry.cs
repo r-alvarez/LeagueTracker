@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using LeagueTracker.Api.Accounts;
 using Microsoft.Extensions.Options;
 
 namespace LeagueTracker.Api.Services;
@@ -14,8 +15,8 @@ public sealed class AgentOptions
     public Dictionary<string, string> Profile { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// Folder holding LeagueTracker.RenderAgent-<version>.zip builds. Blank =
-    /// <DataDir>/agent-releases. Shared across the tracker containers on the
-    /// NAS so one publish updates every agent.
+    /// <Accounts:DataRoot or the default account's DataDir>/agent-releases -
+    /// process-wide, not per account.
     public string ReleaseDir { get; set; } = "";
 
     /// Mirror the newest agent build from GitHub Releases into ReleaseDir.
@@ -32,7 +33,7 @@ public sealed record AgentRelease(string Version, string File, long SizeBytes, s
 
 /// In-memory: agents re-announce every poll, so a restart just waits a
 /// minute for the picture to refill. Nothing here is worth a table.
-public sealed class AgentRegistry(IOptions<AgentOptions> options, DataPaths paths)
+public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<AccountsOptions> accounts, AccountRegistry registry, IWebHostEnvironment env)
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, (AgentHeartbeat Beat, DateTime SeenUtc)> _agents = new(StringComparer.OrdinalIgnoreCase);
@@ -40,7 +41,9 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, DataPaths path
 
     public IReadOnlyDictionary<string, string> Profile => options.Value.Profile;
 
-    public string ReleaseDir => options.Value.ReleaseDir is { Length: > 0 } dir ? dir : Path.Combine(paths.DataDir, "agent-releases");
+    public string ReleaseDir => options.Value.ReleaseDir is { Length: > 0 } dir ? dir
+        : accounts.Value.DataRoot is { Length: > 0 } root ? Path.Combine(Path.IsPathRooted(root) ? root : Path.Combine(env.ContentRootPath, root), "agent-releases")
+        : Path.Combine(registry.Default.DataDir, "agent-releases");
 
     public void Record(AgentHeartbeat beat)
     {

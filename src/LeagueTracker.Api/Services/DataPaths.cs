@@ -1,13 +1,11 @@
-using LeagueTracker.Api.Riot;
-using Microsoft.Extensions.Options;
+using LeagueTracker.Api.Accounts;
 
 namespace LeagueTracker.Api.Services;
 
-public sealed class DataPaths(IOptions<RiotOptions> options, IWebHostEnvironment env)
+/// Scoped: the bound account's folder. Everything file-shaped hangs off it.
+public sealed class DataPaths(AccountContext account)
 {
-    public string DataDir { get; } = Path.IsPathRooted(options.Value.DataDir)
-        ? options.Value.DataDir
-        : Path.Combine(env.ContentRootPath, options.Value.DataDir);
+    public string DataDir => account.DataDir;
 
     public string GamesDir => Path.Combine(DataDir, "games");
 

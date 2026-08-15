@@ -1,3 +1,4 @@
+using LeagueTracker.Api.Accounts;
 using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Riot;
 using Microsoft.EntityFrameworkCore;
@@ -9,9 +10,10 @@ namespace LeagueTracker.Api.Services;
 /// ingests every new game (match + timeline + at-game-time ranks) and attributes
 /// the exact LP change once Riot's win/loss counter confirms a single new game.
 public sealed class MatchPollerService(
-    IServiceScopeFactory scopes,
+    AccountScopes scopes,
+    AccountRegistry accounts,
     IOptions<RiotOptions> options,
-    LiveGameState live,
+    PerAccount<LiveGameState> liveStates,
     ILogger<MatchPollerService> logger) : BackgroundService
 {
     /// After a live game ends, poll fast until its match shows up - Riot takes a
@@ -20,8 +22,9 @@ public sealed class MatchPollerService(
     private static readonly TimeSpan FastCaptureDelay = TimeSpan.FromSeconds(15);
 
     private readonly RiotOptions _options = options.Value;
-    private bool _firstPass = true;
-    private DateTime _lastRetentionSweepUtc = DateTime.MinValue;
+    // Per-account pass state: first pass and the retention sweep clock.
+    private readonly HashSet<string> _passed = [];
+    private readonly Dictionary<string, DateTime> _lastRetentionSweepUtc = [];
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -30,33 +33,41 @@ public sealed class MatchPollerService(
 
         while (!ct.IsCancellationRequested)
         {
-            try
+            // Every account each pass, in turn - one Riot key, one limiter,
+            // so sequential is also the polite order.
+            foreach (var account in accounts.All)
             {
-                await RunPassAsync(ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (RiotApiKeyMissingException)
-            {
-                logger.LogWarning("No Riot API key configured yet - poller idle. Set Riot:ApiKey, RIOT_API_KEY, or Riot:ApiKeyFile.");
-            }
-            catch (RiotApiException ex) when (ex.IsAuthFailure)
-            {
-                logger.LogError("Riot API key rejected ({Status}). Refresh the key (personal keys: https://developer.riotgames.com).", ex.StatusCode);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Poll pass failed");
+                try
+                {
+                    await RunPassAsync(account, liveStates.For(account), ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (RiotApiKeyMissingException)
+                {
+                    logger.LogWarning("No Riot API key configured yet - poller idle. Set Riot:ApiKey, RIOT_API_KEY, or Riot:ApiKeyFile.");
+                    break;
+                }
+                catch (RiotApiException ex) when (ex.IsAuthFailure)
+                {
+                    logger.LogError("Riot API key rejected ({Status}). Refresh the key (personal keys: https://developer.riotgames.com).", ex.StatusCode);
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Poll pass failed for {Account}", account.Slug);
+                }
             }
 
-            var delay = live.FastCapturePending ? FastCaptureDelay : TimeSpan.FromSeconds(Math.Max(30, _options.PollSeconds));
+            var anyFast = accounts.All.Any(a => liveStates.For(a).FastCapturePending);
+            var delay = anyFast ? FastCaptureDelay : TimeSpan.FromSeconds(Math.Max(30, _options.PollSeconds));
             await Task.Delay(delay, ct);
         }
     }
 
-    private async Task CheckLiveGameAsync(string puuid, RiotApiClient riot, RankLookupService ranks, CancellationToken ct)
+    private async Task CheckLiveGameAsync(LiveGameState live, string puuid, RiotApiClient riot, RankLookupService ranks, CancellationToken ct)
     {
         string? activeRaw;
         try
@@ -117,9 +128,9 @@ public sealed class MatchPollerService(
         };
     }
 
-    private async Task RunPassAsync(CancellationToken ct)
+    private async Task RunPassAsync(Account account, LiveGameState live, CancellationToken ct)
     {
-        using var scope = scopes.CreateScope();
+        using var scope = scopes.Create(account);
         var db = scope.ServiceProvider.GetRequiredService<LeagueDbContext>();
         var riot = scope.ServiceProvider.GetRequiredService<RiotApiClient>();
         var ingest = scope.ServiceProvider.GetRequiredService<MatchIngestService>();
@@ -128,21 +139,20 @@ public sealed class MatchPollerService(
 
         var puuid = await player.GetPuuidAsync(ct);
 
-        await CheckLiveGameAsync(puuid, riot, scope.ServiceProvider.GetRequiredService<RankLookupService>(), ct);
+        await CheckLiveGameAsync(live, puuid, riot, scope.ServiceProvider.GetRequiredService<RankLookupService>(), ct);
 
         // Full-game renders are big; expire unkept ones on a slow cadence.
-        if (DateTime.UtcNow - _lastRetentionSweepUtc > TimeSpan.FromHours(6))
+        if (DateTime.UtcNow - _lastRetentionSweepUtc.GetValueOrDefault(account.Slug) > TimeSpan.FromHours(6))
         {
-            _lastRetentionSweepUtc = DateTime.UtcNow;
+            _lastRetentionSweepUtc[account.Slug] = DateTime.UtcNow;
             var swept = scope.ServiceProvider.GetRequiredService<FullGameService>().SweepRetention(_options.FullGameRetentionDays);
             if (swept > 0) logger.LogInformation("Retention: deleted {Count} unkept full-game render(s) older than {Days} days", swept, _options.FullGameRetentionDays);
         }
 
         // Service (re)start: grab whatever of the last games' replays is still on
         // offer - the window is ~5 games, so an offline stretch can't be recovered later.
-        if (_firstPass)
+        if (_passed.Add(account.Slug))
         {
-            _firstPass = false;
             await scope.ServiceProvider.GetRequiredService<ReplayArchiveService>().SweepAsync(puuid, ct);
         }
 

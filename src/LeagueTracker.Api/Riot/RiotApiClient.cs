@@ -1,15 +1,16 @@
 using System.Text.Json;
-using Microsoft.Extensions.Options;
+using LeagueTracker.Api.Accounts;
 
 namespace LeagueTracker.Api.Riot;
 
-public sealed class RiotApiClient(HttpClient http, IOptions<RiotOptions> options)
+/// Routing follows the bound account (region/platform); the key and the
+/// rate limiter are shared by every account, as they are on Riot's side.
+public sealed class RiotApiClient(HttpClient http, AccountContext account)
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
-    private readonly RiotOptions _options = options.Value;
 
-    private string RegionalBase => $"https://{_options.Region}.api.riotgames.com";
-    private string PlatformBase => $"https://{_options.Platform}.api.riotgames.com";
+    private string RegionalBase => $"https://{account.Current.Region}.api.riotgames.com";
+    private string PlatformBase => $"https://{account.Current.Platform}.api.riotgames.com";
 
     public async Task<AccountDto> GetAccountAsync(string gameName, string tagLine, CancellationToken ct) =>
         JsonSerializer.Deserialize<AccountDto>(

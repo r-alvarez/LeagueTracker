@@ -1,14 +1,13 @@
+using LeagueTracker.Api.Accounts;
 using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Riot;
-using Microsoft.Extensions.Options;
 
 namespace LeagueTracker.Api.Services;
 
-public sealed class TrackedPlayerService(LeagueDbContext db, RiotApiClient riot, IOptions<RiotOptions> options)
+public sealed class TrackedPlayerService(LeagueDbContext db, RiotApiClient riot, AccountContext account)
 {
-    private readonly RiotOptions _options = options.Value;
-
-    public string RiotId => $"{_options.GameName}#{_options.TagLine}";
+    public Account Account => account.Current;
+    public string RiotId => Account.RiotId;
 
     private string CacheKey => $"puuid:{RiotId}";
 
@@ -18,9 +17,9 @@ public sealed class TrackedPlayerService(LeagueDbContext db, RiotApiClient riot,
     {
         if (await db.KeyValues.FindAsync([CacheKey], ct) is { } cached) return cached.Value;
 
-        var account = await riot.GetAccountAsync(_options.GameName, _options.TagLine, ct);
-        await StorePuuidAsync(account.Puuid, ct);
-        return account.Puuid;
+        var resolved = await riot.GetAccountAsync(Account.GameName, Account.TagLine, ct);
+        await StorePuuidAsync(resolved.Puuid, ct);
+        return resolved.Puuid;
     }
 
     /// Lets the importer seed the puuid it inferred from export files, so imports
