@@ -40,6 +40,10 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, (AgentHeartbeat Beat, DateTime SeenUtc)> _agents = new(StringComparer.OrdinalIgnoreCase);
+    // The last error the owner has acknowledged, per agent - hidden until a
+    // different one arrives (in memory: a dismissed transient never matters
+    // after a restart).
+    private readonly Dictionary<string, string> _dismissedError = new(StringComparer.OrdinalIgnoreCase);
     private (string Path, DateTime ModifiedUtc, string Sha)? _shaCache;
 
     public IReadOnlyDictionary<string, string> Profile => options.Value.Profile;
@@ -53,6 +57,17 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
         lock (_gate) _agents[beat.Agent] = (beat, DateTime.UtcNow);
     }
 
+    /// Hide the agent's current last error until a different one comes in.
+    public bool DismissError(string agent)
+    {
+        lock (_gate)
+        {
+            if (!_agents.TryGetValue(agent, out var a) || a.Beat.LastError is not { Length: > 0 } error) return false;
+            _dismissedError[agent] = error;
+            return true;
+        }
+    }
+
     public List<object> Snapshot()
     {
         lock (_gate)
@@ -60,7 +75,9 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
             return [.. _agents.Values.OrderBy(a => a.Beat.Agent).Select(a => (object)new
             {
                 a.Beat.Agent, a.Beat.Version, a.Beat.Role, a.Beat.Paused, a.Beat.State, a.Beat.Detail,
-                a.Beat.LastRecordingUtc, a.Beat.YouTubeReady, a.Beat.LastError, a.Beat.Machine, a.Beat.User,
+                a.Beat.LastRecordingUtc, a.Beat.YouTubeReady,
+                LastError = _dismissedError.TryGetValue(a.Beat.Agent, out var d) && d == a.Beat.LastError ? null : a.Beat.LastError,
+                a.Beat.Machine, a.Beat.User,
                 SeenUtc = a.SeenUtc,
                 // Two missed polls = gone. The agent polls every 60s.
                 Online = DateTime.UtcNow - a.SeenUtc < TimeSpan.FromMinutes(3),

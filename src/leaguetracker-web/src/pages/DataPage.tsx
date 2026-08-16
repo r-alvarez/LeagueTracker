@@ -20,6 +20,9 @@ export default function DataPage() {
   // Failed renders grouped by their (normalised) reason: the same patch-mismatch
   // or sim-hang message repeats across many games, so one row per reason with
   // the games listed beats a comma-soup paragraph.
+  const reloadRenderQueue = () => api.renderQueue().then(setRenderQueue).catch(() => setRenderQueue([]))
+  const reloadStatus = () => api.status().then(setStatus).catch(console.error)
+
   const failedGroups = (() => {
     const groups = new Map<string, RenderQueueRow[]>()
     for (const r of renderQueue) {
@@ -32,7 +35,7 @@ export default function DataPage() {
 
   useEffect(() => {
     api.status().then(s => { setStatus(s); setJob(s.job) }).catch(console.error)
-    api.renderQueue().then(setRenderQueue).catch(() => setRenderQueue([]))
+    reloadRenderQueue()
     api.storage().then(setStorage).catch(() => setStorage(null))
     return () => { if (pollTimer.current) window.clearInterval(pollTimer.current) }
   }, [])
@@ -152,7 +155,11 @@ export default function DataPage() {
                   {!a.youTubeReady && <div><dt>YouTube</dt><dd className="warn-text">not authorized</dd></div>}
                 </dl>
                 {a.lastError && (
-                  <div className="agent-error"><span className="agent-error-label">Last error</span>{a.lastError}</div>
+                  <div className="agent-error">
+                    <span className="agent-error-label">Last error</span>{a.lastError}
+                    <button className="dismiss-x" title="Dismiss (comes back only if a new error appears)"
+                      onClick={async () => { await api.dismissAgentError(a.agent); reloadStatus() }}>✕</button>
+                  </div>
                 )}
               </div>
             ))}
@@ -191,12 +198,20 @@ export default function DataPage() {
                     <tbody>
                       {failedGroups.map(g => (
                         <tr key={g.reason}>
-                          <td className="reason">{g.reason}</td>
+                          <td className="reason">
+                            {g.reason}
+                            <button className="dismiss-x" title={`Dismiss all ${g.rows.length}`}
+                              onClick={async () => { for (const r of g.rows) await api.dismissRender(r.matchId, r.kind); reloadRenderQueue() }}>✕ all</button>
+                          </td>
                           <td className="games"><div className="games-list">
                             {g.rows.map(r => (
-                              <Link key={r.matchId} to={`/matches/${r.matchId}`} title={r.matchId}>
-                                {r.champion} · {new Date(r.gameEndUtc).toLocaleDateString()}
-                              </Link>
+                              <span key={r.matchId} className="failed-game">
+                                <Link to={`/matches/${r.matchId}`} title={r.matchId}>
+                                  {r.champion} · {new Date(r.gameEndUtc).toLocaleDateString()}
+                                </Link>
+                                <button className="dismiss-x" title="Dismiss - a dead render (won't retry). Retry it from the match page to bring it back."
+                                  onClick={async () => { await api.dismissRender(r.matchId, r.kind); reloadRenderQueue() }}>✕</button>
+                              </span>
                             ))}
                           </div></td>
                         </tr>

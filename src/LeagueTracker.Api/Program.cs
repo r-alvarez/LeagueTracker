@@ -252,6 +252,9 @@ app.MapGet("/api/agent/accounts", (AccountRegistry registry) => Results.Ok(new
     Accounts = registry.All.Select(AccountView),
 }));
 
+app.MapPost("/api/agents/dismiss-error", (string agent, AgentRegistry agents) =>
+    agents.DismissError(agent) ? Results.Ok() : Results.NotFound());
+
 app.MapGet("/api/agents", (AgentKeyStore keys) => Results.Ok(keys.All.Select(r => new
 {
     r.Id, r.Name, r.Machine, Status = r.Status.ToString().ToLowerInvariant(), r.CreatedUtc, r.DecidedUtc, r.LastSeenUtc, r.LastIp, r.Note,
@@ -763,6 +766,9 @@ api.MapPost("/render/release-stale", (string agent, RenderLeaseService leases) =
 
 // Re-queues the match: clears the failed marker AND deletes any existing
 // clips, so both failed and badly-rendered matches get picked up again.
+api.MapPost("/render/{matchId}/dismiss", (string matchId, ClipService clips, FullGameService full, string kind = "clips") =>
+    (kind is "full" ? full.Dismiss(matchId) : clips.Dismiss(matchId)) ? Results.Ok() : Results.NotFound());
+
 api.MapPost("/render/{matchId}/retry", (string matchId, ClipService clips, FullGameService full, string kind = "clips") =>
 {
     if (kind is "full") full.Request(matchId);

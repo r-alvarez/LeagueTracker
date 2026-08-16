@@ -236,7 +236,22 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         if (DirFor(matchId) is not { } dir) return;
         var marker = Path.Combine(dir, "render-failed.json");
         if (File.Exists(marker)) File.Delete(marker);
+        var dismissed = Path.Combine(dir, "render-dismissed");
+        if (File.Exists(dismissed)) File.Delete(dismissed);
     }
+
+    /// Acknowledge a dead render (patch mismatch, replay sim-hang - things a
+    /// retry can never fix): keep the fail marker so render/next still skips
+    /// it, but hide it from the queue and its counts. Retry lifts it.
+    public bool Dismiss(string matchId)
+    {
+        if (DirFor(matchId) is not { } dir || FailReason(matchId) is null) return false;
+        File.WriteAllText(Path.Combine(dir, "render-dismissed"), DateTime.UtcNow.ToString("o"));
+        return true;
+    }
+
+    public bool IsDismissed(string matchId) =>
+        DirFor(matchId) is { } dir && File.Exists(Path.Combine(dir, "render-dismissed"));
 
     /// Drops rendered clips so the match re-qualifies for the render queue,
     /// and the plan with them: nothing is pinned to the old window indices any
@@ -284,6 +299,7 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         foreach (var m in matches)
         {
             var failed = FailReason(m.Id);
+            if (failed is not null && IsDismissed(m.Id)) continue; // dealt with - off the board
             // The saved plan is the manifest existing clips were rendered
             // against; only never-claimed matches need a fresh plan.
             var plan = await LoadPlanAsync(m.Id, ct) ?? (m.HasTimeline ? await PlanAsync(m.Id, ct) : null);

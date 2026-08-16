@@ -48,6 +48,8 @@ export const api = {
   toggleFullGameKeep: (id: string) => post<FullGameStatus>(`/api/matches/${id}/fullgame/keep`),
   deleteFullGame: async (id: string) => { await fetch(account.apiUrl(`/api/matches/${id}/fullgame`), { method: 'DELETE' }) },
   retryRender: async (id: string, kind: 'clips' | 'full') => { await fetch(account.apiUrl(`/api/render/${id}/retry?kind=${kind}`), { method: 'POST' }) },
+  dismissRender: async (id: string, kind: 'clips' | 'full') => { await fetch(account.apiUrl(`/api/render/${id}/dismiss?kind=${kind}`), { method: 'POST' }) },
+  dismissAgentError: async (agent: string) => { await fetch(`/api/agents/dismiss-error?agent=${encodeURIComponent(agent)}`, { method: 'POST' }) },
   storage: () => get<StorageInfo>('/api/storage'),
   lens: async (opts: { window?: number; days?: number; role?: string }): Promise<LensResponse | null> => {
     const params = new URLSearchParams()

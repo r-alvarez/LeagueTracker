@@ -50,6 +50,7 @@ public sealed class FullGameService(LeagueDbContext db, ReplayArchiveService rep
         if (File.Exists(Mp4(matchId))) return null;   // already rendered - nothing to do
         Directory.CreateDirectory(Root);
         File.Delete(FailMarker(matchId));
+        if (File.Exists(DismissMarker(matchId))) File.Delete(DismissMarker(matchId));
         if (!File.Exists(RequestMarker(matchId))) File.WriteAllText(RequestMarker(matchId), DateTime.UtcNow.ToString("o"));
         return null;
     }
@@ -92,6 +93,15 @@ public sealed class FullGameService(LeagueDbContext db, ReplayArchiveService rep
         }
     }
 
+    private string DismissMarker(string matchId) => FailMarker(matchId) + ".dismissed";
+    public bool IsDismissed(string matchId) => ValidId(matchId) && File.Exists(DismissMarker(matchId));
+    public bool Dismiss(string matchId)
+    {
+        if (FailReason(matchId) is null) return false;
+        File.WriteAllText(DismissMarker(matchId), DateTime.UtcNow.ToString("o"));
+        return true;
+    }
+
     public void MarkFailed(string matchId, string error)
     {
         if (!ValidId(matchId)) return;
@@ -117,10 +127,12 @@ public sealed class FullGameService(LeagueDbContext db, ReplayArchiveService rep
             .Distinct().ToList();
         if (ids is not { Count: > 0 }) return [];
 
-        var matches = await db.Matches.AsNoTracking()
+        var matches = (await db.Matches.AsNoTracking()
             .Where(m => ids.Contains(m.Id))
             .Select(m => new { m.Id, m.Champion, m.GameEndUtc })
-            .ToListAsync(ct);
+            .ToListAsync(ct))
+            .Where(m => !(FailReason(m.Id) is not null && IsDismissed(m.Id)))
+            .ToList();
         return [.. matches.OrderByDescending(m => m.GameEndUtc).Select(m => (object)new
         {
             MatchId = m.Id,
