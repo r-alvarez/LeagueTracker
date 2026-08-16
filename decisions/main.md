@@ -1291,3 +1291,16 @@ transition and for machines that must skip approval), and the join code
 became optional pre-fill instead of a credential carrier. Ruben's
 verdict on the alternatives: a shared token was "A now", this was "B
 next"; per-machine tokens were never the answer.
+
+## 2026-08-16 — Data page: agents, clip rendering and storage stop being sentences
+
+**Structure over prose.** The agent line, the render counts and the
+storage figures were inline sentences separated by dots, and the failed
+render list was one comma-joined paragraph of match ids - Ruben read the
+whole block as "text bunched up together". Agents are now cards (status +
+name, state line, seen / last recording as a definition list, last error
+in its own tinted box); render counts and storage are small tiles;
+failed renders hide behind a toggle and group by reason ("window(s) N
+skipped" normalised so the sim-hang cases collapse to one row) with the
+games as champion · date chips linking to the match page - the ids alone
+were unreadable anyway.

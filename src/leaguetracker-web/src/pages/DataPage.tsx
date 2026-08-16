@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { account } from '../account'
 import AgentJoin from '../components/AgentJoin'
 import AgentApprovals from '../components/AgentApprovals'
@@ -14,6 +15,20 @@ export default function DataPage() {
   // /imports (see docker-compose.override.yml); host runs use Windows paths.
   const [importPath, setImportPath] = useState('/imports')
   const pollTimer = useRef<number | null>(null)
+  const [showFailed, setShowFailed] = useState(false)
+
+  // Failed renders grouped by their (normalised) reason: the same patch-mismatch
+  // or sim-hang message repeats across many games, so one row per reason with
+  // the games listed beats a comma-soup paragraph.
+  const failedGroups = (() => {
+    const groups = new Map<string, RenderQueueRow[]>()
+    for (const r of renderQueue) {
+      if (r.status !== 'failed') continue
+      const reason = (r.error ?? 'unknown error').replace(/window\(s\) [\d, ]+ skipped/, 'some windows skipped')
+      groups.set(reason, [...(groups.get(reason) ?? []), r])
+    }
+    return [...groups.entries()].map(([reason, rows]) => ({ reason, rows })).sort((a, b) => b.rows.length - a.rows.length)
+  })()
 
   useEffect(() => {
     api.status().then(s => { setStatus(s); setJob(s.job) }).catch(console.error)
@@ -117,21 +132,31 @@ export default function DataPage() {
             The recorder/render agents that report to this tracker. Recorders capture the player's own games and publish them;
             the renderer cuts replay clips for every tracker. Each one pauses from its tray icon.
           </p>
-          {status.agents.map(a => (
-            <p key={a.agent} style={{ margin: '4px 0' }}>
-              <span className={`badge ${a.online ? (a.paused ? 'remake' : 'win') : 'loss'}`}>
-                {a.online ? (a.paused ? 'paused' : 'online') : 'offline'}
-              </span>{' '}
-              <strong>{a.agent}</strong> <span className="mut">v{a.version} · {a.role}{a.user ? ` · ${a.user}` : ''}</span>
-              {' — '}{a.state}{a.detail ? `: ${a.detail}` : ''}
-              <span className="mut sm-text">
-                {' · '}seen {new Date(a.seenUtc).toLocaleTimeString()}
-                {a.lastRecordingUtc ? ` · last recording ${new Date(a.lastRecordingUtc).toLocaleString()}` : ''}
-                {!a.youTubeReady ? ' · YouTube not authorized' : ''}
-              </span>
-              {a.lastError && <><br /><span className="mut sm-text">last error: {a.lastError}</span></>}
-            </p>
-          ))}
+          <div className="agent-list">
+            {status.agents.map(a => (
+              <div key={a.agent} className="agent-row">
+                <div className="agent-head">
+                  <span className={`badge ${a.online ? (a.paused ? 'remake' : 'win') : 'loss'}`}>
+                    {a.online ? (a.paused ? 'paused' : 'online') : 'offline'}
+                  </span>
+                  <strong>{a.agent}</strong>
+                  <span className="mut sm-text">v{a.version} · {a.role}{a.user ? ` · ${a.user}` : ''}</span>
+                </div>
+                <div className="agent-state">
+                  <span className="agent-state-name">{a.state}</span>
+                  {a.detail && <span className="mut"> — {a.detail}</span>}
+                </div>
+                <dl className="agent-meta">
+                  <div><dt>Seen</dt><dd>{new Date(a.seenUtc).toLocaleTimeString()}</dd></div>
+                  {a.lastRecordingUtc && <div><dt>Last recording</dt><dd>{new Date(a.lastRecordingUtc).toLocaleString()}</dd></div>}
+                  {!a.youTubeReady && <div><dt>YouTube</dt><dd className="warn-text">not authorized</dd></div>}
+                </dl>
+                {a.lastError && (
+                  <div className="agent-error"><span className="agent-error-label">Last error</span>{a.lastError}</div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -142,17 +167,45 @@ export default function DataPage() {
             Each archived replay gets its kill/death moments cut into mp4 clips by the render agent on the gaming PC
             (it drives the game client's replay mode). Clips appear on the match pages as they land.
           </p>
-          <p style={{ margin: 0 }}>
+          <div className="status-tiles">
             {(['pending', 'partial', 'rendering', 'done', 'failed'] as const).map(s => {
               const n = renderQueue.filter(r => r.status === s).length
-              return n > 0 ? <span key={s} style={{ marginRight: 14 }}><strong>{n}</strong> {s}</span> : null
+              return n > 0 ? (
+                <div key={s} className={`tile status-tile ${s}`}>
+                  <div className="value">{n}</div>
+                  <div className="label">{s}</div>
+                </div>
+              ) : null
             })}
             {renderQueue.every(r => r.status === 'no-events') && <span className="mut">nothing to render yet</span>}
-          </p>
-          {renderQueue.some(r => r.status === 'failed') && (
-            <p className="mut sm-text" style={{ marginBottom: 0 }}>
-              failed: {renderQueue.filter(r => r.status === 'failed').map(r => `${r.matchId} (${r.error})`).join(', ')}
-            </p>
+          </div>
+          {failedGroups.length > 0 && (
+            <div className="render-failed">
+              <button className="kpi-toggle" onClick={() => setShowFailed(v => !v)}>
+                {showFailed ? 'Hide' : 'Show'} failed renders ({failedGroups.reduce((n, g) => n + g.rows.length, 0)})
+              </button>
+              {showFailed && (
+                <div className="table-scroll">
+                  <table className="data render-failed-table">
+                    <thead><tr><th>Reason</th><th>Games</th></tr></thead>
+                    <tbody>
+                      {failedGroups.map(g => (
+                        <tr key={g.reason}>
+                          <td className="reason">{g.reason}</td>
+                          <td className="games"><div className="games-list">
+                            {g.rows.map(r => (
+                              <Link key={r.matchId} to={`/matches/${r.matchId}`} title={r.matchId}>
+                                {r.champion} · {new Date(r.gameEndUtc).toLocaleDateString()}
+                              </Link>
+                            ))}
+                          </div></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -164,14 +217,15 @@ export default function DataPage() {
             What the tracker's data folder holds. Clips are small and permanent; full-game renders are the heavy tier
             and expire automatically unless marked keep on their match page.
           </p>
-          <p style={{ margin: 0, display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+          <div className="status-tiles">
             {([['raw games', storage.rawGamesMb], ['replays', storage.replaysMb], ['clips', storage.clipsMb],
               ['full games', storage.fullGamesMb], ['database', storage.databaseMb]] as const).map(([label, mb]) => (
-              <span key={label} style={{ whiteSpace: 'nowrap' }}>
-                <strong>{mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`}</strong> <span className="mut">{label}</span>
-              </span>
+              <div key={label} className="tile status-tile">
+                <div className="value">{mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`}</div>
+                <div className="label">{label}</div>
+              </div>
             ))}
-          </p>
+          </div>
         </div>
       )}
 
@@ -188,9 +242,8 @@ export default function DataPage() {
       <div className="card">
         <h2>Exports</h2>
         <p className="mut" style={{ marginTop: 0 }}>
-          Download .zip mirrors everything on the screens: per-game stats, the full Riot challenges block, lane
-          checkpoints, all-10 loadouts, deaths, the objective timeline, LP history, and <code>dashboard.json</code>
-          (the computed dashboard views over all games) - for the coaching workflows.
+          The .zip bundles every table below plus <code>dashboard.json</code> (the computed dashboard views over all
+          games) - for the coaching workflows. Or grab a single CSV.
         </p>
         <div className="filters" style={{ margin: 0, flexWrap: 'wrap' }}>
           <a className="action primary" href={account.apiUrl('/api/export/all.zip')} download>Download .zip</a>
