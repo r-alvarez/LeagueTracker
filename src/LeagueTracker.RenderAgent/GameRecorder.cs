@@ -157,6 +157,12 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         while (!ct.IsCancellationRequested)
         {
             if (RenderAgent.StopRequested) { Log.Info("stop.requested found - recorder exiting"); return; }
+            // The tracker's profile (YouTube credentials above all) can land
+            // after this loop began, and an agent that has never recorded
+            // would otherwise report its startup guess forever. Re-reading is
+            // cheap - _youtube.Enabled re-checks the live config each time.
+            AgentStatus.YouTubeReady = _youtube.Enabled;
+
             try
             {
                 var phase = await PhaseAsync(ct);
