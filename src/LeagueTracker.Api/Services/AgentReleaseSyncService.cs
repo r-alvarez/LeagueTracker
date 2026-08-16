@@ -45,6 +45,7 @@ public sealed class AgentReleaseSyncService(
         }
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
         (Version Version, string Name, string Url, long Size)? best = null;
+        var installers = new Dictionary<Version, (string Name, string Url, long Size)>();
         foreach (var release in doc.RootElement.EnumerateArray())
         {
             if (release.TryGetProperty("draft", out var draft) && draft.GetBoolean()) continue;
@@ -52,6 +53,11 @@ public sealed class AgentReleaseSyncService(
             foreach (var asset in assets.EnumerateArray())
             {
                 var name = asset.GetProperty("name").GetString() ?? "";
+                if (name.StartsWith("LeagueTracker.Agent-Setup-") && name.EndsWith(".exe") && Version.TryParse(name["LeagueTracker.Agent-Setup-".Length..^4], out var iv))
+                {
+                    installers[iv] = (name, asset.GetProperty("browser_download_url").GetString() ?? "", asset.GetProperty("size").GetInt64());
+                    continue;
+                }
                 if (!name.StartsWith("LeagueTracker.RenderAgent-") || !name.EndsWith(".zip")) continue;
                 if (!Version.TryParse(name["LeagueTracker.RenderAgent-".Length..^4], out var version)) continue;
                 if (best is null || version > best.Value.Version)
@@ -85,6 +91,35 @@ public sealed class AgentReleaseSyncService(
         File.Move(partial, target, overwrite: true);
         log.LogInformation("Agent {Version} is now in {Dir}; agents update when idle", best.Value.Version, registry.ReleaseDir);
 
+        // The installer beside it, best-effort: new machines download it from
+        // the Data page; installed agents never need it.
+        if (installers.TryGetValue(best.Value.Version, out var setup))
+        {
+            var setupTarget = Path.Combine(registry.ReleaseDir, setup.Name);
+            if (!File.Exists(setupTarget) || new FileInfo(setupTarget).Length != setup.Size)
+            {
+                try
+                {
+                    var setupPartial = setupTarget + ".partial";
+                    using var download = await client.GetAsync(setup.Url, HttpCompletionOption.ResponseHeadersRead, ct);
+                    download.EnsureSuccessStatusCode();
+                    await using (var source = await download.Content.ReadAsStreamAsync(ct))
+                    await using (var file = File.Create(setupPartial))
+                    {
+                        await source.CopyToAsync(file, ct);
+                    }
+                    File.Move(setupPartial, setupTarget, overwrite: true);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("Installer for {Version} not mirrored: {Message}", best.Value.Version, ex.Message); }
+            }
+        }
+
+        foreach (var oldSetup in Directory.EnumerateFiles(registry.ReleaseDir, "LeagueTracker.Agent-Setup-*.exe")
+                     .Select(f => (Path: f, Version: ParseVersion(f)))
+                     .Where(f => f.Version is not null && f.Version < best.Value.Version))
+        {
+            try { File.Delete(oldSetup.Path); } catch { /* next time */ }
+        }
         foreach (var old in Directory.EnumerateFiles(registry.ReleaseDir, "LeagueTracker.RenderAgent-*.zip")
                      .Select(f => (Path: f, Version: ParseVersion(f)))
                      .Where(f => f.Version is not null)

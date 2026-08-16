@@ -45,14 +45,20 @@ jobs:
           "$bin" >> $env:GITHUB_PATH
           & (Join-Path $bin ffmpeg.exe) -version | Select-Object -First 1
 
-      - name: Build and zip
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build zip and installer
         id: build
         shell: pwsh
         run: |
           .\deploy\publish-agent.ps1
           $zip = Get-ChildItem src\LeagueTracker.RenderAgent\bin\LeagueTracker.RenderAgent-*.zip | Select-Object -First 1
           $version = $zip.BaseName -replace '^.*-', ''
+          $setup = Get-ChildItem src\LeagueTracker.RenderAgent\bin\LeagueTracker.Agent-Setup-*.exe | Select-Object -First 1
+          if (-not $setup) { throw "installer missing" }
           "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
+          "setup=$($setup.FullName)" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
 
       - name: Release
@@ -60,6 +66,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "agent-${{ steps.build.outputs.version }}" "${{ steps.build.outputs.zip }}" `
+          gh release create "agent-${{ steps.build.outputs.version }}" "${{ steps.build.outputs.zip }}" "${{ steps.build.outputs.setup }}" `
             --title "Agent ${{ steps.build.outputs.version }}" `
-            --notes "Render/recorder agent build from ${{ github.sha }}. Trackers pick it up automatically; agents update when idle."
+            --notes "Render/recorder agent build from ${{ github.sha }}. Setup.exe for new machines (per-user, no admin); the zip is what installed agents update themselves from."

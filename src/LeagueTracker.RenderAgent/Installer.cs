@@ -11,6 +11,8 @@ public static class Installer
 {
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "LeagueTrackerAgent";
+    private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\LeagueTrackerAgent";
+    private const string DisplayName = "LeagueTracker Agent";
 
     private static string ExePath => Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "LeagueTracker.RenderAgent.exe");
 
@@ -65,7 +67,8 @@ public static class Installer
         {
             key.SetValue(ValueName, $"\"{ExePath}\"");
         }
-        Log.Info($"Installed: runs at logon ({RunKey}\\{ValueName})");
+        RegisterAsApp();
+        Log.Info($"Installed: runs at logon ({RunKey}\\{ValueName}), listed in Settings > Apps, Start Menu shortcut");
 
         // A running agent restarts so the new settings take: stop sentinel,
         // then a detached cmd relaunches once it has gone.
@@ -81,16 +84,78 @@ public static class Installer
         return problems is { Count: > 0 } ? 1 : 0;
     }
 
+    /// What makes Windows treat the folder as an installed app: a Start Menu
+    /// shortcut (Start search finds it, with the bolt icon) and an entry in
+    /// Settings > Apps with version and a working Uninstall - all per-user,
+    /// no admin, no MSI. Idempotent: every --install refreshes them, so a
+    /// self-updated agent's version stays right after its next setup.
+    /// Present when Setup.exe (Inno) put the files here: it owns the Start
+    /// Menu and Settings > Apps entries then, and its uninstaller calls
+    /// --uninstall --quiet.
+    private static bool InstalledBySetup => File.Exists(Path.Combine(AppContext.BaseDirectory, "setup.installed"));
+    private static bool Quiet => Environment.GetCommandLineArgs().Contains("--quiet");
+
+    private static void RegisterAsApp()
+    {
+        if (InstalledBySetup) return;
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(UninstallKey);
+            key.SetValue("DisplayName", DisplayName);
+            key.SetValue("DisplayVersion", AgentConfig.Version);
+            key.SetValue("Publisher", "LeagueTracker");
+            key.SetValue("DisplayIcon", ExePath);
+            key.SetValue("InstallLocation", AppContext.BaseDirectory.TrimEnd('\\'));
+            key.SetValue("UninstallString", $"\"{ExePath}\" --uninstall");
+            key.SetValue("ModifyPath", $"\"{ExePath}\" --setup");
+            key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
+            key.SetValue("InstallDate", DateTime.Now.ToString("yyyyMMdd"));
+            key.SetValue("EstimatedSize", (int)(new DirectoryInfo(AppContext.BaseDirectory).EnumerateFiles().Sum(f => f.Length) / 1024), RegistryValueKind.DWord);
+        }
+        catch (Exception ex) { Log.Warn($"Could not register in Settings > Apps: {ex.Message}"); }
+
+        try
+        {
+            var shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
+            dynamic shortcut = ((dynamic)shell).CreateShortcut(ShortcutPath);
+            shortcut.TargetPath = ExePath;
+            shortcut.Arguments = "--setup";
+            shortcut.WorkingDirectory = AppContext.BaseDirectory;
+            shortcut.IconLocation = ExePath + ",0";
+            shortcut.Description = "LeagueTracker agent settings";
+            shortcut.Save();
+        }
+        catch (Exception ex) { Log.Warn($"Could not create the Start Menu shortcut: {ex.Message}"); }
+    }
+
+    private static void UnregisterAsApp()
+    {
+        if (InstalledBySetup) return;
+        try { Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, throwOnMissingSubKey: false); } catch { /* best-effort */ }
+        try { File.Delete(ShortcutPath); } catch { /* best-effort */ }
+    }
+
+    private static string ShortcutPath =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), DisplayName + ".lnk");
+
     public static int Uninstall()
     {
         using (var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true))
         {
             key?.DeleteValue(ValueName, throwOnMissingValue: false);
         }
+        UnregisterAsApp();
         // Ask any running copy to stop the polite way (finish/postpone first).
         var running = OtherInstance(ExePath) is not null;
         if (running) File.WriteAllText(RenderAgent.StopSentinelPath, "uninstall");
         Log.Info("Uninstalled: no longer runs at logon" + (running ? "; the running agent is stopping" : ""));
+        if (running && Quiet)
+        {
+            // Setup's uninstaller is about to delete the files: give the agent
+            // its moment to stop first (its loops honour the sentinel).
+            for (var i = 0; i < 60 && OtherInstance(ExePath) is not null; i++) Thread.Sleep(1000);
+        }
+        if (Quiet) return 0;
         MessageBox.Show("LeagueTracker agent removed from startup" + (running ? " - the running agent stops as soon as it is idle." : ".") +
                         "\n\nRecordings and settings stay where they are.", "LeagueTracker agent", MessageBoxButtons.OK, MessageBoxIcon.Information);
         return 0;

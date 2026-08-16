@@ -72,5 +72,20 @@ if ($ReleaseDir) {
         Select-Object -Skip ($Keep + 1) |
         ForEach-Object { Remove-Item $_.FullName -Force; Write-Host "  pruned $($_.Name)" }
 }
+# Setup.exe when Inno Setup is around (always in CI; locally: winget install JRSoftware.InnoSetup).
+# Per-user installer: Start Menu, Settings > Apps, the agent's setup window at the end.
+$iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+if (-not $iscc) { $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+if ($iscc) {
+    $binDir = Join-Path $root "src/LeagueTracker.RenderAgent/bin"
+    & $iscc "/DAppVersion=$version" "/DSourceDir=$out" "/DOutDir=$binDir" (Join-Path $root "deploy/agent-setup.iss")
+    if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
+    $setup = Join-Path $binDir "LeagueTracker.Agent-Setup-$version.exe"
+    Write-Host "  $setup ($([math]::Round((Get-Item $setup).Length / 1MB)) MB)"
+    if ($ReleaseDir) { Copy-Item $setup (Join-Path $ReleaseDir ([IO.Path]::GetFileName($setup))) -Force }
+} else {
+    Write-Warning "Inno Setup (ISCC) not found - no Setup.exe built, zip only"
+}
+
 Remove-Item $out -Recurse -Force
 Write-Host "Done - agents pick up $version on their next hourly check (or heartbeat hint), when idle."

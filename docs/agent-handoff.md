@@ -79,9 +79,14 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
 
 ## C. Per player's PC (5 minutes, no admin rights, nothing to hand out)
 
-1. **Download agent** from the site (Data & sync → Get the agent) or the
-   GitHub release; unzip anywhere (e.g. `C:\LeagueTrackerAgent`).
-2. Double-click `LeagueTracker.RenderAgent.exe` → the setup window: tracker
+1. **Download installer** from the site (Data & sync → Get the agent) or the
+   GitHub release (`LeagueTracker.Agent-Setup-<version>.exe`; the zip is the
+   portable alternative - unzip anywhere and double-click the exe). Run it:
+   per-user install under `%LocalAppData%\Programs\LeagueTracker Agent`, no
+   admin, Start Menu + Settings › Apps entries; Windows SmartScreen may warn
+   once (unsigned).
+2. The installer ends in the setup window (later: Start → LeagueTracker Agent,
+   or the tray's Settings…): tracker
    URL `https://league.rjav-tech.co.uk`, role Recorder, optional recordings
    folder and title prefix. **No token.** **Test connection** enrols the
    machine and says "waiting for approval"; **Save**. (A join code from the
@@ -125,7 +130,9 @@ is up on that box; the gaming PCs are never used for rendering again.
   tracker fills the rest.
 - **Renderer conflict:** two agents that both render would fight over the
   replay client on the same PC - never set `RenderReplays` on two agents on
-  one machine. Different machines are fine (leases are per tracker).
+  one machine. Different machines are fine (leases are per tracker). Same
+  rule for two *installs*: don't run Setup.exe on a PC that already has the
+  portable agent (Ruben's `E:\LeagueTrackerAgent`) - one folder per machine.
 - **Same game, two players:** each player's tracker holds the match with its
   own `IsMe`; both recorders publish their own VOD to their own match page;
   the renderer may cut the same fight twice (once per tracker) - harmless.

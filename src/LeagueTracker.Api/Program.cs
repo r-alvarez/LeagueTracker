@@ -276,7 +276,7 @@ app.MapGet("/api/agent/release", (AgentRegistry agents) =>
 
 app.MapGet("/api/agent/release/{file}", (string file, AgentRegistry agents) =>
     agents.ReleasePath(file) is { } path
-        ? Results.File(path, "application/zip", file, enableRangeProcessing: true)
+        ? Results.File(path, file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? "application/vnd.microsoft.portable-executable" : "application/zip", file, enableRangeProcessing: true)
         : Results.NotFound());
 
 app.MapFallbackToFile("index.html", staticFiles);

@@ -29,7 +29,10 @@ public sealed record AgentHeartbeat(
     string Agent, string Version, string Role, bool Paused, string State, string? Detail,
     DateTime? LastRecordingUtc, bool YouTubeReady, string? LastError, string? Machine, string? User);
 
-public sealed record AgentRelease(string Version, string File, long SizeBytes, string Sha256, DateTime ModifiedUtc);
+/// Installer is the Setup.exe published beside the zip (null when a
+/// release predates it or it was not mirrored) - for new machines; the zip
+/// is what installed agents update from.
+public sealed record AgentRelease(string Version, string File, long SizeBytes, string Sha256, DateTime ModifiedUtc, string? Installer = null, long InstallerSizeBytes = 0);
 
 /// In-memory: agents re-announce every poll, so a restart just waits a
 /// minute for the picture to refill. Nothing here is worth a table.
@@ -79,13 +82,19 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
         if (best.Path is null) return null;
 
         var info = new FileInfo(best.Path);
-        return new AgentRelease(best.Version!.ToString(), info.Name, info.Length, Sha256Of(info), info.LastWriteTimeUtc);
+        var installer = new FileInfo(Path.Combine(ReleaseDir, $"LeagueTracker.Agent-Setup-{best.Version}.exe"));
+        return new AgentRelease(best.Version!.ToString(), info.Name, info.Length, Sha256Of(info), info.LastWriteTimeUtc,
+            installer.Exists ? installer.Name : null, installer.Exists ? installer.Length : 0);
     }
 
     public string? ReleasePath(string file)
     {
-        // The name comes from the client - keep it inside ReleaseDir.
-        if (Path.GetFileName(file) != file || !file.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) return null;
+        // The name comes from the client - keep it inside ReleaseDir, and only
+        // the two shapes we publish.
+        if (Path.GetFileName(file) != file) return null;
+        var isZip = file.StartsWith("LeagueTracker.RenderAgent-") && file.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
+        var isSetup = file.StartsWith("LeagueTracker.Agent-Setup-") && file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase);
+        if (!isZip && !isSetup) return null;
         var full = Path.Combine(ReleaseDir, file);
         return File.Exists(full) ? full : null;
     }

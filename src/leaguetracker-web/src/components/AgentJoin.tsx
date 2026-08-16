@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { account } from '../account'
 
-interface Release { version: string; file: string; sizeBytes: number }
+interface Release { version: string; file: string; sizeBytes: number; installer: string | null; installerSizeBytes: number }
 
 /// Everything a new machine needs, from the site: the current agent build
 /// (the same zip the trackers serve to self-updates) and a join code that
@@ -45,15 +45,22 @@ export default function AgentJoin() {
       <h2>Get the agent</h2>
       <p className="mut" style={{ marginTop: 0 }}>
         The agent runs on the gaming PC: it records the player's games and publishes them to YouTube (recorder), or cuts
-        replay clips for every account (renderer). Install: unzip anywhere, double-click the exe, type this site's address
-        (or paste a join code), Save - the machine then shows up below as <em>pending</em> until you approve it. It
-        updates itself from here afterwards.
+        replay clips for every account (renderer). Install: run the installer (no admin needed), then in the setup window
+        type this site's address (or paste a join code) and Save - the machine shows up below as <em>pending</em> until you
+        approve it. It updates itself from here afterwards. Windows may warn about an unsigned download the first time.
       </p>
       <p style={{ margin: '0 0 10px' }}>
         {release ? (
-          <a className="action primary" href={`/api/agent/release/${encodeURIComponent(release.file)}`} download>
-            Download agent {release.version} ({Math.round(release.sizeBytes / 1_000_000)} MB)
-          </a>
+          <>
+            {release.installer && (
+              <a className="action primary" href={`/api/agent/release/${encodeURIComponent(release.installer)}`} download>
+                Download installer {release.version} ({Math.round(release.installerSizeBytes / 1_000_000)} MB)
+              </a>
+            )}{' '}
+            <a className={`action${release.installer ? '' : ' primary'}`} href={`/api/agent/release/${encodeURIComponent(release.file)}`} download title="Portable: unzip anywhere and double-click the exe">
+              {release.installer ? 'zip' : `Download agent ${release.version}`} ({Math.round(release.sizeBytes / 1_000_000)} MB)
+            </a>
+          </>
         ) : (
           <span className="mut">No agent build published on this tracker yet.</span>
         )}
