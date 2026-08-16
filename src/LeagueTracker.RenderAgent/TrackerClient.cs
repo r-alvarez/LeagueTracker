@@ -21,6 +21,11 @@ public sealed record ClipWindow(int Index, int StartSec, int EndSec, string Labe
 
 public sealed record AgentRelease(string Version, string File, long SizeBytes, string Sha256);
 
+/// The tracker's answer to a heartbeat: the newest published version, and a
+/// one-shot command the owner queued from the Data page (with a token so the
+/// agent runs it once and a restart never re-triggers it).
+public sealed record HeartbeatReply(string? Latest, string? Command, string? CommandToken);
+
 public sealed record RenderJob(
     string Kind, string MatchId, string GameVersion, double DurationSec, string ReplayUrl,
     string? MyName, string? MyChampion, List<ClipWindow> Windows)
@@ -263,7 +268,7 @@ public sealed class TrackerClient
     /// Tells the tracker this agent is alive and what it is doing. Returns
     /// the newest published agent version the tracker knows of (null = none
     /// or an old tracker).
-    public async Task<string?> HeartbeatAsync(object beat, CancellationToken ct)
+    public async Task<HeartbeatReply?> HeartbeatAsync(object beat, CancellationToken ct)
     {
         try
         {
@@ -271,7 +276,9 @@ public sealed class TrackerClient
             using var resp = await _http.PostAsync($"{ServerUrl}/api/agent/heartbeat", content, ct);
             if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
-            return doc.RootElement.TryGetProperty("latest", out var v) && v.ValueKind is JsonValueKind.String ? v.GetString() : null;
+            var root = doc.RootElement;
+            string? Str(string name) => root.TryGetProperty(name, out var v) && v.ValueKind is JsonValueKind.String ? v.GetString() : null;
+            return new HeartbeatReply(Str("latest"), Str("command"), Str("commandToken"));
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {

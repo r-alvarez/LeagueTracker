@@ -77,6 +77,54 @@ public sealed class AgentSupervisor(AgentConfig config, IReadOnlyList<TrackerCli
 
     private static Version CurrentVersion => Version.TryParse(AgentConfig.Version, out var v) ? v : new Version(0, 0);
 
+    private static string HandledCommandPath => Path.Combine(AppContext.BaseDirectory, "last-command");
+
+    /// A one-shot command from the Data page. The token makes it idempotent:
+    /// once handled it is written to disk, so the relaunched agent (which
+    /// receives the same still-pending command on its first heartbeat) does
+    /// not act on it again. Only "restart" today - it re-reads the profile
+    /// and self-updates on the way back up.
+    private void HandleCommand(string command, string token)
+    {
+        try { if (File.Exists(HandledCommandPath) && File.ReadAllText(HandledCommandPath).Trim() == token) return; }
+        catch { /* unreadable - treat as unhandled */ }
+
+        if (command is not "restart") return;
+        // Only when nothing is in flight - the same gate as a self-update.
+        if (System.Diagnostics.Process.GetProcessesByName("League of Legends") is { Length: > 0 }) return;
+        if (AgentStatus.Current.State is not ("idle" or "paused")) return;
+
+        try { File.WriteAllText(HandledCommandPath, token); } catch { /* best-effort */ }
+        Log.Info("Restart requested from the tracker - restarting (re-reads the profile and updates on the way up)");
+        AgentStatus.Set("updating", "restart");   // stops a race with the exit sentinel cleanup
+        RestartSelf();
+    }
+
+    /// Detached cmd that waits for this process to exit, then relaunches it.
+    private static void RestartSelf()
+    {
+        var exe = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "LeagueTracker.RenderAgent.exe");
+        var staging = Path.Combine(Path.GetTempPath(), "leaguetracker-agent");
+        Directory.CreateDirectory(staging);
+        var script = Path.Combine(staging, "restart-self.cmd");
+        File.WriteAllLines(script,
+        [
+            "@echo off",
+            $"set PID={Environment.ProcessId}",
+            ":wait",
+            @"%SystemRoot%\System32\tasklist.exe /FI ""PID eq %PID%"" 2>nul | %SystemRoot%\System32\find.exe ""%PID%"" >nul",
+            "if not errorlevel 1 (",
+            @"  %SystemRoot%\System32\ping.exe -n 3 127.0.0.1 >nul",
+            "  goto wait",
+            ")",
+            $"cd /d \"{AppContext.BaseDirectory.TrimEnd('\\')}\"",
+            "del /f /q stop.requested 2>nul",
+            $"start \"\" \"{exe}\"",
+        ]);
+        Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"{script}\"") { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = staging });
+        File.WriteAllText(RenderAgent.StopSentinelPath, "restart from tracker");
+    }
+
     private async Task<string?> HeartbeatAsync(CancellationToken ct)
     {
         var (state, detail) = AgentStatus.Current;
@@ -94,12 +142,14 @@ public sealed class AgentSupervisor(AgentConfig config, IReadOnlyList<TrackerCli
             Machine = Environment.MachineName,
             User = Environment.UserName,
         };
-        // Every tracker gets the beat; the first version hint wins.
+        // Every tracker gets the beat; the first version hint and the first
+        // queued command win.
         string? latest = null;
         foreach (var tracker in trackers)
         {
-            var hint = await tracker.HeartbeatAsync(beat, ct);
-            latest ??= hint;
+            if (await tracker.HeartbeatAsync(beat, ct) is not { } reply) continue;
+            latest ??= reply.Latest;
+            if (reply.Command is { Length: > 0 } && reply.CommandToken is { Length: > 0 }) HandleCommand(reply.Command, reply.CommandToken);
         }
         return latest;
     }

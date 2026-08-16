@@ -1551,3 +1551,5 @@ table.data.render-failed-table td.reason { color: var(--ink-2); font-size: 12.5p
 .dismiss-x:hover { color: var(--ink); border-color: var(--muted); }
 .failed-game { display: inline-flex; align-items: center; }
 .agent-error { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+
+.agent-head .sm-action { margin-left: auto; font-size: 12px; padding: 3px 9px; }

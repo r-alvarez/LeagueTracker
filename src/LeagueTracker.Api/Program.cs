@@ -255,6 +255,11 @@ app.MapGet("/api/agent/accounts", (AccountRegistry registry) => Results.Ok(new
 app.MapPost("/api/agents/dismiss-error", (string agent, AgentRegistry agents) =>
     agents.DismissError(agent) ? Results.Ok() : Results.NotFound());
 
+// Queue a restart for an agent - it obeys on its next heartbeat when idle
+// (re-reads the profile and self-updates on the way back up).
+app.MapPost("/api/agents/restart", (string agent, AgentRegistry agents) =>
+    agents.Queue(agent, "restart") ? Results.Ok() : Results.NotFound());
+
 app.MapGet("/api/agents", (AgentKeyStore keys) => Results.Ok(keys.All.Select(r => new
 {
     r.Id, r.Name, r.Machine, Status = r.Status.ToString().ToLowerInvariant(), r.CreatedUtc, r.DecidedUtc, r.LastSeenUtc, r.LastIp, r.Note,
@@ -269,7 +274,8 @@ app.MapPost("/api/agent/heartbeat", (AgentHeartbeat beat, AgentRegistry agents) 
 {
     if (beat is not { Agent.Length: > 0 }) return Results.BadRequest("agent name required");
     agents.Record(beat);
-    return Results.Ok(new { latest = agents.Latest()?.Version });
+    var pending = agents.PendingCommand(beat.Agent);
+    return Results.Ok(new { latest = agents.Latest()?.Version, command = pending?.Command, commandToken = pending?.Token });
 });
 
 app.MapGet("/api/agent/agents", (AgentRegistry agents) => Results.Ok(agents.Snapshot()));

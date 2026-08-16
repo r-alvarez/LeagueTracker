@@ -44,6 +44,9 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
     // different one arrives (in memory: a dismissed transient never matters
     // after a restart).
     private readonly Dictionary<string, string> _dismissedError = new(StringComparer.OrdinalIgnoreCase);
+    // A one-shot command queued for an agent (name -> (token, command)),
+    // delivered on the heartbeat. The token lets the agent run it once.
+    private readonly Dictionary<string, (string Token, string Command)> _command = new(StringComparer.OrdinalIgnoreCase);
     private (string Path, DateTime ModifiedUtc, string Sha)? _shaCache;
 
     public IReadOnlyDictionary<string, string> Profile => options.Value.Profile;
@@ -58,6 +61,25 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
     }
 
     /// Hide the agent's current last error until a different one comes in.
+    /// Queue a command for an agent's next heartbeat (only "restart" today).
+    /// A fresh token each time so a re-press fires again; the agent keeps the
+    /// last token it ran so a relaunch does not loop.
+    public bool Queue(string agent, string command)
+    {
+        lock (_gate)
+        {
+            if (!_agents.ContainsKey(agent)) return false;
+            _command[agent] = (Guid.NewGuid().ToString("N")[..12], command);
+            return true;
+        }
+    }
+
+    /// The command pending for an agent (if any) - read by the heartbeat.
+    public (string Token, string Command)? PendingCommand(string agent)
+    {
+        lock (_gate) return _command.TryGetValue(agent, out var c) ? c : null;
+    }
+
     public bool DismissError(string agent)
     {
         lock (_gate)

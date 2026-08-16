@@ -144,6 +144,8 @@ export default function DataPage() {
                   </span>
                   <strong>{a.agent}</strong>
                   <span className="mut sm-text">v{a.version} · {a.role}{a.user ? ` · ${a.user}` : ''}</span>
+                  <button className="action sm-action" title="Ask this agent to restart on its next heartbeat (when it is idle) - it re-reads settings and updates itself"
+                    onClick={async () => { await api.restartAgent(a.agent); }}>Restart</button>
                 </div>
                 <div className="agent-state">
                   <span className="agent-state-name">{a.state}</span>

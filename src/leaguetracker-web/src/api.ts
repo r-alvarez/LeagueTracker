@@ -50,6 +50,7 @@ export const api = {
   retryRender: async (id: string, kind: 'clips' | 'full') => { await fetch(account.apiUrl(`/api/render/${id}/retry?kind=${kind}`), { method: 'POST' }) },
   dismissRender: async (id: string, kind: 'clips' | 'full') => { await fetch(account.apiUrl(`/api/render/${id}/dismiss?kind=${kind}`), { method: 'POST' }) },
   dismissAgentError: async (agent: string) => { await fetch(`/api/agents/dismiss-error?agent=${encodeURIComponent(agent)}`, { method: 'POST' }) },
+  restartAgent: async (agent: string) => { await fetch(`/api/agents/restart?agent=${encodeURIComponent(agent)}`, { method: 'POST' }) },
   storage: () => get<StorageInfo>('/api/storage'),
   lens: async (opts: { window?: number; days?: number; role?: string }): Promise<LensResponse | null> => {
     const params = new URLSearchParams()
