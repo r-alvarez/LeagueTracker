@@ -25,6 +25,11 @@ x-lt-agent-env: &lt-agent-env
   Agent__Profile__YouTubeClientSecret: ${YT_CLIENT_SECRET:-}
   Agent__Profile__YouTubeRefreshToken: ${YT_REFRESH_TOKEN:-}
   Agent__Profile__RecordQueues: ranked-solo,normal
+  # Friends publish to YouTube and send only the small review sidecar; the
+  # full multi-GB video is NOT pushed to the NAS (YouTube hosts it). Without
+  # this an agent defaults to UploadVods=true and tries to upload every game's
+  # video over the wire - slow, and it fills the NAS.
+  Agent__Profile__UploadVods: "false"
   Agent__Profile__UploadVodSidecars: "true"
 
 services:
