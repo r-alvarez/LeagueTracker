@@ -279,6 +279,21 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             // answers immediately.
             await WaitForGameLiveAsync(ct);
 
+            // Spectating runs the game client with gameflow "InProgress" too,
+            // but there is no active player in a spectated game - so the world
+            // is live yet activeplayername stays empty. Catch it once, before
+            // any capture, and sit the game out: recording someone else's game
+            // wastes the disk and the encoder, and it could never be published
+            // anyway (the live-player publish guard would drop it).
+            if (state.Segments.Count == 0 && await IsSpectatingAsync(ct))
+            {
+                Log.Info("Spectating (no active player) - not recording this game");
+                ReleaseBaseName(state.BaseName);
+                CleanupInflight(state);
+                while (!RenderAgent.StopRequested && await PhaseAsync(ct) is "InProgress" or "Reconnect") await Task.Delay(TimeSpan.FromSeconds(15), ct);
+                return true;
+            }
+
             // The mode switch may have changed the client size since load -
             // read the rect now, post-switch, so the crop matches the screen.
             if (GameWindow.ClientRectOf(g.Process.MainWindowHandle) is { Width: >= 320, Height: >= 200 } liveRect)
@@ -1671,6 +1686,20 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         if (!Over(await PhaseAsync(CancellationToken.None))) return false;
         await Task.Delay(TimeSpan.FromSeconds(3));
         return Over(await PhaseAsync(CancellationToken.None));
+    }
+
+    /// A spectated (or replayed) game answers activeplayername with nothing
+    /// while the world is live and the clock advances. Sampled a few times so
+    /// one slow answer on a real game's own client is not mistaken for it.
+    private async Task<bool> IsSpectatingAsync(CancellationToken ct)
+    {
+        for (var i = 0; i < 4; i++)
+        {
+            if (await ActivePlayerAsync(ct) is { Length: > 0 } name && !name.Equals("Unknown", StringComparison.OrdinalIgnoreCase)) return false;
+            if (await PhaseAsync(ct) is not "InProgress" and not "Reconnect") return false; // game vanished - let the loop handle it
+            await Task.Delay(TimeSpan.FromSeconds(2), ct);
+        }
+        return true;
     }
 
     private async Task<string?> ActivePlayerAsync(CancellationToken ct)
