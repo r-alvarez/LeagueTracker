@@ -367,7 +367,17 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             // Customs/Practice Tool have no Riot match for a tracker to own -
             // those recordings are local-only, not eternal upload retries.
             // A deploy stop skips the deliveries; the startup sweep catches up.
-            var deliverable = state.MatchId is not null && !RenderAgent.StopRequested
+            // A live game answers liveclientdata/activeplayername with the
+            // player's Riot ID for its whole length; a replay, spectator
+            // stream or reconnect catch-up answers nothing (state.ActivePlayer
+            // stays null/"Unknown"). Publishing one as the game's own VOD is
+            // exactly the wrong-video bug - keep the file, don't deliver it.
+            var livePlayerKnown = state.ActivePlayer is { Length: > 0 } p && !p.Equals("Unknown", StringComparison.OrdinalIgnoreCase);
+            if (!livePlayerKnown)
+            {
+                Log.Warn($"Not publishing {state.BaseName}: no live player was seen (activeplayername stayed empty - a replay, spectator or reconnect catch-up, not a live game). The file is kept locally.");
+            }
+            var deliverable = livePlayerKnown && state.MatchId is not null && !RenderAgent.StopRequested
                 && QueueCategories.GetValueOrDefault(state.QueueId ?? -1, "other") is not "custom";
             if (deliverable && (config.UploadVods || config.UploadVodSidecars))
             {
@@ -721,6 +731,12 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 {
                     continue; // no Riot match exists for customs - nothing to deliver to
                 }
+                // Same guard as the live path: a recording with no live player
+                // (replay/spectator/reconnect capture) is not the game's VOD.
+                if (root["activePlayer"]?.GetValue<string>() is not { Length: > 0 } sweepPlayer || sweepPlayer.Equals("Unknown", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
                 // Sidecars recorded before the platform fallback existed have
                 // a gameId but no match id - repair them when the client can
                 // say which platform this PC plays on (once per sweep).
@@ -989,10 +1005,11 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                         clockMap.Add((encodedSec, gameSec));
                     }
                     activePlayer ??= await ActivePlayerAsync(ct);
-                    // Every 6th sample (~90s) also re-check the phase: the
-                    // post-game screen keeps the process alive briefly, and
-                    // there is nothing worth recording past "InProgress".
-                    if (clockMap.Count % 6 == 0 && await PhaseAsync(CancellationToken.None) is not "InProgress" and not null) break;
+                    // Every 6th sample (~90s) re-check the phase, but only end
+                    // on a SUSTAINED exit: a mid-game reconnect flips the
+                    // phase to "Reconnect" (still in the game) and the LCU can
+                    // blip; one stray reading must not truncate the VOD.
+                    if (clockMap.Count % 6 == 0 && await GameHasEndedAsync() ) break;
                 }
             }
         }
@@ -1108,7 +1125,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                     clockMap.Add(((DateTime.UtcNow - startedUtc).TotalSeconds, gameSec));
                 }
                 activePlayer ??= await ActivePlayerAsync(ct);
-                if (clockMap.Count % 6 == 0 && await PhaseAsync(CancellationToken.None) is not "InProgress" and not null) break;
+                if (clockMap.Count % 6 == 0 && await GameHasEndedAsync()) break;
             }
         }
 
@@ -1644,6 +1661,18 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     }
 
     /// Which account is playing - this PC sees more than one.
+    /// True only when the game is confirmed over: two consecutive phase reads
+    /// that are neither InProgress nor Reconnect (a reconnect is still the
+    /// game) nor a failed read (null = LCU momentarily unreachable, not an
+    /// end). One blip never ends a recording.
+    private async Task<bool> GameHasEndedAsync()
+    {
+        static bool Over(string? phase) => phase is not null and not "InProgress" and not "Reconnect";
+        if (!Over(await PhaseAsync(CancellationToken.None))) return false;
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        return Over(await PhaseAsync(CancellationToken.None));
+    }
+
     private async Task<string?> ActivePlayerAsync(CancellationToken ct)
     {
         try
