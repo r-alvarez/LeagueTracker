@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { account } from '../account'
+import AgentJoin from '../components/AgentJoin'
 import { api } from '../api'
 import type { JobStatus, RenderQueueRow, Status, StorageInfo } from '../types'
 
@@ -103,6 +104,8 @@ export default function DataPage() {
           Reprocess all games
         </button>
       </div>
+
+      <AgentJoin />
 
       {status && status.agents.length > 0 && (
         <div className="card">

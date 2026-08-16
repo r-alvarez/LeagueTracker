@@ -10,6 +10,7 @@ namespace LeagueTracker.RenderAgent;
 /// stays at its default) and can prove the tracker answers before saving.
 public sealed class SetupForm : Form
 {
+    private readonly TextBox _join = new() { Width = ContentWidth };
     private readonly TextBox _server = new() { Width = ContentWidth };
     private readonly TextBox _cfId = new() { Width = ContentWidth };
     private readonly TextBox _cfSecret = new() { UseSystemPasswordChar = true };
@@ -98,9 +99,12 @@ public sealed class SetupForm : Form
 
         var root = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(24, 20, 24, 20), BackColor = Page };
         root.Controls.Add(Header());
+        root.Controls.Add(Card("Join",
+            Fields(("Join code", _join, "Paste the code the tracker owner sent you (starts with lt1:) - it fills in the rest of this window."))));
+        _join.TextChanged += (_, _) => ApplyJoinCode(_join.Text);
         root.Controls.Add(Card("Tracker",
             Fields(
-                ("Tracker URL", _server, "Your tracker's address, e.g. https://league-ben.rjav-tech.co.uk (several: comma-separated)."),
+                ("Tracker URL", _server, "Your tracker's address, e.g. https://league.rjav-tech.co.uk (several: comma-separated)."),
                 ("Access token ID", _cfId, "The Cloudflare Access service token you were given for this machine."),
                 ("Access token secret", SecretRow(), null))));
         root.Controls.Add(Card("This machine",
@@ -258,6 +262,40 @@ public sealed class SetupForm : Form
         button.FlatAppearance.BorderSize = 0;
         button.FlatAppearance.MouseOverBackColor = ColorTranslator.FromHtml("#6aacfb");
         button.Margin = new Padding(8, 0, 0, 0);
+    }
+
+    /// lt1:<base64url json> - {server, cfId, cfSecret, role, prefix,
+    /// recordings}. Made in the browser on the tracker's Data page (the
+    /// server never sees the token); one paste instead of three fields.
+    private void ApplyJoinCode(string text)
+    {
+        var code = text.Trim();
+        if (!code.StartsWith("lt1:", StringComparison.OrdinalIgnoreCase)) return;
+        try
+        {
+            var b64 = code[4..].Replace('-', '+').Replace('_', '/');
+            b64 = b64.PadRight(b64.Length + (4 - b64.Length % 4) % 4, '=');
+            using var doc = JsonDocument.Parse(Convert.FromBase64String(b64));
+            var root = doc.RootElement;
+            string? Get(string name) => root.TryGetProperty(name, out var v) && v.ValueKind is JsonValueKind.String ? v.GetString() : null;
+            if (Get("server") is { Length: > 0 } server) _server.Text = server;
+            if (Get("cfId") is { Length: > 0 } id) _cfId.Text = id;
+            if (Get("cfSecret") is { Length: > 0 } secret) _cfSecret.Text = secret;
+            if (Get("role") is { Length: > 0 } role)
+            {
+                var index = role.ToLowerInvariant() switch { "recorder" => 0, "renderer" => 1, "both" or "full" => 2, _ => -1 };
+                if (index >= 0) _role.SelectedIndex = index;
+            }
+            if (Get("prefix") is { } prefix) _prefix.Text = prefix;
+            if (Get("recordings") is { Length: > 0 } rec) _recordings.Text = rec;
+            _verdict.ForeColor = Good;
+            _verdict.Text = "Join code applied - press Test connection, then Save.";
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException)
+        {
+            _verdict.ForeColor = Bad;
+            _verdict.Text = "That join code is not readable - ask for it again.";
+        }
     }
 
     private bool Validate(out string problem)

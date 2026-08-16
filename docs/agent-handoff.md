@@ -72,28 +72,30 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
 
 ## C. Per player's PC (5 minutes, no admin rights)
 
-1. Unzip the latest `LeagueTracker.RenderAgent-<version>.zip` anywhere
-   (e.g. `C:\LeagueTrackerAgent`).
-2. Double-click `LeagueTracker.RenderAgent.exe`. With no settings yet it opens
-   the **setup window**: tracker URL (`https://league.rjav-tech.co.uk` - the one
-   site; the agent finds their account by itself),
-   the Access token ID + secret you gave them, "This machine is: Recorder",
-   optional recordings folder. **Test connection** proves the tracker answers
-   and that YouTube is configured on it; **Save** writes `appsettings.json`,
-   registers run-at-logon (per-user Run key), starts the agent, and shows a
-   message box with anything still missing. (Same window later via the tray's
-   **Settings…** or `--setup`; `--install` forces it.)
-   Everything else (YouTube, queues, title prefix) comes from the tracker.
-   Leave `PostGameReview` off unless they ask for it - it takes the screen.
+Owner, once per machine: Cloudflare Zero Trust → Access → Service Auth →
+create a token (`agent-<name>`), allow it on the site's Access application;
+then on the site, **Data & sync → Get the agent → Make a join code…**, paste
+the token, pick the role (Recorder for a player's PC) and their title
+prefix, copy the `lt1:…` code and send it to them privately (it holds the
+token; the server never sees it - it is built in your browser).
+
+Player:
+1. **Download agent** from the same card (or the zip from the GitHub
+   release), unzip anywhere (e.g. `C:\LeagueTrackerAgent`).
+2. Double-click `LeagueTracker.RenderAgent.exe` → the setup window opens →
+   paste the join code (everything fills in) → **Test connection** (should
+   list the accounts and "YouTube ready") → **Save**. Run-at-logon is
+   registered, the agent starts, a message box says if anything is missing.
+   (Later: tray **Settings…** or `--setup`; `--install` forces the window.)
 3. Look for the tracker's bolt by the clock; the small dot is the state:
    - green = idle/watching, red = recording/uploading/rendering, grey with
      bars = paused, amber = waiting for the tracker, orange = last thing failed
    - right-click: **Pause/Resume** (the off switch - survives reboots),
      open tracker / recordings / log, Settings…, check for updates, quit.
-4. Check the tracker's **Data page → Agents**: their machine should be
-   `online · recorder`, `YouTube` not flagged. Play a normal or ranked game;
-   the VOD lands under their match page within minutes of the game ending
-   (upload time depends on their upstream; it pauses while they play).
+4. On the site, their page → **Data & sync → Agents** shows their machine
+   `online · recorder`. Play a normal or ranked game; the VOD lands under
+   their match page within minutes of the game ending (upload time depends
+   on their upstream; it pauses while they play).
 
 Uninstall: `LeagueTracker.RenderAgent.exe --uninstall` (recordings stay).
 
