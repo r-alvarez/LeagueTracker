@@ -1274,3 +1274,20 @@ complete or it isn't - every significant fight he was in, every death, and
 now every kill of his (a pick or a solo kill outside any fight gets the
 same 20s approach + 3s as a death). Long games take longer to watch; F9
 skips.
+
+## 2026-08-16 — Agents enrol themselves; the owner clicks Approve
+
+**No credential per machine.** A new agent knows only the site's URL: it
+makes a random key once (`agent.key`), enrols it (`POST /api/agent/enroll`,
+the server keeps the SHA-256), and waits; the Data page lists it as
+pending, one click approves, one click revokes. Cloudflare Access is
+bypassed for the `/api/agent/*` path (a path-scoped Access application),
+and the tracker guards that slice itself: an approved key or nothing,
+except enrol/ping/release. Account calls from approved agents go through
+`/api/agent/a/{region}/{slug}/…` - the same handlers mounted a fourth
+time. Everything humans use stays behind Access untouched; agents with a
+Cloudflare service token keep working the old way (kept for the
+transition and for machines that must skip approval), and the join code
+became optional pre-fill instead of a credential carrier. Ruben's
+verdict on the alternatives: a shared token was "A now", this was "B
+next"; per-machine tokens were never the answer.

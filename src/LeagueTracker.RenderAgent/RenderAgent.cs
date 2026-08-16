@@ -70,17 +70,57 @@ public sealed class RenderAgent(AgentConfig config)
 
         // The NAS may be rebooting or the stack redeploying when we start (we
         // run at logon) - wait for a tracker rather than giving up.
+        // Reachability first (anonymous ping, or the Access-token'd status
+        // on a server from before enrolment), then who we are to each server:
+        // enrol this machine's key; "approved" means the agent slice is ours,
+        // "pending" means a human has to click Approve on the Data page -
+        // wait for that unless an Access token gets us in the old way.
+        var hasAccessToken = config is { CfAccessClientId.Length: > 0, CfAccessClientSecret.Length: > 0 };
         while (true)
         {
             var reachable = 0;
             foreach (var server in _servers)
             {
-                if (await server.PingAsync(ct)) { reachable++; }
+                if (await server.PingAnonymousAsync(ct) || await server.PingAsync(ct)) reachable++;
                 else Log.Warn($"Tracker unreachable: {server.ServerUrl} (will keep retrying)");
             }
             if (reachable > 0) { Log.Info($"{reachable}/{_servers.Count} tracker server(s) reachable"); break; }
             AgentStatus.Set("waiting", "Waiting for the tracker (unreachable)");
             await Task.Delay(TimeSpan.FromSeconds(60), ct);
+        }
+
+        var announcedPending = false;
+        while (true)
+        {
+            var usable = 0;
+            foreach (var server in _servers)
+            {
+                if (server.Keyed) { usable++; continue; }
+                switch (await server.EnrollAsync(ct))
+                {
+                    case "approved":
+                        server.MarkKeyed();
+                        usable++;
+                        Log.Info($"{server.ServerUrl}: this machine is approved - talking on its key");
+                        break;
+                    case "pending":
+                        if (hasAccessToken) { usable++; if (!announcedPending) Log.Info($"{server.ServerUrl}: enrolment pending (Access token in use meanwhile - approve on the Data page to drop it)"); }
+                        else if (!announcedPending) Log.Info($"{server.ServerUrl}: waiting for approval - open the site's Data page and press Approve for \"{config.AgentName}\"");
+                        break;
+                    case "revoked":
+                        if (!announcedPending) Log.Error($"{server.ServerUrl}: this machine has been revoked - re-approve it on the Data page (or delete agent.key to enrol as new)");
+                        break;
+                    default:
+                        // Old server or no enrolment: the Access token is the way.
+                        if (hasAccessToken) usable++;
+                        else if (!announcedPending) Log.Warn($"{server.ServerUrl}: no enrolment answer and no Access token configured");
+                        break;
+                }
+            }
+            if (usable > 0) break;
+            announcedPending = true;
+            AgentStatus.Set("waiting", "Waiting for approval on the tracker");
+            await Task.Delay(TimeSpan.FromSeconds(20), ct);
         }
 
         // One tracker per account. The same account reachable through two
@@ -94,7 +134,7 @@ public sealed class RenderAgent(AgentConfig config)
             {
                 foreach (var account in accounts.Where(a => seen.Add(a.RiotId)))
                 {
-                    _trackers.Add(TrackerClient.ForAccount(server.ServerUrl, account, config));
+                    _trackers.Add(TrackerClient.ForAccount(server.ServerUrl, account, config, server.Keyed));
                 }
             }
             else if (seen.Add(server.ServerUrl))

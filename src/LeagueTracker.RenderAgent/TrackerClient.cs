@@ -46,26 +46,73 @@ public sealed class TrackerClient
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly string _agentName;
 
-    private TrackerClient(string serverUrl, string api, TrackerAccount? account, AgentConfig config)
+    private TrackerClient(string serverUrl, string api, TrackerAccount? account, AgentConfig config, bool keyed)
     {
         ServerUrl = serverUrl;
         Api = api;
         Account = account;
+        Keyed = keyed;
         _agentName = config.AgentName;
         if (config is { CfAccessClientId.Length: > 0, CfAccessClientSecret.Length: > 0 })
         {
             _http.DefaultRequestHeaders.Add("CF-Access-Client-Id", config.CfAccessClientId);
             _http.DefaultRequestHeaders.Add("CF-Access-Client-Secret", config.CfAccessClientSecret);
         }
+        // Always presented; the server ignores it on Access-authenticated
+        // routes and requires it on the agent slice.
+        _http.DefaultRequestHeaders.Add("X-Agent-Key", AgentKey.Load());
     }
 
-    /// The server itself (agent endpoints, discovery) - also the tracker for
-    /// a legacy single-account server.
+    /// The server itself (agent endpoints, discovery, enrolment) - also the
+    /// tracker for a legacy single-account server.
     public static TrackerClient ForServer(string serverUrl, AgentConfig config) =>
-        new(serverUrl, $"{serverUrl}/api", null, config);
+        new(serverUrl, $"{serverUrl}/api", null, config, keyed: false);
 
-    public static TrackerClient ForAccount(string serverUrl, TrackerAccount account, AgentConfig config) =>
-        new(serverUrl, $"{serverUrl}/api/a/{account.UrlPath}", account, config);
+    /// One account on a one-site server. Keyed = this machine is approved
+    /// there, so account calls go through the agent slice (/api/agent/a/...,
+    /// which Access lets through on the key); otherwise the human routes
+    /// behind an Access service token, as before.
+    public static TrackerClient ForAccount(string serverUrl, TrackerAccount account, AgentConfig config, bool keyed) =>
+        new(serverUrl, keyed ? $"{serverUrl}/api/agent/a/{account.UrlPath}" : $"{serverUrl}/api/a/{account.UrlPath}", account, config, keyed);
+
+    /// Whether this machine may talk to the server on its key alone.
+    public bool Keyed { get; private set; }
+    /// The server client learns it after enrolment says "approved".
+    public void MarkKeyed() => Keyed = true;
+
+    /// Enrol (or re-announce) this machine and learn where it stands:
+    /// "approved", "pending", "revoked", or null when the server predates
+    /// enrolment or is unreachable (then the Access token is the only way).
+    public async Task<string?> EnrollAsync(CancellationToken ct)
+    {
+        try
+        {
+            var body = JsonSerializer.Serialize(new { key = AgentKey.Load(), name = _agentName, machine = Environment.MachineName });
+            using var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+            using var resp = await _http.PostAsync($"{ServerUrl}/api/agent/enroll", content, ct);
+            if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            return doc.RootElement.GetProperty("status").GetString();
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    /// Anonymous liveness: the one route a brand-new machine can reach.
+    public async Task<bool> PingAnonymousAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _http.GetAsync($"{ServerUrl}/api/agent/ping", ct);
+            return resp.IsSuccessStatusCode && IsJson(resp);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
 
     /// The tracked accounts a one-site server hosts; null for a legacy
     /// single-account server (no /api/accounts) or when unreachable.
@@ -73,7 +120,7 @@ public sealed class TrackerClient
     {
         try
         {
-            using var resp = await _http.GetAsync($"{ServerUrl}/api/accounts", ct);
+            using var resp = await _http.GetAsync(Keyed ? $"{ServerUrl}/api/agent/accounts" : $"{ServerUrl}/api/accounts", ct);
             if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
             return [.. doc.RootElement.GetProperty("accounts").EnumerateArray().Select(a => new TrackerAccount(

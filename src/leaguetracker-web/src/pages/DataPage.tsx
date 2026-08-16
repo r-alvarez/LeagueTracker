@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { account } from '../account'
 import AgentJoin from '../components/AgentJoin'
+import AgentApprovals from '../components/AgentApprovals'
 import { api } from '../api'
 import type { JobStatus, RenderQueueRow, Status, StorageInfo } from '../types'
 
@@ -106,6 +107,8 @@ export default function DataPage() {
       </div>
 
       <AgentJoin />
+
+      <AgentApprovals />
 
       {status && status.agents.length > 0 && (
         <div className="card">

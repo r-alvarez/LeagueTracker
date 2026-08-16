@@ -52,9 +52,14 @@ public sealed class AccountBindingMiddleware(RequestDelegate next, AccountRegist
         var path = http.Request.Path.Value ?? "";
         Account? account = null;
 
-        if (path.StartsWith("/api/a/", StringComparison.OrdinalIgnoreCase))
+        // /api/a/... for humans (behind Access), /api/agent/a/... for keyed
+        // agents (the Access-bypassed slice) - same account addressing.
+        var prefix = path.StartsWith("/api/a/", StringComparison.OrdinalIgnoreCase) ? "/api/a/"
+            : path.StartsWith("/api/agent/a/", StringComparison.OrdinalIgnoreCase) ? "/api/agent/a/"
+            : null;
+        if (prefix is not null)
         {
-            var parts = path[7..].Split('/', 3);
+            var parts = path[prefix.Length..].Split('/', 3);
             var first = Uri.UnescapeDataString(parts[0]);
             if (Platforms.ByCode(first) is not null && parts.Length > 1)
             {

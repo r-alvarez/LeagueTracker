@@ -45,8 +45,9 @@ export default function AgentJoin() {
       <h2>Get the agent</h2>
       <p className="mut" style={{ marginTop: 0 }}>
         The agent runs on the gaming PC: it records the player's games and publishes them to YouTube (recorder), or cuts
-        replay clips for every account (renderer). Install: unzip anywhere, double-click the exe, paste a join code, Test
-        connection, Save. It updates itself from here afterwards.
+        replay clips for every account (renderer). Install: unzip anywhere, double-click the exe, type this site's address
+        (or paste a join code), Save - the machine then shows up below as <em>pending</em> until you approve it. It
+        updates itself from here afterwards.
       </p>
       <p style={{ margin: '0 0 10px' }}>
         {release ? (
@@ -62,9 +63,9 @@ export default function AgentJoin() {
       {open && (
         <div className="agent-join">
           <p className="mut sm-text" style={{ marginTop: 0 }}>
-            Paste the Cloudflare Access service token you created for this machine (Zero Trust → Access → Service Auth,
-            allowed on this site's application). The code is made in your browser and never sent anywhere - hand it to the
-            player over a private channel.
+            Optional. A join code pre-fills the setup window (site address, role, title prefix). Leave the token fields
+            empty for the normal approve-on-this-page flow; fill them only for a machine that must bypass approval with a
+            Cloudflare Access service token. The code is made in your browser and never sent anywhere.
           </p>
           <div className="agent-join-grid">
             <label>Token ID<input value={cfId} onChange={e => setCfId(e.target.value)} placeholder="….access" /></label>
@@ -79,7 +80,7 @@ export default function AgentJoin() {
             <label>Video title prefix<input value={prefix} onChange={e => setPrefix(e.target.value)} placeholder="e.g. Ben" /></label>
           </div>
           <p style={{ margin: '8px 0' }}>
-            <button className="action primary" onClick={build} disabled={!cfId.trim() || !cfSecret.trim()}>Make join code</button>
+            <button className="action primary" onClick={build}>Make join code</button>
             {code && <button className="action" onClick={copy} style={{ marginLeft: 8 }}>{copied ? 'Copied' : 'Copy'}</button>}
           </p>
           {code && <textarea className="agent-join-code" readOnly value={code} rows={3} onFocus={e => e.currentTarget.select()} />}

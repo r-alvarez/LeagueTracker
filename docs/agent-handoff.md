@@ -50,6 +50,13 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
      when idle (no game, no upload) within the hour or on the next heartbeat.
 4. **Waker:** `PC_MAC` / `WOL_BROADCAST` in the compose now belong to the
    render box, not the gaming PC - update when the renderer moves.
+5. **Agent enrolment (once).** Cloudflare Zero Trust → Access → Applications
+   → Add → Self-hosted: domain `league.rjav-tech.co.uk`, **path `api/agent`**,
+   one policy with action **Bypass**, include Everyone. Path applications win
+   over the site-wide one, so `/api/agent/*` reaches the tracker
+   unauthenticated - and the tracker itself demands an approved agent key
+   there (only enrol, ping and the release feed are open). Everything human
+   stays behind the site-wide Access application exactly as before.
 
 ## B. Per new player (owner) - "the upgrade to multi-account"
 
@@ -70,39 +77,37 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
    token can be revoked without touching the others.
 3. First run: history sync from their Data page pulls their past games.
 
-## C. Per player's PC (5 minutes, no admin rights)
+## C. Per player's PC (5 minutes, no admin rights, nothing to hand out)
 
-Owner, once per machine: Cloudflare Zero Trust → Access → Service Auth →
-create a token (`agent-<name>`), allow it on the site's Access application;
-then on the site, **Data & sync → Get the agent → Make a join code…**, paste
-the token, pick the role (Recorder for a player's PC) and their title
-prefix, copy the `lt1:…` code and send it to them privately (it holds the
-token; the server never sees it - it is built in your browser).
-
-Player:
-1. **Download agent** from the same card (or the zip from the GitHub
-   release), unzip anywhere (e.g. `C:\LeagueTrackerAgent`).
-2. Double-click `LeagueTracker.RenderAgent.exe` → the setup window opens →
-   paste the join code (everything fills in) → **Test connection** (should
-   list the accounts and "YouTube ready") → **Save**. Run-at-logon is
-   registered, the agent starts, a message box says if anything is missing.
-   (Later: tray **Settings…** or `--setup`; `--install` forces the window.)
-3. Look for the tracker's bolt by the clock; the small dot is the state:
+1. **Download agent** from the site (Data & sync → Get the agent) or the
+   GitHub release; unzip anywhere (e.g. `C:\LeagueTrackerAgent`).
+2. Double-click `LeagueTracker.RenderAgent.exe` → the setup window: tracker
+   URL `https://league.rjav-tech.co.uk`, role Recorder, optional recordings
+   folder and title prefix. **No token.** **Test connection** enrols the
+   machine and says "waiting for approval"; **Save**. (A join code from the
+   Data page pre-fills the fields; a Cloudflare service token is only for
+   machines that must skip approval.)
+3. Owner: the site's Data & sync → **Agent access** lists the machine as
+   pending → **Approve**. The agent notices within 20 s and starts. Revoke
+   there cuts it off instantly; the machine keeps its key (`agent.key` next
+   to the exe) and can be re-approved.
+4. Tray: the tracker's bolt by the clock; the small dot is the state:
    - green = idle/watching, red = recording/uploading/rendering, grey with
-     bars = paused, amber = waiting for the tracker, orange = last thing failed
+     bars = paused, amber = waiting (tracker unreachable, or not yet
+     approved), orange = last thing failed
    - right-click: **Pause/Resume** (the off switch - survives reboots),
      open tracker / recordings / log, Settings…, check for updates, quit.
-4. On the site, their page → **Data & sync → Agents** shows their machine
-   `online · recorder`. Play a normal or ranked game; the VOD lands under
-   their match page within minutes of the game ending (upload time depends
-   on their upstream; it pauses while they play).
+5. Their page → Data & sync → Agents shows the machine `online · recorder`.
+   Play a normal or ranked game; the VOD lands under their match page within
+   minutes of the game ending (upload time depends on their upstream; it
+   pauses while they play).
 
 Uninstall: `LeagueTracker.RenderAgent.exe --uninstall` (recordings stay).
 
 ## D. The render box (owner's old PC)
 
-Same zip, same setup window: the one URL (every account is discovered), one service
-token, "This machine is: Renderer" (RecordGames off), `PostGameReview` off,
+Same zip, same setup window: the one URL (every account is discovered), no
+token (approve it on the site), "This machine is: Renderer" (RecordGames off), `PostGameReview` off,
 League installed and a client logged in (Vanguard only allows replays through
 the client; any account works), and `IdleSeconds` can drop to ~10 since
 nobody uses it. `--install` as above. Renders run whenever no game process

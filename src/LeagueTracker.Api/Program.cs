@@ -51,6 +51,7 @@ builder.Services.AddScoped<ReviewService>();
 builder.Services.AddScoped<ReviewReelService>();
 builder.Services.AddPerAccount<RenderLeaseService>();
 builder.Services.AddSingleton<AgentRegistry>();
+builder.Services.AddSingleton<AgentKeyStore>();
 builder.Services.AddHttpClient("github", c =>
 {
     c.Timeout = TimeSpan.FromMinutes(10);   // a 130 MB asset on a slow day
@@ -116,6 +117,7 @@ void InitializeAccount(Account account)
     app.Logger.LogInformation("Account {Slug}: {RiotId} at {Dir}", account.Slug, account.RiotId, account.DataDir);
 }
 
+app.UseMiddleware<AgentAuthMiddleware>();
 app.UseMiddleware<AccountBindingMiddleware>();
 app.UseCors();
 app.UseResponseCompression();
@@ -140,6 +142,7 @@ app.UseStaticFiles(staticFiles);
 MapAccountApi(app.MapGroup("/api"));
 MapAccountApi(app.MapGroup("/api/a/{region:regex(^[a-z]{{2,4}}$)}/{slug}"));   // canonical: /api/a/euw/ImRA-87166/...
 MapAccountApi(app.MapGroup("/api/a/{slug}"));                                    // first one-site build; agents mid-update
+MapAccountApi(app.MapGroup("/api/agent/a/{region:regex(^[a-z]{{2,4}}$)}/{slug}")); // keyed agents (Access-bypassed slice)
 
 static object AccountView(Account a) => new
 {
@@ -219,6 +222,43 @@ static (string? GameName, string? TagLine) ParseRiotId(string? riotId)
 // announce themselves every poll, take their defaults + secrets from here (so
 // a friend's install is ServerUrl + Access token and nothing else), and pull
 // new builds from ReleaseDir - one publish on the NAS updates every machine.
+
+// --- Agent enrolment ------------------------------------------------------------
+// A new machine knocks with only the URL: it generates a key, enrols, and
+// waits; the owner approves on the Data page. AgentAuthMiddleware lets
+// enroll/ping/release through anonymously and demands an approved key for
+// the rest of /api/agent/*. Human management lives under /api/agents
+// (behind Access like every other human route).
+
+app.MapPost("/api/agent/enroll", (EnrollRequest request, HttpContext http, AgentKeyStore keys) =>
+{
+    if (request.Key is not { Length: >= 32 } || request.Key.Length > 200) return Results.BadRequest(new { error = "key must be 32-200 characters" });
+    var (record, created, refusal) = keys.Enroll(request.Key, request.Name ?? "", request.Machine ?? "unknown", http.Connection.RemoteIpAddress?.ToString());
+    if (refusal is not null) return Results.StatusCode(StatusCodes.Status429TooManyRequests);
+    return Results.Ok(new { record.Id, Status = record.Status.ToString().ToLowerInvariant(), Created = created });
+});
+
+app.MapGet("/api/agent/enroll/status", (HttpContext http, AgentKeyStore keys) =>
+    http.Request.Headers[AgentAuthMiddleware.HeaderName].FirstOrDefault() is { Length: >= 16 } key && keys.Find(key) is { } record
+        ? Results.Ok(new { record.Id, Status = record.Status.ToString().ToLowerInvariant() })
+        : Results.NotFound(new { error = "unknown key - enrol first" }));
+
+app.MapGet("/api/agent/ping", (HttpContext http) =>
+    Results.Ok(new { ok = true, server = "leaguetracker", authenticated = http.Items.ContainsKey(AgentAuthMiddleware.ItemKey) }));
+
+app.MapGet("/api/agent/accounts", (AccountRegistry registry) => Results.Ok(new
+{
+    Default = registry.Default.Slug,
+    Accounts = registry.All.Select(AccountView),
+}));
+
+app.MapGet("/api/agents", (AgentKeyStore keys) => Results.Ok(keys.All.Select(r => new
+{
+    r.Id, r.Name, r.Machine, Status = r.Status.ToString().ToLowerInvariant(), r.CreatedUtc, r.DecidedUtc, r.LastSeenUtc, r.LastIp, r.Note,
+})));
+app.MapPost("/api/agents/{id}/approve", (string id, AgentKeyStore keys) => keys.Decide(id, AgentKeyStatus.Approved) ? Results.Ok() : Results.NotFound());
+app.MapPost("/api/agents/{id}/revoke", (string id, AgentKeyStore keys) => keys.Decide(id, AgentKeyStatus.Revoked) ? Results.Ok() : Results.NotFound());
+app.MapDelete("/api/agents/{id}", (string id, AgentKeyStore keys) => keys.Delete(id) ? Results.NoContent() : Results.NotFound());
 
 app.MapGet("/api/agent/profile", (AgentRegistry agents) => Results.Ok(agents.Profile));
 
@@ -1156,3 +1196,5 @@ static IResult CsvFile(string fileName, string csv) =>
     Results.File(Encoding.UTF8.GetBytes(csv), "text/csv", fileName);
 
 public sealed record AddAccountRequest(string RiotId, string Region, string? DisplayName);
+
+public sealed record EnrollRequest(string Key, string? Name, string? Machine);

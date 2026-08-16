@@ -105,7 +105,7 @@ public sealed class SetupForm : Form
         root.Controls.Add(Card("Tracker",
             Fields(
                 ("Tracker URL", _server, "Your tracker's address, e.g. https://league.rjav-tech.co.uk (several: comma-separated)."),
-                ("Access token ID", _cfId, "The Cloudflare Access service token you were given for this machine."),
+                ("Access token ID", _cfId, "Optional. Leave empty: the machine asks the tracker to be let in and the owner approves it on the site's Data page. Fill it only if you were given a Cloudflare Access service token."),
                 ("Access token secret", SecretRow(), null))));
         root.Controls.Add(Card("This machine",
             Fields(("Role", _role, "Recorder for a player's PC; Renderer for the box that cuts replay clips; Both for one machine doing everything."))));
@@ -306,9 +306,9 @@ public sealed class SetupForm : Form
             problem = "Tracker URL must be one or more http(s) addresses.";
             return false;
         }
-        if (_server.Text.Contains("https://") && (_cfId.Text.Trim() is not { Length: > 0 } || _cfSecret.Text.Trim() is not { Length: > 0 }))
+        if ((_cfId.Text.Trim() is { Length: > 0 }) != (_cfSecret.Text.Trim() is { Length: > 0 }))
         {
-            problem = "An https tracker sits behind Cloudflare Access - both token fields are needed.";
+            problem = "Access token: fill both the ID and the secret, or neither (then the owner approves this machine on the site).";
             return false;
         }
         return true;
@@ -340,12 +340,23 @@ public sealed class SetupForm : Form
         foreach (var url in draft.ServerUrls)
         {
             var client = TrackerClient.ForServer(url, draft);
-            var ok = await client.PingAsync(CancellationToken.None);
-            var profile = ok ? await client.GetProfileAsync(CancellationToken.None) : null;
-            var accounts = ok ? await client.GetAccountsAsync(CancellationToken.None) : null;
-            results.Add(ok
-                ? $"{url}: OK{(accounts is { Count: > 0 } ? $" - {accounts.Count} account(s): {string.Join(", ", accounts.Select(a => a.RiotId))}" : "")}{(profile is { Count: > 0 } ? $" (YouTube {(profile.ContainsKey("YouTubeRefreshToken") ? "ready" : "not configured")})" : "")}"
-                : $"{url}: no answer - wrong address, or the Access token is not allowed here");
+            var reachable = await client.PingAnonymousAsync(CancellationToken.None) || await client.PingAsync(CancellationToken.None);
+            if (!reachable) { results.Add($"{url}: no answer - wrong address, or not reachable from here"); continue; }
+            // Enrol right here: the machine shows up on the owner's Data page
+            // as pending while the person is still looking at this window.
+            var status = await client.EnrollAsync(CancellationToken.None);
+            if (status is "approved") client.MarkKeyed();
+            var accounts = await client.GetAccountsAsync(CancellationToken.None);
+            var profile = (status is "approved" || draft.CfAccessClientId is { Length: > 0 }) ? await client.GetProfileAsync(CancellationToken.None) : null;
+            var who = accounts is { Count: > 0 } ? $" - {accounts.Count} account(s): {string.Join(", ", accounts.Select(a => a.RiotId))}" : "";
+            var youtube = profile is { Count: > 0 } ? $" (YouTube {(profile.ContainsKey("YouTubeRefreshToken") ? "ready" : "not configured")})" : "";
+            results.Add(status switch
+            {
+                "approved" => $"{url}: OK - this machine is approved{who}{youtube}",
+                "pending" => $"{url}: OK - reachable; this machine is waiting for approval on the site's Data page (Save now, it starts by itself once approved){who}",
+                "revoked" => $"{url}: reachable, but this machine was revoked - ask the owner to re-approve it",
+                _ => draft.CfAccessClientId is { Length: > 0 } && accounts is not null ? $"{url}: OK{who}{youtube}" : $"{url}: reachable, but it did not accept the Access token and offers no enrolment",
+            });
         }
         var allOk = results.All(r => r.Contains(": OK"));
         _verdict.ForeColor = allOk ? Good : Bad;
