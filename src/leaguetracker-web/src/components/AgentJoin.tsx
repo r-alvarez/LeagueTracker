@@ -47,7 +47,13 @@ export default function AgentJoin() {
         The agent runs on the gaming PC: it records the player's games and publishes them to YouTube (recorder), or cuts
         replay clips for every account (renderer). Install: run the installer (no admin needed), then in the setup window
         type this site's address (or paste a join code) and Save - the machine shows up below as <em>pending</em> until you
-        approve it. It updates itself from here afterwards. Windows may warn about an unsigned download the first time.
+        approve it. It updates itself from here afterwards.
+      </p>
+      <p className="mut sm-text" style={{ margin: '0 0 10px' }}>
+        The download is safe but not code-signed yet, so Windows SmartScreen says "not commonly downloaded". To get past it
+        once: in the browser's download bar choose <strong>Keep</strong> (Edge: the ··· menu → Keep → Keep anyway), then if a
+        blue "Windows protected your PC" box appears click <strong>More info → Run anyway</strong>. (Or right-click the
+        downloaded file → Properties → tick <strong>Unblock</strong> → OK before running.)
       </p>
       <p style={{ margin: '0 0 10px' }}>
         {release ? (
