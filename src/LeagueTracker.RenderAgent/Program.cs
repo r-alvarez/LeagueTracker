@@ -55,11 +55,22 @@ try
         Log.Warn($"Another agent from this folder is running (pid {other.Id}) - asking it to stop first");
         AgentStatus.Set("waiting", "Waiting for the previous agent to stop");
         File.WriteAllText(RenderAgent.StopSentinelPath, $"superseded by pid {Environment.ProcessId}");
+        // Five minutes covers a recording finalizing or a render postponing.
+        // A process still there after that has finished its work and is
+        // stuck on the way out (seen once: the tray teardown) - ending it
+        // loses nothing, while giving up here leaves the machine with no
+        // agent at all, which is the one outcome that must not happen.
         var gone = other.WaitForExit(TimeSpan.FromMinutes(5));
+        if (!gone)
+        {
+            Log.Warn($"The previous agent (pid {other.Id}) did not stop within 5 minutes - ending it");
+            try { other.Kill(); gone = other.WaitForExit(TimeSpan.FromSeconds(30)); }
+            catch (Exception ex) { Log.Error($"Could not end pid {other.Id}: {ex.Message}"); }
+        }
         try { File.Delete(RenderAgent.StopSentinelPath); } catch { /* best-effort */ }
         if (!gone)
         {
-            Log.Error($"The previous agent (pid {other.Id}) did not stop within 5 minutes - this one exits");
+            Log.Error($"The previous agent (pid {other.Id}) will not go away - this one exits");
             return 1;
         }
         Log.Info("Previous agent stopped - continuing");
@@ -143,4 +154,9 @@ finally
     {
         try { File.Delete(RenderAgent.StopSentinelPath); } catch { /* best-effort */ }
     }
+    // Nothing may keep this process alive once Main is done - not a tray
+    // pump that stopped answering, not a stray foreground thread. An agent
+    // that has said goodbye but lingers blocks its own successor.
+    Log.Info("Exiting.");
+    Environment.Exit(Environment.ExitCode);
 }

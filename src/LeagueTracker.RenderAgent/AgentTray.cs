@@ -159,15 +159,25 @@ public sealed class AgentTray : IDisposable
     /// Synchronous on purpose: Main returns right after this, and an icon
     /// that is only scheduled for removal outlives the process as a ghost by
     /// the clock until someone hovers it.
+    /// Removes the icon before Main returns (a merely scheduled removal
+    /// leaves a ghost by the clock) - but never waits on the pump for more
+    /// than a moment: a pump that has stopped answering must not hold the
+    /// process hostage.
     public void Dispose()
     {
         try
         {
-            _ui?.Send(_ =>
+            using var done = new ManualResetEventSlim(false);
+            _ui?.Post(_ =>
             {
-                if (_icon is not null) { _icon.Visible = false; _icon.Dispose(); }
-                Application.ExitThread();
+                try
+                {
+                    if (_icon is not null) { _icon.Visible = false; _icon.Dispose(); }
+                    Application.ExitThread();
+                }
+                finally { done.Set(); }
             }, null);
+            if (_ui is not null && !done.Wait(TimeSpan.FromSeconds(3))) Log.Warn("Tray icon did not close in time - continuing to exit");
         }
         catch (Exception ex)
         {
