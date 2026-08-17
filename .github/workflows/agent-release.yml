@@ -3,6 +3,13 @@
 # poll these releases (AgentReleaseSyncService) and drop the newest zip in
 # the shared agent-releases folder, from which every agent updates itself -
 # so a push to main is the whole agent deploy, the same as it is for the API.
+#
+# Everything that goes into the zip is pinned: the actions by commit, ffmpeg
+# by version and checksum, Inno Setup by version. The same commit builds the
+# same bytes next month, and nothing on a friend's PC came from "whatever the
+# CDN served today". SHA256SUMS and a build-provenance attestation ride along
+# so anyone can check what they downloaded (no code-signing certificate:
+# SmartScreen still warns once, the checksum and attestation are the proof).
 name: agent-release
 
 on:
@@ -12,41 +19,57 @@ on:
       - src/LeagueTracker.RenderAgent/**
       - src/LeagueTracker.ReplayLauncher/**
       - deploy/publish-agent.ps1
+      - deploy/agent-setup.iss
       - .github/workflows/agent-release.yml
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: agent-release
   cancel-in-progress: false
 
+env:
+  # https://www.gyan.dev/ffmpeg/builds/ - the versioned "full" build (NVENC
+  # included), same as the owner's machines use. Bump both lines together;
+  # the .sha256 next to the archive is where the checksum comes from.
+  FFMPEG_VERSION: 9.0.1
+  FFMPEG_SHA256: 4b9c814cb07a1f90d05b768ef4eb2abbf89af94bbb924df5b7dbd6e64e1e2b96
+  INNOSETUP_VERSION: 6.7.1
+
 jobs:
   publish:
     runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
       # publish-agent.ps1 bundles ffmpeg from PATH so a friend's PC needs
       # nothing else installed. Not choco: its ffmpeg on PATH is a shim that
-      # only works on the machine it was installed on. Gyan's full build is a
-      # single static exe (NVENC included), same as the owner's machines use.
-      - name: Fetch ffmpeg
+      # only works on the machine it was installed on.
+      - name: Fetch ffmpeg ${{ env.FFMPEG_VERSION }}
         shell: pwsh
         run: |
-          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z -OutFile ffmpeg.7z
+          $url = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-$env:FFMPEG_VERSION-full_build.7z"
+          Invoke-WebRequest $url -OutFile ffmpeg.7z
+          $actual = (Get-FileHash ffmpeg.7z -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:FFMPEG_SHA256) { throw "ffmpeg checksum mismatch: expected $env:FFMPEG_SHA256, got $actual" }
           7z x ffmpeg.7z -offmpeg-dist | Out-Null
           $bin = (Get-ChildItem ffmpeg-dist -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
           "$bin" >> $env:GITHUB_PATH
           & (Join-Path $bin ffmpeg.exe) -version | Select-Object -First 1
 
-      - name: Install Inno Setup
-        run: choco install innosetup --no-progress -y
+      - name: Install Inno Setup ${{ env.INNOSETUP_VERSION }}
+        run: choco install innosetup --version ${{ env.INNOSETUP_VERSION }} --no-progress -y
 
       - name: Build zip and installer
         id: build
@@ -57,15 +80,29 @@ jobs:
           $version = $zip.BaseName -replace '^.*-', ''
           $setup = Get-ChildItem src\LeagueTracker.RenderAgent\bin\LeagueTracker.Agent-Setup-*.exe | Select-Object -First 1
           if (-not $setup) { throw "installer missing" }
+          $sums = Join-Path $zip.DirectoryName "SHA256SUMS.txt"
+          @($zip, $setup) | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content $sums -Encoding ascii
+          Get-Content $sums
           "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
           "setup=$($setup.FullName)" >> $env:GITHUB_OUTPUT
+          "sums=$sums" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
+
+      # Signed statement (Sigstore, via GitHub OIDC) that these exact files
+      # came from this workflow at this commit. Verify with:
+      #   gh attestation verify <file> --repo r-alvarez/LeagueTracker
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ steps.build.outputs.zip }}
+            ${{ steps.build.outputs.setup }}
 
       - name: Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "agent-${{ steps.build.outputs.version }}" "${{ steps.build.outputs.zip }}" "${{ steps.build.outputs.setup }}" `
+          gh release create "agent-${{ steps.build.outputs.version }}" "${{ steps.build.outputs.zip }}" "${{ steps.build.outputs.setup }}" "${{ steps.build.outputs.sums }}" `
             --title "Agent ${{ steps.build.outputs.version }}" `
-            --notes "Render/recorder agent build from ${{ github.sha }}. Setup.exe for new machines (per-user, no admin); the zip is what installed agents update themselves from."
+            --generate-notes `
+            --notes "Render/recorder agent build from ${{ github.sha }}. Setup.exe for new machines (per-user, no admin); the zip is what installed agents update themselves from. SHA256SUMS.txt lists both; provenance: ``gh attestation verify <file> --repo ${{ github.repository }}``."
