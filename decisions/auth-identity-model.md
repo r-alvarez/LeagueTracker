@@ -142,3 +142,55 @@ poller inversion (#4), `PublicReads=true` and the site-wide Access app coming
 off, RSO, per-user quotas. Adjacent one-line fixes T-B5 (`VideoTargetPath`
 via `ValidId`) and T-B6 (import path containment) sit on the same endpoints
 this branch touches and are folded into phase 2 unless Ruben says otherwise.
+
+## 2026-08-17 — Implementation notes (phases 0–5 built on the branch)
+
+**What matches the design above, and where the build settled a detail:**
+
+- **registry.db** at `<DataRoot>/registry.db` (EF Core SQLite, `EnsureCreated`
+  + the same PRAGMA-driven column upgrades the account dbs use). `Account`
+  itself is the EF entity (config still binds to it); a first boot imports
+  `accounts.json`/`agents.json` and renames them `*.imported`; configuration is
+  matched to its stored row by `DataDir`, then Riot ID, so a redeploy never
+  duplicates an account or moves a folder. `Owner` (email) is a config-only
+  property resolved to `OwnerUserId` at boot; the puuid is hoisted from each
+  account's `KeyValues`. All registry timestamps get a UTC-kind converter (SQLite
+  drops the kind and an hour's drift read as an expired claim in the browser).
+- **Per-account state is keyed by `Account.Id`** (PerAccount, AccountInitializer,
+  the poller's pass state) so a rename keeps leases and running jobs.
+- **Authentication:** cookie `lt.session` (HttpOnly, SameSite=Lax, 30-day
+  sliding, persistent — a session cookie died with the headless browser and
+  would with a friend's window), OIDC scheme registered only when
+  `Auth:Oidc` is configured, `AgentKey` scheme chosen by a policy scheme when
+  the header is present. `/auth/logout` clears the app cookie only. Dev login is
+  mapped only in the Development environment (`dotnet run … -- --environment
+  Development` — the `--` matters, `dotnet run` eats `--environment` otherwise).
+- **Policies as one enum** (`Access`: Read, User, Owner, Admin, Agent,
+  AgentRecorder, AgentRender, RenderRead, MediaRead) with a single handler; the
+  account API is mapped through one group per policy so the matrix is legible
+  in Program.cs. `RenderRead` (render queue, replay file) was added because
+  the owner and the render agents both need them and policies AND together.
+- **`/api/render/pending`** (anonymous, counts only) exists for the waker,
+  whose per-account `/render/queue` became owner/agent-only.
+- **Redirect for a stale slug is 308**, the method-preserving permanent
+  redirect (a POST to an old address must not turn into a GET).
+- **Legacy mounts:** `/api/agent/a/…` is a *curated* mount (status, reel,
+  vod/status, uploads, render work — nullable groups map nothing else) under
+  the Agent policy; the Host-header `/api` and `/api/a/{slug}` mounts keep the
+  full API under the same policies until the cutover's follow-up commit.
+- **Folded fixes:** `FullGameService.VideoTargetPath` validates the id and the
+  upload checks the match exists (T-B5); `/import` only accepts folders under
+  the account's data folder or the `/imports` mount (T-B6).
+- **Agent build:** account calls go to `/api/a/{region}/{slug}` on the key
+  (same URL whether keyed or Access-token'd); `JoinCode` (config/env
+  `LT_JOIN_CODE`, the setup window's field, `lt2:` one-line paste from the
+  Data page) is sent at enrolment; accounts payload carries puuids. The
+  Cloudflare service-token fields stay readable for one more release.
+- **Verified on localhost:5399** per phase: idempotent boot/import; dev-login,
+  `/api/auth/me`, agent key scheme (401/403 texts); the full authorization
+  matrix by curl (anonymous / signed-in visitor / owner-admin / agent key,
+  CSRF header); join-code enrolment binding a key; a real agent process
+  enrolling with a renderer code, being approved, discovering accounts,
+  claiming a job and uploading (mock render); settings + media policy flip;
+  a simulated rename (registry edit) → config precedence log + 308; a real
+  claim round-trip against Riot (icon mismatch reported with the live icon).

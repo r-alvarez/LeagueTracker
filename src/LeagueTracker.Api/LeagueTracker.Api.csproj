@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Local review against a real Auth0 tenant: dotnet user-secrets set Auth:Oidc:ClientSecret ... - never appsettings. -->
+    <UserSecretsId>leaguetracker-api</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

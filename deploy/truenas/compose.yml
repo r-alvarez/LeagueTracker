@@ -51,6 +51,21 @@ services:
       <<: *lt-agent-env
       TZ: Europe/London
       Riot__ApiKeyFile: /data/main/riot-api-key.txt
+      # Identity: the app is an OIDC client of Auth0 with its own users table
+      # (registry.db under /data). Issuer, client id/secret are Portainer stack
+      # env vars, NEVER committed. Admins and each account's owner are emails;
+      # the user rows exist before anyone signs in and join on first login.
+      Auth__Oidc__Authority: ${AUTH0_ISSUER:-}
+      Auth__Oidc__ClientId: ${AUTH0_CLIENT_ID:-}
+      Auth__Oidc__ClientSecret: ${AUTH0_CLIENT_SECRET:-}
+      Auth__Admins: ${AUTH_ADMINS:-}
+      # Cloudflare Access still walls the site: reads need a signed-in person
+      # until the public launch flips this to "true".
+      Auth__PublicReads: "false"
+      # Rollout: approved agent keys from before ownership keep working on every
+      # account until each is assigned an owner on the Data page; then "false".
+      Agents__AllowUnbound: "true"
+      AllowedHosts: league.rjav-tech.co.uk;league-alt.rjav-tech.co.uk;league-ben.rjav-tech.co.uk
       Accounts__DataRoot: /data
       Accounts__Default: ImRA-87166
       Accounts__List__0__GameName: ImRA
@@ -58,16 +73,19 @@ services:
       Accounts__List__0__DataDir: /data/main
       Accounts__List__0__Hosts: league.rjav-tech.co.uk
       Accounts__List__0__DisplayName: Ruben
+      Accounts__List__0__Owner: ${OWNER_RUBEN:-}
       Accounts__List__1__GameName: ImRA
       Accounts__List__1__TagLine: "5957"
       Accounts__List__1__DataDir: /data/alt
       Accounts__List__1__Hosts: league-alt.rjav-tech.co.uk
       Accounts__List__1__DisplayName: Ruben (alt)
+      Accounts__List__1__Owner: ${OWNER_RUBEN:-}
       Accounts__List__2__GameName: TheCosmicPeach
       Accounts__List__2__TagLine: TTV
       Accounts__List__2__DataDir: /data/ben
       Accounts__List__2__Hosts: league-ben.rjav-tech.co.uk
       Accounts__List__2__DisplayName: Ben
+      Accounts__List__2__Owner: ${OWNER_BEN:-}
       # Accounts__List__3__GameName: <Vanessa's game name>
       # Accounts__List__3__TagLine: <tag>
       # Accounts__List__3__DataDir: /data/vanessa

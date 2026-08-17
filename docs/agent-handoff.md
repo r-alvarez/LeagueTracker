@@ -6,6 +6,15 @@ every tracked account with its own data folder; one **recorder** agent on
 each player's gaming PC; one **renderer** agent on the dedicated replay box
 that serves every account. Nobody but the tracker owner touches credentials.
 
+Identity, in one paragraph: people sign in through Auth0 (the app keeps its
+own users; Auth0 only vouches), a person **owns** the Riot accounts they
+proved are theirs (profile-icon check, or assigned by the admin), and each
+agent **belongs to one person** - a recorder acts on its owner's accounts, the
+renderer (admin-approved) on everyone's render work. The API authorizes
+itself on every endpoint; Cloudflare Access stays in front of the site as
+the outer wall for now (`Auth__PublicReads=false`), and is bypassed for
+`/api` because the API needs no help.
+
 ```
  Ben's PC ──recorder──┐                                         ┌─ /ImRA-87166
  Vanessa's PC ─recorder┼─▶ league.rjav-tech.co.uk (one process) ├─ /ImRA-5957
@@ -50,13 +59,26 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
      when idle (no game, no upload) within the hour or on the next heartbeat.
 4. **Waker:** `PC_MAC` / `WOL_BROADCAST` in the compose now belong to the
    render box, not the gaming PC - update when the renderer moves.
-5. **Agent enrolment (once).** Cloudflare Zero Trust → Access → Applications
-   → Add → Self-hosted: domain `league.rjav-tech.co.uk`, **path `api/agent`**,
-   one policy with action **Bypass**, include Everyone. Path applications win
-   over the site-wide one, so `/api/agent/*` reaches the tracker
-   unauthenticated - and the tracker itself demands an approved agent key
-   there (only enrol, ping and the release feed are open). Everything human
-   stays behind the site-wide Access application exactly as before.
+5. **Cloudflare Access.** Zero Trust → Access → Applications → Add →
+   Self-hosted: domain `league.rjav-tech.co.uk`, **path `api`**, one policy
+   with action **Bypass**, include Everyone (replaces the older `api/agent`
+   application - delete that one). Path applications win over the site-wide
+   one, so the whole API reaches the tracker unauthenticated and the tracker
+   authorizes every call itself: humans by their session cookie, agents by
+   their key. The site-wide application keeps the SPA shell behind Access;
+   its policy must list every friend's email or they never reach the login.
+6. **Auth0 (once).** A Regular Web Application: allowed callback
+   `https://league.rjav-tech.co.uk/auth/callback` (add
+   `http://localhost:5399/auth/callback` for local review), allowed logout
+   `https://league.rjav-tech.co.uk/`; connections as you like (Username-Password
+   with *Disable Sign Ups* on while invite-only, Google/Discord); MFA and
+   brute-force protection on. Put the issuer (`https://<tenant>.<region>.auth0.com/`),
+   client id and secret in the Portainer stack env as `AUTH0_ISSUER`,
+   `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`; `AUTH_ADMINS` = your email;
+   `OWNER_RUBEN` / `OWNER_BEN` = the owners' emails (the compose maps them to
+   `Accounts__List__N__Owner`). Users are created from those emails at boot
+   and join on first login, so ownership is in place before anyone signs in.
+   Friends are created or invited from the Auth0 dashboard.
 
 ## B. Per new player (owner) - "the upgrade to multi-account"
 
@@ -70,12 +92,15 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
    original ones stay in the compose (`Accounts__List__N`) - both sources
    are fine, config wins on a duplicate. `DELETE /api/accounts/{slug}`
    untracks a runtime-added one (folder kept).
-2. Cloudflare Access: add their email to the `league.rjav-tech.co.uk`
-   application (they see every account's pages - fine among friends;
-   per-account visibility by email is a later step), and create a **service
-   token per agent** (Zero Trust → Access → Service Auth) so one friend's
-   token can be revoked without touching the others.
-3. First run: history sync from their Data page pulls their past games.
+2. Cloudflare Access: add their email to the site-wide `league.rjav-tech.co.uk`
+   application (that is the outer wall - without it they never reach the
+   login button). Auth0: create/invite their user with the same email.
+3. Ownership: either they claim the account themselves (Data page →
+   "Is this your Riot account?" → set the named profile icon → Verify), or you
+   assign it: `POST /api/admin/accounts/{id}/owner {"ownerEmail": "..."}`
+   (or `Accounts__List__N__Owner` in the compose for configured accounts).
+4. First run: history sync from their Data page pulls their past games -
+   theirs to run now, not yours.
 
 ## C. Per player's PC (5 minutes, no admin rights, nothing to hand out)
 
@@ -85,24 +110,28 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
    per-user install under `%LocalAppData%\Programs\LeagueTracker Agent`, no
    admin, Start Menu + Settings › Apps entries; Windows SmartScreen may warn
    once (unsigned).
-2. The installer ends in the setup window (later: Start → LeagueTracker Agent,
-   or the tray's Settings…): tracker
+2. **The owner** opens their Data page → Machines → **Add a machine…** and
+   sends the friend the join code (eight letters like `K7Q2-9DFM`, or the
+   one-line `lt2:` paste that also carries the site address). It lives 15
+   minutes and works once.
+3. The installer ends in the setup window (later: Start → LeagueTracker Agent,
+   or the tray's Settings…): paste the code (or the `lt2:` line), tracker
    URL `https://league.rjav-tech.co.uk`, role Recorder, optional recordings
    folder and title prefix. **No token.** **Test connection** enrols the
-   machine and says "waiting for approval"; **Save**. (A join code from the
-   Data page pre-fills the fields; a Cloudflare service token is only for
-   machines that must skip approval.)
-3. Owner: the site's Data & sync → **Agent access** lists the machine as
-   pending → **Approve**. The agent notices within 20 s and starts. Revoke
-   there cuts it off instantly; the machine keeps its key (`agent.key` next
-   to the exe) and can be re-approved.
-4. Tray: the tracker's bolt by the clock; the small dot is the state:
+   machine - it is the owner's from that moment - and says "waiting for
+   approval"; **Save**.
+4. Owner: Data & sync → Machines → **Waiting for approval** → **Approve**.
+   The agent notices within 20 s and starts. Revoke there cuts it off
+   instantly; the machine keeps its key (`agent.key` next to the exe) and can
+   be re-approved. A machine enrolled without a code shows as unassigned;
+   only an admin can approve it (and assign its owner).
+5. Tray: the tracker's bolt by the clock; the small dot is the state:
    - green = idle/watching, red = recording/uploading/rendering, grey with
      bars = paused, amber = waiting (tracker unreachable, or not yet
      approved), orange = last thing failed
    - right-click: **Pause/Resume** (the off switch - survives reboots),
      open tracker / recordings / log, Settings…, check for updates, quit.
-5. Their page → Data & sync → Agents shows the machine `online · recorder`.
+6. Their page → Data & sync → Machines shows the machine `online · recorder`.
    Play a normal or ranked game; the VOD lands under their match page within
    minutes of the game ending (upload time depends on their upstream; it
    pauses while they play).
@@ -111,8 +140,9 @@ Uninstall: `LeagueTracker.RenderAgent.exe --uninstall` (recordings stay).
 
 ## D. The render box (owner's old PC)
 
-Same zip, same setup window: the one URL (every account is discovered), no
-token (approve it on the site), "This machine is: Renderer" (RecordGames off), `PostGameReview` off,
+Same zip, same setup window: the one URL (every account is discovered), a
+**renderer** join code (only an admin can mint one - the renderer reaches
+every account's render work), "This machine is: Renderer" (RecordGames off), `PostGameReview` off,
 League installed and a client logged in (Vanguard only allows replays through
 the client; any account works), and `IdleSeconds` can drop to ~10 since
 nobody uses it. `--install` as above. Renders run whenever no game process
@@ -138,3 +168,22 @@ is up on that box; the gaming PCs are never used for rendering again.
   the renderer may cut the same fight twice (once per tracker) - harmless.
 - Old trackers without the `/api/agent/*` endpoints just get a working
   agent with no profile/heartbeat/updates - every call is best-effort.
+
+## E. Cutover to the identity model (once, in this order)
+
+1. Merge `auth/identity-model`; Portainer redeploys with the new env
+   (`AUTH0_*`, `AUTH_ADMINS`, `OWNER_*`, `Agents__AllowUnbound=true`). First
+   boot imports `accounts.json`/`agents.json` into `/data/registry.db` (the
+   files stay as `*.imported`) and hoists each account's puuid.
+2. Sign in on the live site through Auth0; `GET /api/auth/me` shows you as
+   admin with your two accounts. Add the friends' emails to the site-wide
+   Access policy.
+3. Cloudflare: add the `api` Bypass application, delete `api/agent`.
+4. Data page → Machines: assign the four existing keys to their owners
+   (recorders → the player, the render box → you as renderer). Publish the new
+   agent build; watch the heartbeats report it (`/api/me/agents`).
+5. Flip `Agents__AllowUnbound` to `false`. Then a follow-up commit removes the
+   Host-header `/api` group, `/api/a/{slug}` and `/api/agent/a/...` mounts and
+   the legacy `Hosts` bindings.
+6. Public launch, later: `Auth__PublicReads=true` and the site-wide Access
+   application off - nothing in-process changes.
