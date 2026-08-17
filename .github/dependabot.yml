@@ -1,0 +1,43 @@
+# Weekly, grouped: one PR per ecosystem for the routine bumps, so the actions'
+# commit pins and the NuGet/npm/base-image versions never quietly go stale.
+# CI (ci.yml) builds and tests every PR before it can merge; Portainer only
+# ever deploys main.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ['*']
+
+  - package-ecosystem: nuget
+    directories:
+      - /src/LeagueTracker.Api
+      - /src/LeagueTracker.RenderAgent
+      - /tests/LeagueTracker.Api.Tests
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      nuget:
+        patterns: ['*']
+
+  - package-ecosystem: npm
+    directory: /src/leaguetracker-web
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      npm:
+        patterns: ['*']
+
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /deploy/truenas/waker
+    schedule:
+      interval: weekly
+      day: monday

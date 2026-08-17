@@ -88,6 +88,23 @@ source tree).
   - Riot's per-game skillshot counters (`skillshotsHit`/`skillshotsDodged` —
     totals only; the API has no per-event skillshot data)
 
+## CI / CD
+
+- **`ci.yml`** - every push and PR: API build + xUnit tests (`tests/`), web
+  lint + build, agent build on Windows. On main it also publishes the API
+  image to `ghcr.io/r-alvarez/leaguetracker` (`sha-<commit>`, `main`,
+  `latest`) with a build-provenance attestation and a Trivy scan into the
+  Security tab. Nothing in it deploys.
+- **Deploy** is GitOps: Portainer polls the repo and rebuilds `main` from
+  `deploy/truenas/compose.yml`; the GHCR image is the rollback path (see the
+  comment on the `leaguetracker` service).
+- **`agent-release.yml`** - agent code on main -> GitHub Release
+  `agent-<version>` (zip + Setup.exe + SHA256SUMS + attestation), which the
+  trackers mirror and every agent self-updates from. Inputs are pinned:
+  actions by commit, ffmpeg by version + SHA256, Inno Setup by version.
+- **`codeql.yml`** weekly + on main; **Dependabot** bumps actions, NuGet, npm
+  and base images weekly in grouped PRs.
+
 ## Storage model
 
 SQLite (`data/leaguetracker.db`; never committed) is an **index, not the

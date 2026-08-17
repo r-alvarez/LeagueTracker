@@ -41,6 +41,12 @@ services:
   # era keep working. Adding a player = one more Accounts__List__N block
   # (GameName, TagLine, DataDir; DisplayName/HideLp/Region/Platform optional)
   # - no hostname, no DNS, no extra Access application.
+  # Built here from the checked-out commit. CI also publishes the same
+  # Dockerfile as ghcr.io/r-alvarez/leaguetracker:<sha> (and :main, :latest)
+  # on every green main - the immutable copy. To roll back to a known-good
+  # build without waiting on a rebuild: comment out `build`/`pull_policy`,
+  # set `image: ghcr.io/r-alvarez/leaguetracker:sha-<full sha>`, push; undo
+  # when main is fixed. (Portainer needs "re-pull image" on for that path.)
   leaguetracker:
     build: *lt-build
     pull_policy: build
