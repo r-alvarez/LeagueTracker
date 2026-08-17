@@ -112,7 +112,7 @@ Uninstall: `LeagueTracker.RenderAgent.exe --uninstall` (recordings stay).
 ## D. The render box (owner's old PC)
 
 Same zip, same setup window: the one URL (every account is discovered), no
-token (approve it on the site), "This machine is: Renderer" (RecordGames off), `PostGameReview` off,
+token (approve it on the site), "This machine is: Renderer" (RecordGames off; the post-game review only runs on recording machines),
 League installed and a client logged in (Vanguard only allows replays through
 the client; any account works), and `IdleSeconds` can drop to ~10 since
 nobody uses it. `--install` as above. Renders run whenever no game process

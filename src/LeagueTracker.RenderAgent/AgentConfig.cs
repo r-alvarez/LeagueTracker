@@ -123,9 +123,10 @@ public sealed class AgentConfig
 
     /// Open the finished game's review reel in the browser once it lands on
     /// its tracker - but only when the next game isn't already being queued
-    /// for. Off by default: it takes over the screen, which is only welcome
-    /// if you asked for it.
-    public bool PostGameReview { get; set; }
+    /// for. On by default for every recording agent (the review is the point
+    /// of the recording); queueing up straight away skips it, and it never
+    /// runs on a renderer-only box.
+    public bool PostGameReview { get; set; } = true;
 
     /// How long to let the end-of-game screens settle before deciding whether
     /// a review is wanted. Long enough that hitting "play again" immediately
