@@ -165,11 +165,10 @@ only). They go in the follow-up commit after the agents update (step 5.7).
 - Puuids are encrypted per API-key holder: if the key holder ever changes,
   set `Accounts__List__N__Puuid` or let the poller re-resolve; folders and ids
   don't move.
-- SPA follow-ups worth a small pass: an admin page for users (`/api/admin/users`
-  exists, no UI), the header pill could link to `/api/me`, and the login wall
-  copy once Auth0 is real.
-- README still describes the old single-user model; rewrite before the Riot
-  application (audit must-do #10).
+- Done 2026-08-17 (later commits): the admin **People** card on the Data page
+  (users, admin toggle, account owner by email) and the sign-in wall copy;
+  README rewritten for the multi-user model (audit must-do #10). The header
+  pill still only shows name/admin - fine until there is a profile page.
 
 ## 7. Files that matter
 
