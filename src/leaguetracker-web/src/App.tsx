@@ -61,7 +61,10 @@ export default function App() {
       {!auth.canRead ? (
         <div className="card signin-wall">
           <h2>Sign in to view this tracker</h2>
-          <p className="mut">This site is private for now. Sign in with the account the owner invited you with.</p>
+          <p className="mut">
+            This tracker is invite-only while it is being built. Sign in with the email its owner invited you with;
+            if you have not been invited, there is nothing to see here yet.
+          </p>
           <p><a className="action primary" href={auth.loginUrl()}>Sign in</a></p>
         </div>
       ) : (<>

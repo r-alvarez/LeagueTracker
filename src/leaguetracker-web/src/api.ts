@@ -1,6 +1,6 @@
 import { account } from './account'
 import { csrfHeaders } from './auth'
-import type { AgentKey, AnalyticsSummary, ClaimInfo, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
+import type { AdminUser, AgentKey, AnalyticsSummary, ClaimInfo, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
 
 /// Every API call goes through here: account-scoped URL rewriting, the
 /// session cookie, and the CSRF header on writes. Bare fetch() elsewhere is
@@ -93,6 +93,11 @@ export const api = {
   },
   // Admin
   adminAgents: () => get<{ keys: AgentKey[]; live: unknown[] }>('/api/admin/agents'),
+  adminUsers: () => get<AdminUser[]>('/api/admin/users'),
+  adminSetUserAdmin: async (id: string, admin: boolean) => {
+    const r = await apiFetch(`/api/admin/users/${id}/admin?admin=${admin}`, { method: 'POST' })
+    if (!r.ok) throw new Error(await r.text())
+  },
   adminAssignAgent: async (id: string, ownerEmail: string | null, role: string | null) => {
     const r = await apiFetch(`/api/admin/agents/${id}/assign`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ownerEmail, role }) })
     if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error ?? `assign -> HTTP ${r.status}`)

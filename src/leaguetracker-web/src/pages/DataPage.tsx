@@ -4,6 +4,7 @@ import { account } from '../account'
 import { auth } from '../auth'
 import ClaimAccount from '../components/ClaimAccount'
 import Machines from '../components/Machines'
+import People from '../components/People'
 import { api } from '../api'
 import type { JobStatus, RenderQueueRow, Status, StorageInfo } from '../types'
 
@@ -187,6 +188,8 @@ export default function DataPage() {
       </div>
 
       <Machines />
+
+      {auth.isAdmin && <People />}
 
       {renderQueue.length > 0 && (
         <div className="card">

@@ -65,6 +65,10 @@ export interface AgentKey {
 export interface ClaimInfo { id: string; accountId: string; riotId: string; iconId: number; expiresUtc: string; attemptsLeft: number; state: 'pending' | 'verified' | 'expired' | 'failed' }
 export interface JoinCodeInfo { code: string; role: 'recorder' | 'renderer'; expiresUtc: string }
 export interface MyAgents { keys: AgentKey[]; live: AgentInfo[]; joinCodes: JoinCodeInfo[] }
+export interface AdminUser {
+  id: string; email: string; displayName: string; isAdmin: boolean; createdUtc: string; lastSeenUtc: string | null
+  logins: string[]; accounts: string[]; agents: number
+}
 
 export interface MatchSummary {
   id: string
