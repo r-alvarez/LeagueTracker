@@ -12,6 +12,7 @@ namespace LeagueTracker.Api.Services;
 public sealed class MatchPollerService(
     AccountScopes scopes,
     AccountRegistry accounts,
+    AccountInitializer initializer,
     IOptions<RiotOptions> options,
     PerAccount<LiveGameState> liveStates,
     ILogger<MatchPollerService> logger) : BackgroundService
@@ -37,6 +38,9 @@ public sealed class MatchPollerService(
             // so sequential is also the polite order.
             foreach (var account in accounts.All)
             {
+                // A db that could not be opened is retried by the initializer on
+                // its own schedule; polling it would only fail on the first query.
+                if (!initializer.EnsureReady(account)) continue;
                 try
                 {
                     await RunPassAsync(account, liveStates.For(account), ct);

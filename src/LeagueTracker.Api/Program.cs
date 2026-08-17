@@ -20,6 +20,7 @@ builder.Services.Configure<AccountsOptions>(builder.Configuration.GetSection("Ac
 builder.Services.AddSingleton<AccountRegistry>();
 builder.Services.AddScoped<AccountContext>();
 builder.Services.AddSingleton<AccountScopes>();
+builder.Services.AddSingleton<AccountInitializer>();
 builder.Services.AddDbContext<LeagueDbContext>((sp, o) =>
     o.UseSqlite($"Data Source={Path.Combine(sp.GetRequiredService<AccountContext>().DataDir, "leaguetracker.db")}"));
 
@@ -88,87 +89,11 @@ builder.Services.AddResponseCompression(o => o.EnableForHttps = true);
 
 var app = builder.Build();
 
-foreach (var account in app.Services.GetRequiredService<AccountRegistry>().All)
-{
-    try
-    {
-        InitializeAccount(account);
-    }
-    catch (Exception ex)
-    {
-        // One account's broken db (locked, read-only, torn) must not take every
-        // other account's site down with it - its own pages will fail loudly.
-        app.Logger.LogError(ex, "Account {Slug}: database initialisation failed - its pages will error until fixed", account.Slug);
-    }
-}
-
-// Creates/upgrades an account's SQLite - at startup for every configured
-// account, and again for each one added through the site.
-void InitializeAccount(Account account)
-{
-    using var scope = app.Services.GetRequiredService<AccountScopes>().Create(account);
-    var db = scope.ServiceProvider.GetRequiredService<LeagueDbContext>();
-    db.Database.EnsureCreated();
-    // WAL lets match pages read while the poller/backfill writes (the default
-    // rollback journal blocks readers for the whole write). Persistent setting.
-    db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL");
-    // Additive columns land as ALTERs for exactly the columns a table lacks -
-    // checked against PRAGMA table_info first, so an already-current db runs
-    // no statement at all. (Firing every ALTER and swallowing the exception
-    // made a locked or read-only db indistinguishable from "column already
-    // exists", and logged one EF failure per column per account at every start.)
-    var upgrades = new (string Table, string Column, string Definition)[]
-    {
-        ("Matches", "AllyJungler", "TEXT NULL"),
-        ("Matches", "TotalTimeSpentDead", "INTEGER NOT NULL DEFAULT 0"),
-        ("Matches", "LongestTimeSpentLiving", "INTEGER NOT NULL DEFAULT 0"),
-        ("Matches", "TotalTimeCcDealt", "INTEGER NOT NULL DEFAULT 0"),
-        ("Matches", "ChallengesJson", "TEXT NOT NULL DEFAULT ''"),
-        ("Matches", "AvgUnspentGold", "INTEGER NULL"),
-        ("Matches", "MaxUnspentGold", "INTEGER NULL"),
-        ("Matches", "FirstWardSec", "INTEGER NULL"),
-        ("Matches", "FirstControlWardSec", "INTEGER NULL"),
-        ("Matches", "WardsFirst10", "INTEGER NOT NULL DEFAULT 0"),
-        ("Matches", "Level6LeadSec", "INTEGER NULL"),
-        ("Matches", "Level11LeadSec", "INTEGER NULL"),
-        ("Matches", "Level16LeadSec", "INTEGER NULL"),
-        ("Matches", "FriendlyEpicObjectives", "INTEGER NOT NULL DEFAULT 0"),
-        ("Matches", "ObjectivesPresentFor", "INTEGER NOT NULL DEFAULT 0"),
-        ("Matches", "FightsJson", "TEXT NOT NULL DEFAULT ''"),
-        ("Matches", "TeamGoldDiff15", "INTEGER NULL"),
-        ("Matches", "TeamGoldDiff20", "INTEGER NULL"),
-        ("Matches", "ContestedEpicsTaken", "INTEGER NOT NULL DEFAULT 0"),
-        ("Deaths", "EnemyJunglerNear", "INTEGER NULL"),
-        ("KillEvents", "AssistIds", "TEXT NOT NULL DEFAULT ''"),
-    };
-    var connection = db.Database.GetDbConnection();
-    db.Database.OpenConnection();
-    try
-    {
-        var columnsByTable = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (table, column, definition) in upgrades)
-        {
-            if (!columnsByTable.TryGetValue(table, out var columns))
-            {
-                columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                using var pragma = connection.CreateCommand();
-                pragma.CommandText = $"PRAGMA table_info({table})";
-                using var reader = pragma.ExecuteReader();
-                while (reader.Read()) columns.Add(reader.GetString(1));
-                columnsByTable[table] = columns;
-            }
-            if (columns.Contains(column)) continue;
-            db.Database.ExecuteSqlRaw($"ALTER TABLE {table} ADD COLUMN {column} {definition}");
-            columns.Add(column);
-            app.Logger.LogInformation("Account {Slug}: added column {Table}.{Column}", account.Slug, table, column);
-        }
-    }
-    finally
-    {
-        db.Database.CloseConnection();
-    }
-    app.Logger.LogInformation("Account {Slug}: {RiotId} at {Dir}", account.Slug, account.RiotId, account.DataDir);
-}
+// Every account gets its db created/upgraded now; one that fails is marked
+// unavailable (503 on its API, skipped by the poller, retried every minute)
+// instead of taking the process down.
+var initializer = app.Services.GetRequiredService<AccountInitializer>();
+foreach (var account in app.Services.GetRequiredService<AccountRegistry>().All) initializer.EnsureReady(account);
 
 app.UseForwardedHeaders();
 app.Use((http, next) =>
@@ -207,10 +132,25 @@ MapAccountApi(app.MapGroup("/api/a/{region:regex(^[a-z]{{2,4}}$)}/{slug}"));   /
 MapAccountApi(app.MapGroup("/api/a/{slug}"));                                    // first one-site build; agents mid-update
 MapAccountApi(app.MapGroup("/api/agent/a/{region:regex(^[a-z]{{2,4}}$)}/{slug}")); // keyed agents (Access-bypassed slice)
 
-static object AccountView(Account a) => new
+// An account whose db could not be opened answers 503 with the reason on
+// every account-scoped route (this also retries the initialisation once a
+// minute, so a transient lock clears itself); the global routes - the
+// account list, agent enrolment, releases - keep working regardless.
+static async ValueTask<object?> RequireAvailableAccount(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+{
+    var account = context.HttpContext.RequestServices.GetRequiredService<AccountContext>().Current;
+    var initializer = context.HttpContext.RequestServices.GetRequiredService<AccountInitializer>();
+    return initializer.EnsureReady(account)
+        ? await next(context)
+        : Results.Problem($"{account.RiotId} is unavailable: {initializer.ErrorFor(account)}", statusCode: 503, title: "Account unavailable");
+}
+
+object AccountView(Account a) => new
 {
     a.Slug, a.Label, a.RiotId, a.GameName, a.TagLine, a.HideLp, a.Platform,
     Region = a.RegionCode, Path = a.UrlPath, a.FromConfig,
+    Available = initializer.IsReady(a),
+    Unavailable = initializer.ErrorFor(a),
 };
 
 app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct) => Results.Ok(new
@@ -227,7 +167,7 @@ app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct) => R
 // The "add account" box: a Riot ID typed by a person, checked against Riot
 // (account-v1 answers with the canonical casing and the puuid), then given a
 // folder, a database and a place in the poller's round - no redeploy.
-app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry registry, AccountScopes scopes, IRiotKeyProvider keys, CancellationToken ct) =>
+app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry registry, AccountScopes scopes, AccountInitializer initializer, IRiotKeyProvider keys, CancellationToken ct) =>
 {
     if (!registry.CanAdd) return Results.Problem("This deployment takes accounts from configuration only (Accounts:DataRoot is not set)", statusCode: 409);
     var (gameName, tagLine) = ParseRiotId(request.RiotId);
@@ -257,7 +197,10 @@ app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry r
         }
     }
     var account = registry.Add(resolved.GameName ?? gameName, resolved.TagLine ?? tagLine, platform.Platform, request.DisplayName);
-    InitializeAccount(account);
+    if (!initializer.EnsureReady(account))
+    {
+        return Results.Problem($"{account.RiotId} is registered but its database could not be initialised: {initializer.ErrorFor(account)}", statusCode: 503);
+    }
     using (var scope = scopes.Create(account))
     {
         await scope.ServiceProvider.GetRequiredService<TrackedPlayerService>().StorePuuidAsync(resolved.Puuid, ct);
@@ -266,8 +209,13 @@ app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry r
 });
 
 // Untrack (the folder stays on the NAS). Configured accounts say no.
-app.MapDelete("/api/accounts/{slug}", (string slug, AccountRegistry registry) =>
-    registry.Remove(Uri.UnescapeDataString(slug)) ? Results.NoContent() : Results.NotFound());
+app.MapDelete("/api/accounts/{slug}", (string slug, AccountRegistry registry, AccountInitializer initializer) =>
+{
+    var decoded = Uri.UnescapeDataString(slug);
+    if (!registry.Remove(decoded)) return Results.NotFound();
+    initializer.Forget(decoded);
+    return Results.NoContent();
+});
 
 static (string? GameName, string? TagLine) ParseRiotId(string? riotId)
 {
@@ -355,8 +303,9 @@ app.MapFallbackToFile("index.html", staticFiles);
 
 app.Run();
 
-void MapAccountApi(IEndpointRouteBuilder api)
+void MapAccountApi(RouteGroupBuilder api)
 {
+api.AddEndpointFilter(RequireAvailableAccount);
 // --- Status ---------------------------------------------------------------------
 
 api.MapGet("/status", async (AccountContext acct, LeagueDbContext db, LpService lp, TrackedPlayerService player, IRiotKeyProvider keys, JobStatusService jobs, ReplayArchiveService replays, AgentRegistry agents, CancellationToken ct) =>
