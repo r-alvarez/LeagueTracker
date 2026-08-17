@@ -1304,3 +1304,55 @@ failed renders hide behind a toggle and group by reason ("window(s) N
 skipped" normalised so the sim-hang cases collapse to one row) with the
 games as champion · date chips linking to the match page - the ids alone
 were unreadable anyway.
+
+## 2026-08-17 — Production audit: the "already broken today" fixes
+
+**Raw game files resolve by match id, not by the stored path.** Every
+`Match.RawPath` in the main account still read `/data/games/<id>.json`
+from the single-container era; the account moved to `/data/main`, so
+reprocess had been reporting success while touching nothing and the
+match-page curves 204'd for the whole history. `DataPaths.ResolveRawGame`
+now looks in the account's own `games/` first and falls back to the stored
+path (imports keep pointing at their source folder), and reprocess writes
+the resolved path back - one pass heals the db. Rejected: a one-off
+migration of the column, which would break again on the next layout move.
+
+**Reprocess extracts the challenges block by the resolved participant's
+own puuid.** It already resolved "me" via the IsMe flag precisely because
+older raw files carry a differently encrypted puuid - then re-extracted
+challenges by the current puuid anyway, blanking 313 of 476 games on every
+pass. Whether puuids really rotate per key is still open (Riot's docs say
+no; the corpus says yes); this fix is correct either way.
+
+**A level lead needs two timestamps.** `LevelLead` returned my own
+game-clock second when the opponent never reached the level, so a 30-minute
+game scored "1800 s ahead to level 16" into the Lens/Fundamentals trading
+tiles (58 rows). Null now; `FirstToLevel2` is a strict "earlier", a tie is
+not first.
+
+**Grubs are one epic moment, not three.** The presence metric counted each
+HORDE kill as an opportunity (31% of the friendly-epic denominator), so a
+grub camp outweighed a Baron 3:1. Same-kind epics within 90 s collapse in
+the analyzer - the rule the Discipline verdict already used for conceded
+epics, applied to both sides of the concept.
+
+**Self-percentiles compare like with like and exclude the window.** The
+recent window's mean was ranked against single-game values of the whole
+history *including* the window, so every score converged on 50 as the
+window grew. Reference is now the baseline only, as the means of every
+equally long window in it (rolling); histories shorter than window+4
+baseline games fall back to the baseline's per-game values so a young
+account still gets a number. Trade-off accepted: young accounts get a
+noisier scale than mature ones, labelled nowhere yet.
+
+**One queue-family table, unknown = 400.** The match filter's queue switch
+was a private list that never learned Swiftplay (480), so 65 games were
+unreachable by any filter and a typo returned everything. `RankMath.
+QueueFamily` sits next to `QueueName` (solo/flex/normal incl. 480/aram
+/arena/urf/swiftplay); an unknown family is a 400.
+
+**Agent status resets to idle after every recorded game.** The only path
+back to idle was inside the YouTube publish, so a recorder-only install
+sat at "finalizing" forever and self-update (which waits for idle) never
+ran again. The reset lives in the recorder loop's `finally` around
+`RecordGameAsync`, covering gave-up, no-segments and exceptions too.
