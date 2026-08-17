@@ -633,7 +633,7 @@ export default function MatchDetail() {
               <div className="sub">
                 <span>{m.kills}/<span className="loss">{m.deaths}</span>/{m.assists}</span> · {m.cs} CS
                 {m.laneGoldDiff10 !== null && <> · <span className={m.laneGoldDiff10 >= 0 ? 'win' : 'loss'}>{m.laneGoldDiff10 > 0 ? '+' : ''}{m.laneGoldDiff10}g</span> @10</>}
-                {m.hasReplay && (
+                {m.hasReplay && canManage && (
                   <>
                     {' · '}
                     <a href={`leaguereplay://${window.location.host}/${m.id}`}

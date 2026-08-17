@@ -255,7 +255,7 @@ export default function Dashboard() {
           ))}
         </div>
         {s && <span className="mut">ranked · {s.dateFrom} → {s.dateTo}</span>}
-        {status && !status.apiKeyConfigured && <span className="mut">· no API key - live capture paused (see Data & sync)</span>}
+        {status?.apiKeyConfigured === false && <span className="mut">· no API key - live capture paused (see Data & sync)</span>}
       </div>
 
       {stats && s && o && (

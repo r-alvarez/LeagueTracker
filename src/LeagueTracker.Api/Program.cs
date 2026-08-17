@@ -123,6 +123,9 @@ var app = builder.Build();
 var initializer = app.Services.GetRequiredService<AccountInitializer>();
 foreach (var account in app.Services.GetRequiredService<AccountRegistry>().All) initializer.EnsureReady(account);
 app.Services.GetRequiredService<RegistryBootstrap>().Run();
+// Built now, not on the first agent request: its one-time agents.json import
+// belongs in the boot log next to the account import.
+app.Services.GetRequiredService<AgentKeyStore>();
 
 app.UseForwardedHeaders();
 app.Use((http, next) =>
