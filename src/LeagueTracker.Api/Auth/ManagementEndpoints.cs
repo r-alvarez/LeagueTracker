@@ -64,6 +64,22 @@ public static class ManagementEndpoints
         me.MapPost("/agents/{id}/dismiss-error", (string id, Caller caller, AgentKeyStore keys, AgentRegistry agents) =>
             Own(caller, keys, id) is { } key ? (agents.DismissError(key.Id) ? Results.Ok() : Results.NotFound()) : Results.NotFound());
 
+        // --- Claiming a Riot account --------------------------------------------------
+
+        me.MapGet("/claims", (Caller caller, ClaimService claims) => Results.Ok(claims.Mine(caller.UserId!)));
+
+        me.MapPost("/claims", async (ClaimRequest request, Caller caller, ClaimService claims, CancellationToken ct) =>
+        {
+            var (claim, error) = await claims.StartAsync(caller.UserId!, request.AccountId, ct);
+            return claim is not null ? Results.Ok(claim) : Results.BadRequest(new { error });
+        });
+
+        me.MapPost("/claims/{id}/verify", async (string id, Caller caller, ClaimService claims, CancellationToken ct) =>
+        {
+            var (claim, verified, error) = await claims.VerifyAsync(caller.UserId!, id, ct);
+            return claim is null ? Results.NotFound(new { error }) : Results.Ok(new { claim, verified, error });
+        });
+
         // --- Admin ----------------------------------------------------------------
 
         admin.MapGet("/users", (UserStore users, AccountRegistry accounts, AgentKeyStore keys) => Results.Ok(users.All().Select(u => new
@@ -125,4 +141,5 @@ public static class ManagementEndpoints
     };
 
     public sealed record AssignRequest(string? OwnerEmail, string? Role);
+    public sealed record ClaimRequest(string AccountId);
 }

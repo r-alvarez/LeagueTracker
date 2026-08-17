@@ -24,6 +24,7 @@ builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth")
 builder.Services.AddSingleton<RegistryDatabase>();
 builder.Services.AddSingleton<UserStore>();
 builder.Services.AddSingleton<RegistryBootstrap>();
+builder.Services.AddSingleton<ClaimService>();
 
 // One process, many tracked accounts: each request/job is bound to one
 // (AccountContext) and everything account-shaped - data folder, SQLite,

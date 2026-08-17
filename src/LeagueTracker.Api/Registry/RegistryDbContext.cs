@@ -2,6 +2,7 @@ using LeagueTracker.Api.Accounts;
 using LeagueTracker.Api.Riot;
 using LeagueTracker.Api.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Microsoft.Extensions.Options;
 
 namespace LeagueTracker.Api.Registry;
@@ -37,6 +38,20 @@ public sealed class RegistryDbContext(DbContextOptions<RegistryDbContext> option
         b.Entity<JoinCode>().Property(c => c.Role).HasConversion<string>();
         b.Entity<OwnershipClaim>().Property(c => c.State).HasConversion<string>();
         b.Entity<OwnershipClaim>().HasIndex(c => c.AccountId);
+
+        // Every timestamp here is UTC; SQLite hands them back with Kind
+        // Unspecified, which serializes without the Z and lands in a browser
+        // as local time (an expiry an hour off is a claim that looks dead).
+        var utc = new ValueConverter<DateTime, DateTime>(v => v, v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
+        var utcNullable = new ValueConverter<DateTime?, DateTime?>(v => v, v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v);
+        foreach (var entity in b.Model.GetEntityTypes())
+        {
+            foreach (var property in entity.GetProperties())
+            {
+                if (property.ClrType == typeof(DateTime)) property.SetValueConverter(utc);
+                else if (property.ClrType == typeof(DateTime?)) property.SetValueConverter(utcNullable);
+            }
+        }
     }
 }
 

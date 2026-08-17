@@ -1,6 +1,6 @@
 import { account } from './account'
 import { csrfHeaders } from './auth'
-import type { AgentKey, AnalyticsSummary, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
+import type { AgentKey, AnalyticsSummary, ClaimInfo, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
 
 /// Every API call goes through here: account-scoped URL rewriting, the
 /// session cookie, and the CSRF header on writes. Bare fetch() elsewhere is
@@ -77,6 +77,20 @@ export const api = {
   },
   dismissAgentError: async (id: string) => { await apiFetch(`/api/me/agents/${id}/dismiss-error`, { method: 'POST' }) },
   restartAgent: async (id: string) => { await apiFetch(`/api/me/agents/${id}/restart`, { method: 'POST' }) },
+  // Claiming a Riot account (profile-icon proof)
+  myClaims: () => get<ClaimInfo[]>('/api/me/claims'),
+  startClaim: async (accountId: string): Promise<ClaimInfo> => {
+    const r = await apiFetch('/api/me/claims', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId }) })
+    const body = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(body.error ?? `claim -> HTTP ${r.status}`)
+    return body
+  },
+  verifyClaim: async (id: string): Promise<{ claim: ClaimInfo; verified: boolean; error: string | null }> => {
+    const r = await apiFetch(`/api/me/claims/${id}/verify`, { method: 'POST' })
+    const body = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(body.error ?? `verify -> HTTP ${r.status}`)
+    return body
+  },
   // Admin
   adminAgents: () => get<{ keys: AgentKey[]; live: unknown[] }>('/api/admin/agents'),
   adminAssignAgent: async (id: string, ownerEmail: string | null, role: string | null) => {

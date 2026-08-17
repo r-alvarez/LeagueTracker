@@ -62,6 +62,7 @@ export interface AgentKey {
   ownerUserId: string | null; ownerEmail?: string | null; bound: boolean
   createdUtc: string; decidedUtc: string | null; lastSeenUtc: string | null; lastIp: string | null; note: string | null
 }
+export interface ClaimInfo { id: string; accountId: string; riotId: string; iconId: number; expiresUtc: string; attemptsLeft: number; state: 'pending' | 'verified' | 'expired' | 'failed' }
 export interface JoinCodeInfo { code: string; role: 'recorder' | 'renderer'; expiresUtc: string }
 export interface MyAgents { keys: AgentKey[]; live: AgentInfo[]; joinCodes: JoinCodeInfo[] }
 

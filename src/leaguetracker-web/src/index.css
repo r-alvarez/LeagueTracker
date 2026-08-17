@@ -1570,3 +1570,6 @@ table.data.render-failed-table td.reason { color: var(--ink-2); font-size: 12.5p
 .setting-row input { margin-top: 3px; accent-color: var(--accent); }
 .join-code-box { margin-top: 8px; }
 .join-code { font: 700 26px/1.2 ui-monospace, "Cascadia Code", Consolas, monospace; letter-spacing: 0.12em; color: var(--accent); }
+
+.claim-box { display: flex; gap: 14px; align-items: flex-start; }
+.claim-icon { border-radius: 10px; border: 2px solid var(--accent); flex: 0 0 auto; }

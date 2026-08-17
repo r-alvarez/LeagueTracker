@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { account } from '../account'
 import { auth } from '../auth'
+import ClaimAccount from '../components/ClaimAccount'
 import Machines from '../components/Machines'
 import { api } from '../api'
 import type { JobStatus, RenderQueueRow, Status, StorageInfo } from '../types'
@@ -91,16 +92,16 @@ export default function DataPage() {
             snapshots · {status?.replays ?? 0} replays archived
           </p>
         </div>
-        <div className="card">
-          <h2>{status?.account.owned ? 'Owned account' : 'Nobody owns this account yet'}</h2>
-          <p className="mut" style={{ marginTop: 0 }}>
-            {status?.account.owned
-              ? 'Only its owner can run syncs, manage machines, download exports or change what the profile shows.'
-              : auth.signedIn
-                ? 'If this is your Riot account you can claim it: the tracker asks you to set a profile icon in the League client and checks it with Riot.'
+        {status?.account.owned || !auth.signedIn ? (
+          <div className="card">
+            <h2>{status?.account.owned ? 'Owned account' : 'Nobody owns this account yet'}</h2>
+            <p className="mut" style={{ marginTop: 0 }}>
+              {status?.account.owned
+                ? 'Only its owner can run syncs, manage machines, download exports or change what the profile shows.'
                 : 'Sign in to claim it if it is yours.'}
-          </p>
-        </div>
+            </p>
+          </div>
+        ) : status && <ClaimAccount />}
       </div>
     )
   }
