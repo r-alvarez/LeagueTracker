@@ -1331,7 +1331,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 var offsetMs = (long)(offsetSec * 1000);
                 using var file = File.OpenRead(Path.Combine(MetaDir, seg.EventsFile!));
                 using var gzip = new System.IO.Compression.GZipStream(file, System.IO.Compression.CompressionMode.Decompress);
-                using var reader = new StreamReader(gzip, Encoding.ASCII);
+                using var reader = new StreamReader(gzip, Encoding.UTF8);
                 reader.ReadLine(); // header
                 while (reader.ReadLine() is { Length: > 0 } line)
                 {
@@ -1342,7 +1342,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             }
             using (var file = File.Create(outPath))
             using (var gzip = new System.IO.Compression.GZipStream(file, System.IO.Compression.CompressionLevel.Fastest))
-            using (var writer = new StreamWriter(gzip, Encoding.ASCII))
+            using (var writer = new StreamWriter(gzip, new UTF8Encoding(false)))
             {
                 writer.WriteLine("t_ms,event_type,input_name,value_a,value_b");
                 foreach (var line in merged) writer.WriteLine(line);

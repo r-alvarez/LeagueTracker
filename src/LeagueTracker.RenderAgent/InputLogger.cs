@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -128,7 +129,9 @@ public sealed class InputLogger : IDisposable
     private void Enqueue(string type, string name, int a, int b)
     {
         if (_gameWindow != 0 && GetForegroundWindow() != _gameWindow) return;
-        _pending.Enqueue($"{_clock.ElapsedMilliseconds},{type},{name},{a},{b}");
+        // Invariant on purpose: a Nordic or RTL Windows formats -1 with U+2212
+        // (or a direction mark), and the server parses these with long.TryParse.
+        _pending.Enqueue(string.Create(CultureInfo.InvariantCulture, $"{_clock.ElapsedMilliseconds},{type},{name},{a},{b}"));
     }
 
     /// League binds letters, digits, F-keys and a few specials; everything
@@ -149,7 +152,7 @@ public sealed class InputLogger : IDisposable
     {
         await using var file = File.Create(Path);
         await using var gzip = new GZipStream(file, CompressionLevel.Fastest);
-        await using var writer = new StreamWriter(gzip, Encoding.ASCII);
+        await using var writer = new StreamWriter(gzip, new UTF8Encoding(false));
         await writer.WriteLineAsync("t_ms,event_type,input_name,value_a,value_b");
         while (!ct.IsCancellationRequested || !_pending.IsEmpty)
         {
