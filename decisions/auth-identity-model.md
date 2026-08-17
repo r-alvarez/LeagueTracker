@@ -13,25 +13,39 @@ bound to exactly one User. They live in a small global `registry.db`
 `agents.json`, which the audit already called the de-facto user table
 (T-M5). Per-account SQLites are untouched.
 
-**The app owns its users; an OIDC provider only authenticates them.** Ruben's
-call, and the reason: this is meant to become a product, possibly commercial,
-so ownership has to be ours, not a seat in someone else's identity org.
-The app is a standard OIDC relying party (`AddOpenIdConnect`, code flow +
+**The app owns its users; a managed OIDC provider only authenticates them.**
+Ruben's call, and the reason: this is meant to become a product, possibly
+commercial, so ownership has to be ours, not a seat in someone else's identity
+org. The app is a standard OIDC relying party (`AddOpenIdConnect`, code flow +
 PKCE, id_token validated against the provider's JWKS) with its own session
-cookie; users are keyed by `(issuer, subject)` with verified email as the
-recovery link. **The provider is Authentik on the Portainer stack** —
-unlimited users, self-signup and social sources when wanted, "Login with
-Riot" (RSO is OIDC) addable as a second provider later. Invite-only for now
-(Authentik enrollment closed; the app auto-creates its User row on first
-login). Rejected: Cloudflare Access as the identity (every login is a Zero
-Trust seat — 50 free — fine for friends, wrong for strangers or customers;
-and its JWT would tie authorization to cookie forwarding through bypass
-paths). Rejected: app-native passwords (nothing to gain over OIDC, a credential
-store to protect). Trade-off accepted: Authentik's exposure and backups are
-Ruben's; a rebuilt Authentik changes every `sub`, so email is the fallback
-link. Cloudflare Access site-wide stays on as the outer wall for now — the
-app does not depend on it, so taking it off for public reads changes nothing
-in-process. Localhost review: a Development-only `/api/auth/dev-login`.
+cookie. A `User` row is ours; a `UserLogin (UserId, Issuer, Subject)` link
+table holds provider identities, one user many logins, so a provider swap or
+a second provider ("Login with Riot" — RSO is OIDC) is a new login linked by
+verified email, never a migration. **The provider is Auth0** (managed:
+passwords, social login for friends, MFA, lockout, breached-password
+detection are theirs to run; ~25k MAU free), invite-only for now (public
+signups disabled on the connection; the app creates its User row on first
+login). Rejected — Authentik on the Portainer stack, first proposed then
+withdrawn on Ruben's objection: `auth.rjav-tech.co.uk` is the SSO for the
+whole homelab (TrueNAS, Portainer, Homarr), so making it the public
+tracker's provider would put every stranger's login attempt, credential-
+stuffing run and Authentik CVE on the homelab's door; an IdP's blast radius
+is everything that trusts it. Rejected — Cloudflare Access as the identity
+(every login is a Zero Trust seat, 50 free: right for friends, wrong for
+strangers or customers; and its JWT would tie authorization to cookie
+forwarding through bypass paths); Access-for-SaaS as a stop-gap was offered
+and declined in favour of one provider from day one so nobody re-links.
+Rejected — app-native passwords (nothing to gain over OIDC, a credential
+store to protect). Cloudflare Access site-wide stays on as the outer wall
+for now — during invite-only a stranger never reaches the login button — and
+the app does not depend on it, so taking it off for public reads changes
+nothing in-process. Isolation rule that goes with this: the tracker's blast
+radius is its container plus `/data`; it sits on no Docker network that can
+reach Authentik, Portainer or the TrueNAS API and holds no homelab secret —
+only its own Auth0 client secret and the Riot key. Localhost review: a
+Development-only `/api/auth/dev-login`; a real Auth0 round-trip is also
+testable locally by allowing `http://localhost:5399/auth/callback` on the
+Auth0 application.
 
 **Account = surrogate id + puuid; RiotId is an alias, never a key.** Riot
 encrypts puuids per API-key *holder* (their own PUUID post), which is the
@@ -104,7 +118,14 @@ from `Auth__Admins`. Existing approved keys start unbound; `Agents:AllowUnbound`
 owners on the Data page, the flag comes off. Old agent URLs stay alive as
 the curated subset until the heartbeats show the new agent build. The Access
 rule change is the last step, after `/api/auth/me` on the deployed site
-proves the session works.
+proves the session works — and the site-wide Access policy, today "Ruben
+only", gets the friends' emails first, or they never reach the login button.
+Auth0 side (console, not code): a Regular Web Application with callback
+`https://league.rjav-tech.co.uk/auth/callback`, connections as wanted
+(username-password with sign-ups disabled, Google/Discord), MFA and
+brute-force protection on; issuer, client id and secret go into the Portainer
+stack env as `Auth__Oidc__Authority/ClientId/ClientSecret` (never in the repo,
+never read by me).
 
 **Reviewable phases, each on localhost:5399 before its commit** (dev login
 needs `--environment Development` on top of the usual `--no-launch-profile
