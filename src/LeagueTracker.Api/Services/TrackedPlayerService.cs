@@ -9,13 +9,20 @@ public sealed class TrackedPlayerService(LeagueDbContext db, RiotApiClient riot,
     public Account Account => account.Current;
     public string RiotId => Account.RiotId;
 
-    private string CacheKey => $"puuid:{RiotId}";
+    public static string PuuidCacheKey(string riotId) => $"puuid:{riotId}";
+    private string CacheKey => PuuidCacheKey(RiotId);
 
-    /// Puuid is stable per account+region; cache it in the db so scheduled/service
-    /// startups don't spend a request on account-v1 every time.
+    /// Puuid is stable per account+region; the registry holds it, the account's
+    /// own db keeps a copy (imports work before the registry knew the account),
+    /// and account-v1 is asked only when neither has it.
     public async Task<string> GetPuuidAsync(CancellationToken ct)
     {
-        if (await db.KeyValues.FindAsync([CacheKey], ct) is { } cached) return cached.Value;
+        if (Account.Puuid is { Length: > 0 } known) return known;
+        if (await db.KeyValues.FindAsync([CacheKey], ct) is { } cached)
+        {
+            account.Registry.Update(Account, a => a.Puuid ??= cached.Value);
+            return cached.Value;
+        }
 
         var resolved = await riot.GetAccountAsync(Account.GameName, Account.TagLine, ct);
         await StorePuuidAsync(resolved.Puuid, ct);
@@ -35,5 +42,6 @@ public sealed class TrackedPlayerService(LeagueDbContext db, RiotApiClient riot,
             db.KeyValues.Add(new KeyValue { Key = CacheKey, Value = puuid });
         }
         await db.SaveChangesAsync(ct);
+        if (Account.Puuid != puuid && account.Registry.ByPuuid(puuid) is null) account.Registry.Update(Account, a => a.Puuid = puuid);
     }
 }

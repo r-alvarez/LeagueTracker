@@ -1,6 +1,8 @@
 using System.Text;
 using LeagueTracker.Api.Accounts;
+using LeagueTracker.Api.Auth;
 using LeagueTracker.Api.Data;
+using LeagueTracker.Api.Registry;
 using LeagueTracker.Api.Riot;
 using LeagueTracker.Api.Services;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -13,6 +15,15 @@ builder.Services.AddWindowsService(o => o.ServiceName = "LeagueTracker");
 builder.Services.Configure<RiotOptions>(builder.Configuration.GetSection("Riot"));
 builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection("Agent"));
 builder.Services.Configure<AccountsOptions>(builder.Configuration.GetSection("Accounts"));
+builder.Services.Configure<AgentsOptions>(builder.Configuration.GetSection("Agents"));
+builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth"));
+
+// The global registry: users, the accounts they own, the machines they
+// enrolled. One SQLite next to the account folders; the per-account
+// databases stay what they were.
+builder.Services.AddSingleton<RegistryDatabase>();
+builder.Services.AddSingleton<UserStore>();
+builder.Services.AddSingleton<RegistryBootstrap>();
 
 // One process, many tracked accounts: each request/job is bound to one
 // (AccountContext) and everything account-shaped - data folder, SQLite,
@@ -94,6 +105,7 @@ var app = builder.Build();
 // instead of taking the process down.
 var initializer = app.Services.GetRequiredService<AccountInitializer>();
 foreach (var account in app.Services.GetRequiredService<AccountRegistry>().All) initializer.EnsureReady(account);
+app.Services.GetRequiredService<RegistryBootstrap>().Run();
 
 app.UseForwardedHeaders();
 app.Use((http, next) =>
@@ -147,8 +159,10 @@ static async ValueTask<object?> RequireAvailableAccount(EndpointFilterInvocation
 
 object AccountView(Account a) => new
 {
-    a.Slug, a.Label, a.RiotId, a.GameName, a.TagLine, a.HideLp, a.Platform,
+    a.Id, a.Slug, a.Label, a.RiotId, a.GameName, a.TagLine, a.HideLp, a.Platform,
     Region = a.RegionCode, Path = a.UrlPath, a.FromConfig,
+    Owned = a.IsOwned, a.OwnerUserId, a.MediaPublic,
+    PreviousSlugs = a.PreviousSlugList,
     Available = initializer.IsReady(a),
     Unavailable = initializer.ErrorFor(a),
 };
@@ -196,7 +210,8 @@ app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry r
             return Results.Problem($"Riot answered {ex.StatusCode} while checking the account{(ex.IsAuthFailure ? " - the API key is invalid or expired" : "")}", statusCode: 502);
         }
     }
-    var account = registry.Add(resolved.GameName ?? gameName, resolved.TagLine ?? tagLine, platform.Platform, request.DisplayName);
+    if (registry.ByPuuid(resolved.Puuid) is { } samePlayer) return Results.Conflict(new { error = $"{samePlayer.RiotId} is already tracked (same player, renamed)", account = AccountView(samePlayer) });
+    var account = registry.Add(resolved.GameName ?? gameName, resolved.TagLine ?? tagLine, platform.Platform, request.DisplayName, resolved.Puuid);
     if (!initializer.EnsureReady(account))
     {
         return Results.Problem($"{account.RiotId} is registered but its database could not be initialised: {initializer.ErrorFor(account)}", statusCode: 503);
@@ -209,11 +224,12 @@ app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry r
 });
 
 // Untrack (the folder stays on the NAS). Configured accounts say no.
-app.MapDelete("/api/accounts/{slug}", (string slug, AccountRegistry registry, AccountInitializer initializer) =>
+app.MapDelete("/api/accounts/{idOrSlug}", (string idOrSlug, AccountRegistry registry, AccountInitializer initializer) =>
 {
-    var decoded = Uri.UnescapeDataString(slug);
-    if (!registry.Remove(decoded)) return Results.NotFound();
-    initializer.Forget(decoded);
+    var decoded = Uri.UnescapeDataString(idOrSlug);
+    if ((registry.ById(decoded) ?? registry.BySlug(decoded)) is not { } account) return Results.NotFound();
+    if (!registry.Remove(account.Id)) return Results.Conflict(new { error = "configured accounts are removed from the compose, not here" });
+    initializer.Forget(account.Slug);
     return Results.NoContent();
 });
 
@@ -244,7 +260,7 @@ static (string? GameName, string? TagLine) ParseRiotId(string? riotId)
 app.MapPost("/api/agent/enroll", (EnrollRequest request, HttpContext http, AgentKeyStore keys) =>
 {
     if (request.Key is not { Length: >= 32 } || request.Key.Length > 200) return Results.BadRequest(new { error = "key must be 32-200 characters" });
-    var (record, created, refusal) = keys.Enroll(request.Key, request.Name ?? "", request.Machine ?? "unknown", http.Connection.RemoteIpAddress?.ToString());
+    var (record, created, refusal) = keys.Enroll(request.Key, request.Name ?? "", request.Machine ?? "unknown", http.Connection.RemoteIpAddress?.ToString(), request.Code);
     if (refusal is not null) return Results.StatusCode(StatusCodes.Status429TooManyRequests);
     return Results.Ok(new { record.Id, Status = record.Status.ToString().ToLowerInvariant(), Created = created });
 });
@@ -1220,4 +1236,4 @@ static IResult CsvFile(string fileName, string csv) =>
 
 public sealed record AddAccountRequest(string RiotId, string Region, string? DisplayName);
 
-public sealed record EnrollRequest(string Key, string? Name, string? Machine);
+public sealed record EnrollRequest(string Key, string? Name, string? Machine, string? Code);
