@@ -2,4 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/LeagueTracker.Api/LeagueTracker.Api.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LeagueTracker.Api.Tests/LeagueTracker.Api.Tests.csproj" />
+  </Folder>
 </Solution>
