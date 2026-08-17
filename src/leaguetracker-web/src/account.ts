@@ -5,13 +5,14 @@
 export interface AccountInfo {
   slug: string; label: string; riotId: string; gameName: string; tagLine: string
   hideLp: boolean; platform: string; region: string; path: string; fromConfig: boolean
+  available: boolean; unavailable: string | null
 }
 export interface RegionInfo { code: string; label: string; platform: string }
 export interface AccountsResponse {
   default: string; current: string; canAdd: boolean; regions: RegionInfo[]; accounts: AccountInfo[]
 }
 
-let current: AccountInfo = { slug: '', label: '', riotId: '', gameName: '', tagLine: '', hideLp: false, platform: '', region: '', path: '', fromConfig: true }
+let current: AccountInfo = { slug: '', label: '', riotId: '', gameName: '', tagLine: '', hideLp: false, platform: '', region: '', path: '', fromConfig: true, available: true, unavailable: null }
 let all: AccountInfo[] = []
 let regions: RegionInfo[] = []
 let canAdd = false

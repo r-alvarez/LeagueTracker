@@ -43,7 +43,9 @@ export default function AccountSwitch() {
     <span className="account-control">
       <label className="player account-switch" title="Switch account">
         <select value={account.current.slug} onChange={e => onPick(e.target.value)} aria-label="Account">
-          {account.all.map(a => <option key={a.slug} value={a.slug}>{a.label} · {a.riotId}</option>)}
+          {account.all.map(a => (
+            <option key={a.slug} value={a.slug}>{a.label} · {a.riotId}{a.available ? '' : ' · unavailable'}</option>
+          ))}
           {account.canAdd && <option value={ADD}>＋ Add account…</option>}
         </select>
       </label>

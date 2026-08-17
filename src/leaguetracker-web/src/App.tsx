@@ -49,6 +49,12 @@ export default function App() {
         <NavLink to="/data" className={({ isActive }) => (isActive ? 'active' : '')}>Data & sync</NavLink>
       </nav>
 
+      {!account.current.available && (
+        <div className="card" role="alert" style={{ marginBottom: 16, borderLeft: '3px solid var(--warn)' }}>
+          <b>This account's data is unavailable right now</b> — its database could not be opened
+          {account.current.unavailable ? ` (${account.current.unavailable})` : ''}. The tracker retries every minute; the other accounts are unaffected.
+        </div>
+      )}
       <LiveGameBanner />
       <StopLossBanner />
 
