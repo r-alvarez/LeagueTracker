@@ -40,47 +40,41 @@ public static class AccountServiceCollectionExtensions
     }
 }
 
-/// Binds the request's account before any scoped service is built:
+/// Binds the request's account after routing and before authorization:
 /// /api/a/{region}/{slug}/... (canonical), /api/a/{slug}/... (the first
-/// one-site build; kept for agents mid-update); otherwise the Host header
-/// (legacy per-account hostnames); otherwise the default account.
+/// one-site build), /api/agent/a/{region}/{slug}/... (agents mid-update) -
+/// all read from the route values the router already decoded, so there is
+/// exactly one URL per account. Otherwise the Host header (legacy
+/// per-account hostnames), otherwise the default account. A slug the
+/// account used before a rename answers with a permanent redirect to the
+/// address it has now.
 public sealed class AccountBindingMiddleware(RequestDelegate next, AccountRegistry registry)
 {
     public async Task InvokeAsync(HttpContext http)
     {
         var context = http.RequestServices.GetRequiredService<AccountContext>();
-        var path = http.Request.Path.Value ?? "";
         Account? account = null;
 
-        // /api/a/... for humans (behind Access), /api/agent/a/... for keyed
-        // agents (the Access-bypassed slice) - same account addressing.
-        var prefix = path.StartsWith("/api/a/", StringComparison.OrdinalIgnoreCase) ? "/api/a/"
-            : path.StartsWith("/api/agent/a/", StringComparison.OrdinalIgnoreCase) ? "/api/agent/a/"
-            : null;
-        if (prefix is not null)
+        if (http.GetRouteValue("slug") is string slug)
         {
-            var parts = path[prefix.Length..].Split('/', 3);
-            var first = Uri.UnescapeDataString(parts[0]);
-            if (Platforms.ByCode(first) is not null && parts.Length > 1)
+            var region = http.GetRouteValue("region") as string;
+            account = region is null ? registry.BySlug(slug) : registry.ByPath(region, slug);
+            if (account is null && registry.ByPreviousSlug(slug) is { } renamed)
             {
-                var slug = Uri.UnescapeDataString(parts[1]);
-                account = registry.ByPath(first, slug);
-                if (account is null)
-                {
-                    http.Response.StatusCode = StatusCodes.Status404NotFound;
-                    await http.Response.WriteAsync($"unknown account '{first}/{slug}'");
-                    return;
-                }
+                var path = http.Request.Path.Value ?? "";
+                var stale = $"/{(region is null ? "" : region + "/")}{Uri.EscapeDataString(slug)}";
+                var index = path.IndexOf(stale, StringComparison.OrdinalIgnoreCase);
+                var target = index >= 0
+                    ? path[..index] + $"/{renamed.RegionCode}/{Uri.EscapeDataString(renamed.Slug)}" + path[(index + stale.Length)..]
+                    : $"/api/a/{renamed.RegionCode}/{Uri.EscapeDataString(renamed.Slug)}";
+                http.Response.Redirect(target + http.Request.QueryString, permanent: true, preserveMethod: true);
+                return;
             }
-            else
+            if (account is null)
             {
-                account = registry.BySlug(first);
-                if (account is null)
-                {
-                    http.Response.StatusCode = StatusCodes.Status404NotFound;
-                    await http.Response.WriteAsync($"unknown account '{first}'");
-                    return;
-                }
+                http.Response.StatusCode = StatusCodes.Status404NotFound;
+                await http.Response.WriteAsync($"unknown account '{(region is null ? "" : region + "/")}{slug}'");
+                return;
             }
         }
         account ??= registry.ByHost(http.Request.Host.Host) ?? registry.Default;

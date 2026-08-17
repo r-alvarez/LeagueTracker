@@ -76,9 +76,15 @@ builder.Services.AddScoped<VodService>();
 builder.Services.AddPerAccount<LiveGameState>();
 builder.Services.AddHostedService<MatchPollerService>();
 
-// Vite dev server origin; irrelevant in production where the SPA is served by this host.
-builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
-    p.WithOrigins("http://localhost:5173").AllowAnyHeader().AllowAnyMethod()));
+// Vite dev server origin - Development only: with a session cookie in play a
+// standing cross-origin allowance would be a CSRF/exfiltration path.
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
+        p.WithOrigins("http://localhost:5173").AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
+}
+
+builder.AddTrackerAuth();
 
 // Behind Traefik (and Cloudflare in front of it) the socket peer is always the
 // proxy: without this every agent enrolment shared one "IP", the per-IP
@@ -117,9 +123,14 @@ app.Use((http, next) =>
     }
     return next(http);
 });
-app.UseMiddleware<AgentAuthMiddleware>();
+app.UseRouting();
+if (app.Environment.IsDevelopment()) app.UseCors();
+// Binding needs the route values (after routing) and must precede
+// authorization (the Owner/Agent policies judge against the bound account).
 app.UseMiddleware<AccountBindingMiddleware>();
-app.UseCors();
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseCsrfGuard();
 app.UseResponseCompression();
 // Hashed bundles never change; everything else (index.html above all) must
 // revalidate every load - without an explicit Cache-Control, browsers apply
@@ -142,7 +153,7 @@ app.UseStaticFiles(staticFiles);
 MapAccountApi(app.MapGroup("/api"));
 MapAccountApi(app.MapGroup("/api/a/{region:regex(^[a-z]{{2,4}}$)}/{slug}"));   // canonical: /api/a/euw/ImRA-87166/...
 MapAccountApi(app.MapGroup("/api/a/{slug}"));                                    // first one-site build; agents mid-update
-MapAccountApi(app.MapGroup("/api/agent/a/{region:regex(^[a-z]{{2,4}}$)}/{slug}")); // keyed agents (Access-bypassed slice)
+MapAccountApi(app.MapGroup("/api/agent/a/{region:regex(^[a-z]{{2,4}}$)}/{slug}").RequireAuthorization(Policies.Agent)); // keyed agents (Access-bypassed slice)
 
 // An account whose db could not be opened answers 503 with the reason on
 // every account-scoped route (this also retries the initialisation once a
@@ -257,6 +268,8 @@ static (string? GameName, string? TagLine) ParseRiotId(string? riotId)
 // the rest of /api/agent/*. Human management lives under /api/agents
 // (behind Access like every other human route).
 
+app.MapAuthEndpoints();
+
 app.MapPost("/api/agent/enroll", (EnrollRequest request, HttpContext http, AgentKeyStore keys) =>
 {
     if (request.Key is not { Length: >= 32 } || request.Key.Length > 200) return Results.BadRequest(new { error = "key must be 32-200 characters" });
@@ -266,18 +279,18 @@ app.MapPost("/api/agent/enroll", (EnrollRequest request, HttpContext http, Agent
 });
 
 app.MapGet("/api/agent/enroll/status", (HttpContext http, AgentKeyStore keys) =>
-    http.Request.Headers[AgentAuthMiddleware.HeaderName].FirstOrDefault() is { Length: >= 16 } key && keys.Find(key) is { } record
+    http.Request.Headers[AgentKeyAuthenticationHandler.HeaderName].FirstOrDefault() is { Length: >= 16 } key && keys.Find(key) is { } record
         ? Results.Ok(new { record.Id, Status = record.Status.ToString().ToLowerInvariant() })
         : Results.NotFound(new { error = "unknown key - enrol first" }));
 
-app.MapGet("/api/agent/ping", (HttpContext http) =>
-    Results.Ok(new { ok = true, server = "leaguetracker", authenticated = http.Items.ContainsKey(AgentAuthMiddleware.ItemKey) }));
+app.MapGet("/api/agent/ping", (Caller caller) =>
+    Results.Ok(new { ok = true, server = "leaguetracker", authenticated = caller.IsAgent }));
 
 app.MapGet("/api/agent/accounts", (AccountRegistry registry) => Results.Ok(new
 {
     Default = registry.Default.Slug,
     Accounts = registry.All.Select(AccountView),
-}));
+})).RequireAuthorization(Policies.Agent);
 
 app.MapPost("/api/agents/dismiss-error", (string agent, AgentRegistry agents) =>
     agents.DismissError(agent) ? Results.Ok() : Results.NotFound());
@@ -295,7 +308,7 @@ app.MapPost("/api/agents/{id}/approve", (string id, AgentKeyStore keys) => keys.
 app.MapPost("/api/agents/{id}/revoke", (string id, AgentKeyStore keys) => keys.Decide(id, AgentKeyStatus.Revoked) ? Results.Ok() : Results.NotFound());
 app.MapDelete("/api/agents/{id}", (string id, AgentKeyStore keys) => keys.Delete(id) ? Results.NoContent() : Results.NotFound());
 
-app.MapGet("/api/agent/profile", (AgentRegistry agents) => Results.Ok(agents.Profile));
+app.MapGet("/api/agent/profile", (AgentRegistry agents) => Results.Ok(agents.Profile)).RequireAuthorization(Policies.Agent);
 
 app.MapPost("/api/agent/heartbeat", (AgentHeartbeat beat, AgentRegistry agents) =>
 {
@@ -303,9 +316,9 @@ app.MapPost("/api/agent/heartbeat", (AgentHeartbeat beat, AgentRegistry agents) 
     agents.Record(beat);
     var pending = agents.PendingCommand(beat.Agent);
     return Results.Ok(new { latest = agents.Latest()?.Version, command = pending?.Command, commandToken = pending?.Token });
-});
+}).RequireAuthorization(Policies.Agent);
 
-app.MapGet("/api/agent/agents", (AgentRegistry agents) => Results.Ok(agents.Snapshot()));
+app.MapGet("/api/agent/agents", (AgentRegistry agents) => Results.Ok(agents.Snapshot())).RequireAuthorization(Policies.Agent);
 
 app.MapGet("/api/agent/release", (AgentRegistry agents) =>
     agents.Latest() is { } release ? Results.Ok(release) : Results.NoContent());

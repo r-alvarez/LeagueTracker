@@ -1,14 +1,25 @@
 import { account } from './account'
+import { csrfHeaders } from './auth'
 import type { AnalyticsSummary, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
 
+/// Every API call goes through here: account-scoped URL rewriting, the
+/// session cookie, and the CSRF header on writes. Bare fetch() elsewhere is
+/// a bug waiting to 403.
+export function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const method = (init.method ?? 'GET').toUpperCase()
+  const headers = new Headers(init.headers)
+  if (method !== 'GET' && method !== 'HEAD') for (const [k, v] of Object.entries(csrfHeaders)) headers.set(k, v)
+  return fetch(account.apiUrl(url), { ...init, headers, credentials: 'same-origin' })
+}
+
 async function get<T>(url: string): Promise<T> {
-  const resp = await fetch(account.apiUrl(url))
+  const resp = await apiFetch(url)
   if (!resp.ok) throw new Error(`${url} -> HTTP ${resp.status}`)
   return resp.json()
 }
 
 async function post<T>(url: string): Promise<T> {
-  const resp = await fetch(account.apiUrl(url), { method: 'POST' })
+  const resp = await apiFetch(url, { method: 'POST' })
   if (!resp.ok && resp.status !== 409) throw new Error(`${url} -> HTTP ${resp.status}`)
   return resp.json()
 }
@@ -23,18 +34,18 @@ export const api = {
   matchFacets: () => get<MatchFacets>('/api/matches/facets'),
   match: (id: string) => get<MatchDetail>(`/api/matches/${id}`),
   review: async (id: string): Promise<MatchReview | null> => {
-    const r = await fetch(account.apiUrl(`/api/matches/${id}/review`))
+    const r = await apiFetch(`/api/matches/${id}/review`)
     if (r.status === 204) return null   // no timeline for this game
     if (!r.ok) throw new Error(`/api/matches/${id}/review -> HTTP ${r.status}`)
     return r.json()
   },
   reviews: (ids: string[]) => get<ReviewVerdicts>(`/api/reviews?ids=${ids.join(',')}`),
   clips: (id: string) => get<ClipInfo[]>(`/api/matches/${id}/clips`),
-  deleteClip: async (id: string, index: number) => { await fetch(account.apiUrl(`/api/matches/${id}/clips/${index}`), { method: 'DELETE' }) },
+  deleteClip: async (id: string, index: number) => { await apiFetch(`/api/matches/${id}/clips/${index}`, { method: 'DELETE' }) },
   renderQueue: () => get<RenderQueueRow[]>('/api/render/queue'),
   vodStatus: (id: string) => get<VodStatus>(`/api/matches/${id}/vod/status`),
   setVodLink: async (id: string, url: string): Promise<VodStatus> => {
-    const r = await fetch(account.apiUrl(`/api/matches/${id}/vod/link`), {
+    const r = await apiFetch(`/api/matches/${id}/vod/link`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
@@ -42,22 +53,22 @@ export const api = {
     if (!r.ok) throw new Error(`/api/matches/${id}/vod/link -> HTTP ${r.status}`)
     return r.json()
   },
-  deleteVod: async (id: string) => { await fetch(account.apiUrl(`/api/matches/${id}/vod`), { method: 'DELETE' }) },
+  deleteVod: async (id: string) => { await apiFetch(`/api/matches/${id}/vod`, { method: 'DELETE' }) },
   fullGameStatus: (id: string) => get<FullGameStatus>(`/api/matches/${id}/fullgame/status`),
   requestFullGame: (id: string) => post<FullGameStatus>(`/api/matches/${id}/fullgame`),
   toggleFullGameKeep: (id: string) => post<FullGameStatus>(`/api/matches/${id}/fullgame/keep`),
-  deleteFullGame: async (id: string) => { await fetch(account.apiUrl(`/api/matches/${id}/fullgame`), { method: 'DELETE' }) },
-  retryRender: async (id: string, kind: 'clips' | 'full') => { await fetch(account.apiUrl(`/api/render/${id}/retry?kind=${kind}`), { method: 'POST' }) },
-  dismissRender: async (id: string, kind: 'clips' | 'full') => { await fetch(account.apiUrl(`/api/render/${id}/dismiss?kind=${kind}`), { method: 'POST' }) },
-  dismissAgentError: async (agent: string) => { await fetch(`/api/agents/dismiss-error?agent=${encodeURIComponent(agent)}`, { method: 'POST' }) },
-  restartAgent: async (agent: string) => { await fetch(`/api/agents/restart?agent=${encodeURIComponent(agent)}`, { method: 'POST' }) },
+  deleteFullGame: async (id: string) => { await apiFetch(`/api/matches/${id}/fullgame`, { method: 'DELETE' }) },
+  retryRender: async (id: string, kind: 'clips' | 'full') => { await apiFetch(`/api/render/${id}/retry?kind=${kind}`, { method: 'POST' }) },
+  dismissRender: async (id: string, kind: 'clips' | 'full') => { await apiFetch(`/api/render/${id}/dismiss?kind=${kind}`, { method: 'POST' }) },
+  dismissAgentError: async (agent: string) => { await apiFetch(`/api/agents/dismiss-error?agent=${encodeURIComponent(agent)}`, { method: 'POST' }) },
+  restartAgent: async (agent: string) => { await apiFetch(`/api/agents/restart?agent=${encodeURIComponent(agent)}`, { method: 'POST' }) },
   storage: () => get<StorageInfo>('/api/storage'),
   lens: async (opts: { window?: number; days?: number; role?: string }): Promise<LensResponse | null> => {
     const params = new URLSearchParams()
     if (opts.window) params.set('window', String(opts.window))
     if (opts.days) params.set('days', String(opts.days))
     if (opts.role) params.set('role', opts.role)
-    const r = await fetch(account.apiUrl(`/api/lens?${params}`))
+    const r = await apiFetch(`/api/lens?${params}`)
     if (r.status === 204) return null   // not enough games yet (for this role/window)
     if (!r.ok) throw new Error(`/api/lens -> HTTP ${r.status}`)
     return r.json()
@@ -67,7 +78,7 @@ export const api = {
     if (opts.window) params.set('window', String(opts.window))
     if (opts.days) params.set('days', String(opts.days))
     if (opts.role) params.set('role', opts.role)
-    const r = await fetch(account.apiUrl(`/api/fundamentals?${params}`))
+    const r = await apiFetch(`/api/fundamentals?${params}`)
     if (r.status === 204) return null   // not enough games yet (for this role/window)
     if (!r.ok) throw new Error(`/api/fundamentals -> HTTP ${r.status}`)
     return r.json()
@@ -81,7 +92,7 @@ export const api = {
   importFolder: (path: string) => post<JobStatus>(`/api/import?path=${encodeURIComponent(path)}`),
   analytics: (lastN: number) => get<AnalyticsSummary>(`/api/analytics/summary?lastN=${lastN}`),
   live: async (): Promise<LiveGame | null> => {
-    const r = await fetch(account.apiUrl('/api/live'))
+    const r = await apiFetch('/api/live')
     if (r.status === 204) return null   // not in a game
     if (!r.ok) throw new Error(`/api/live -> HTTP ${r.status}`)
     return r.json()

@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { NavLink, Route, Routes } from 'react-router-dom'
 import { api } from './api'
 import { account } from './account'
+import { auth } from './auth'
 import AccountSwitch from './components/AccountSwitch'
+import SignInPill from './components/SignInPill'
 import type { Status } from './types'
 import Dashboard from './pages/Dashboard'
 import Matches from './pages/Matches'
@@ -39,6 +41,7 @@ export default function App() {
         <h1>LeagueTracker</h1>
         {account.all.length > 1 || account.canAdd ? <AccountSwitch /> : status && <span className="player">{status.riotId}</span>}
         {scope && <span className="sub" title={patches.length > 1 ? `patches ${patches.join(', ')}` : undefined}>{scope}</span>}
+        <SignInPill />
       </header>
 
       <nav className="tabs">
@@ -55,6 +58,13 @@ export default function App() {
           {account.current.unavailable ? ` (${account.current.unavailable})` : ''}. The tracker retries every minute; the other accounts are unaffected.
         </div>
       )}
+      {!auth.canRead ? (
+        <div className="card signin-wall">
+          <h2>Sign in to view this tracker</h2>
+          <p className="mut">This site is private for now. Sign in with the account the owner invited you with.</p>
+          <p><a className="action primary" href={auth.loginUrl()}>Sign in</a></p>
+        </div>
+      ) : (<>
       <LiveGameBanner />
       <StopLossBanner />
 
@@ -66,6 +76,7 @@ export default function App() {
         <Route path="/matches/:id" element={<MatchDetail />} />
         <Route path="/data" element={<DataPage />} />
       </Routes>
+      </>)}
 
       <footer className="footer">
         LeagueTracker is a personal, non-commercial tool. It isn't endorsed by Riot Games and doesn't reflect the views

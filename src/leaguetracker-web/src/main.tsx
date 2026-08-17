@@ -6,8 +6,9 @@ import '@fontsource-variable/inter/index.css'
 import './index.css'
 import App from './App.tsx'
 import { account, bootAccount } from './account'
+import { bootAuth } from './auth'
 
-bootAccount().then(() => {
+Promise.all([bootAccount(), bootAuth()]).then(() => {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <BrowserRouter basename={account.basename}>

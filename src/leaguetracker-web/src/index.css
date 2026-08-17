@@ -1553,3 +1553,15 @@ table.data.render-failed-table td.reason { color: var(--ink-2); font-size: 12.5p
 .agent-error { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 
 .agent-head .sm-action { margin-left: auto; font-size: 12px; padding: 3px 9px; }
+
+/* Identity pill: sits at the right end of the header row; quiet when signed
+   in, an accent link when not. */
+.topbar .signin-pill {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12.5px; color: var(--muted); text-decoration: none;
+}
+.topbar .signin-pill:not(.signed-in) { color: var(--accent); font-weight: 650; }
+.topbar .signin-pill .who { color: var(--ink); font-weight: 600; }
+.topbar .signin-pill .signout { color: var(--muted); text-decoration: none; border-bottom: 1px dotted currentColor; }
+.topbar .signin-pill .signout:hover { color: var(--accent); }
+.signin-wall { max-width: 520px; margin: 40px auto; text-align: center; }
