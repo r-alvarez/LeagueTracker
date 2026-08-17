@@ -12,6 +12,7 @@ namespace LeagueTracker.Api.Services;
 /// captured ranks.
 public sealed class AnalyticsReprocessService(
     LeagueDbContext db,
+    DataPaths paths,
     TrackedPlayerService player,
     JobStatusService status,
     ILogger<AnalyticsReprocessService> logger)
@@ -56,9 +57,14 @@ public sealed class AnalyticsReprocessService(
     private async Task<bool> ReprocessOneAsync(string matchId, string puuid, CancellationToken ct)
     {
         var match = await db.Matches.Include(m => m.Participants).FirstAsync(m => m.Id == matchId, ct);
-        if (match.RawPath is not { Length: > 0 } || !File.Exists(match.RawPath)) return false;
+        if (paths.ResolveRawGame(matchId, match.RawPath) is not { } rawPath)
+        {
+            logger.LogWarning("No raw file for {MatchId} (stored path: {RawPath}) - not reprocessed", matchId, match.RawPath);
+            return false;
+        }
+        match.RawPath = rawPath;   // heals paths stored under an older layout
 
-        using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(match.RawPath, ct));
+        using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(rawPath, ct));
         var matchRaw = doc.RootElement.GetProperty("match").GetRawText();
         var timelineRaw = doc.RootElement.TryGetProperty("timeline", out var tl) && tl.ValueKind is not JsonValueKind.Null
             ? tl.GetRawText() : null;
@@ -96,7 +102,9 @@ public sealed class AnalyticsReprocessService(
             existing.PingsJson = MatchIngestService.PingsJsonFor(p);
         }
         MatchIngestService.ApplyMatchDtoStats(match, dto.Info, me);
-        match.ChallengesJson = MatchIngestService.ExtractChallengesJson(matchRaw, puuid);
+        // By the resolved participant's own puuid, not the current one: the
+        // raw file may carry an older key's encryption of it (see above).
+        match.ChallengesJson = MatchIngestService.ExtractChallengesJson(matchRaw, me.Puuid);
 
         // Children cascade at the db level, so clearing the parents clears all
         // derived rows before the fresh ones land.

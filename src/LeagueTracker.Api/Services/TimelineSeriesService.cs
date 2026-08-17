@@ -7,16 +7,16 @@ namespace LeagueTracker.Api.Services;
 /// Per-player cumulative curves (gold / cs / damage to champions / xp) straight
 /// from the raw timeline file - computed on demand, never persisted, so new
 /// metrics cost a code change and nothing else.
-public sealed class TimelineSeriesService(LeagueDbContext db)
+public sealed class TimelineSeriesService(LeagueDbContext db, DataPaths paths)
 {
     public async Task<object?> GetAsync(string matchId, CancellationToken ct)
     {
         var match = await db.Matches.AsNoTracking()
             .Include(m => m.Participants)
             .FirstOrDefaultAsync(m => m.Id == matchId, ct);
-        if (match is null || match.RawPath is not { Length: > 0 } || !File.Exists(match.RawPath)) return null;
+        if (match is null || paths.ResolveRawGame(matchId, match.RawPath) is not { } rawPath) return null;
 
-        using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(match.RawPath, ct));
+        using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(rawPath, ct));
         if (!doc.RootElement.TryGetProperty("timeline", out var timeline)
             || timeline.ValueKind is JsonValueKind.Null
             || !timeline.TryGetProperty("info", out var info)
