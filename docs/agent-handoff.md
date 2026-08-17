@@ -125,6 +125,10 @@ is up on that box; the gaming PCs are never used for rendering again.
 - **Updates** never overwrite `appsettings.json` or `youtube-token.json`;
   the previous build stays as `*.prev`. A failed update is logged, reported
   in the heartbeat's `lastError`, and retried at the next published version.
+- **HDR off while playing.** An HDR desktop (Windows HDR, Auto HDR, RTX
+  HDR) records bleached - the 8-bit capture clips it. The agent flags it
+  as the heartbeat's `lastError` ("HDR is on for the display...") so the
+  owner sees it on the Data page; the player fixes it with Win+Alt+B.
 - **Profile precedence:** local `appsettings.json` > `LT_*` env > tracker
   profile > built-in default. A friend can override anything locally; the
   tracker fills the rest.

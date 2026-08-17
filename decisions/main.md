@@ -1409,3 +1409,32 @@ Rejected: keeping the boot-loop try/catch alone (its pages 500'd opaquely
 and nothing retried until a restart), and checking readiness in the binding
 middleware (it runs for static files and global routes too - the endpoint
 filter is exactly the account API's scope).
+
+## 2026-08-17 — HDR desktops are detected and called out, not silently recorded
+
+**Ben's VOD (TheCosmicPeach, ARAM, 17 Aug) plays bleached: normal blacks,
+mids ~2.5x brighter than a same-engine SR capture, 12.6% of the game area
+clipped to pure white.** Both engines (ddagrab and WGC via ScreenRecorderLib)
+read the DWM-composited desktop as 8-bit BGRA. On an HDR desktop that read
+is a clamp of scRGB, not a conversion: Windows' SDR-content brightness
+boost, Auto HDR / RTX HDR highlight expansion and anything above 1.0 clip
+to white while the dark end stays put - which is exactly the histogram
+signature, and not the signature of a colour-range or matrix mistag (a
+tv/pc range mix-up would move the HUD's blacks, and they sit at 9/255 in
+both captures). Nothing after capture can undo it, so the recorder now
+probes the game display's colour mode at every segment start
+(`DisplayHdr`: QueryDisplayConfig + DisplayConfigGetDeviceInfo, the 24H2
+`_2` query first so ACM/WCG desktops - which capture fine - don't trip it,
+the legacy advanced-colour bit on older builds), warns in the log, pins the
+warning on the heartbeat's `lastError` (tray icon + Data page, dismissable)
+and stamps `displayHdr` into the game's metadata json.
+
+Rejected: capturing 10/16-bit and tone-mapping in the agent (ddagrab
+`output_fmt=auto` + libplacebo/zscale, or an HDR frame pool in WGC). It
+doubles the frame bytes at 1440p60, needs a tone-map nobody agrees on, and
+still cannot show "what was on the screen" - the screen was HDR. League is
+an SDR game; the right recording is the SDR desktop, and the player is the
+one who can flip HDR off (Win+Alt+B) or exclude League from Auto HDR.
+Unverified on this branch: the "on" case ran only through the struct-size
+cross-check (72/84/32/36 bytes, rc 0, `\.\DISPLAY33` matched) - the dev
+box has no HDR-capable display.

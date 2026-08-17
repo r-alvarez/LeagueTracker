@@ -100,6 +100,14 @@ start, one CPU-encoder retry (x264 veryfast) happens before giving up on
 that game. The game must be on the primary display (fullscreen or
 borderless both work - Desktop Duplication captures either).
 
+Keep Windows HDR **off** on the display the game runs on (Win+Alt+B
+toggles it; Auto HDR / RTX HDR count too). Both capture engines read the
+desktop as 8-bit SDR, and on an HDR desktop that read clips: the VOD comes
+out brighter and paler than the screen with blown highlights, and no
+later step can undo it. The agent detects HDR at capture start, warns in
+the log and on the heartbeat (tray icon + the Data page's "Last error"),
+and records `displayHdr` in the game's `.json`.
+
 ### Automatic YouTube publishing
 
 With `YouTubeUpload` on, every finished recording is uploaded to the
