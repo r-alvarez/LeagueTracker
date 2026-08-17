@@ -257,13 +257,17 @@ public static class TimelineAnalyzer
         var my20 = My(f20);
         var myEnd = My(last);
 
-        // Power-spike level timing vs the lane opponent (+ seconds = I hit it first).
-        int? LevelLead(int level)
-        {
-            if (opp is null || !levelAt.TryGetValue((me.ParticipantId, level), out var mineSec)) return null;
-            return levelAt.TryGetValue((opp.ParticipantId, level), out var theirsSec) ? theirsSec - mineSec : mineSec;
-        }
-        var firstToLevel2 = LevelLead(2) is { } l2 ? l2 >= 0 : (bool?)null;
+        // Power-spike level timing vs the lane opponent (+ seconds = I hit it
+        // first). Unknown when either side never reached the level in this
+        // game - a lead needs two timestamps, and a game that ends before the
+        // opponent's 16 is not "ahead by the whole game".
+        int? LevelLead(int level) =>
+            opp is not null
+                && levelAt.TryGetValue((me.ParticipantId, level), out var mineSec)
+                && levelAt.TryGetValue((opp.ParticipantId, level), out var theirsSec)
+                ? theirsSec - mineSec
+                : null;
+        var firstToLevel2 = LevelLead(2) is { } l2 ? l2 > 0 : (bool?)null;
 
         // Ward cadence (excludes the auto-undo/placed-then-replaced noise by just
         // taking earliest placements; blue trinket is a sweeper, not vision).
@@ -282,7 +286,15 @@ public static class TimelineAnalyzer
         // Objective presence: friendly epic objectives I was actually near when
         // taken - and of those takes, which were contested (enemy jungler right
         // there), the difference between a smite fight won and a free objective.
-        var friendlyEpics = objectives.Where(o => o.ByMyTeam && o.Kind is "DRAGON" or "BARON" or "HERALD" or "GRUBS" or "ATAKHAN").ToList();
+        // Same-kind epics within 90s (the three grubs of one camp) are one
+        // moment - the same rule the Discipline verdict applies to conceded
+        // epics - so a grub camp is one opportunity, not three, next to a Baron.
+        var friendlyEpics = new List<ObjectiveEvent>();
+        foreach (var o in objectives.Where(o => o.ByMyTeam && o.Kind is "DRAGON" or "BARON" or "HERALD" or "GRUBS" or "ATAKHAN").OrderBy(o => o.TimeSec))
+        {
+            if (friendlyEpics.Any(e => e.Kind == o.Kind && o.TimeSec - e.TimeSec <= 90)) continue;
+            friendlyEpics.Add(o);
+        }
         var objectivesPresentFor = 0;
         var contestedEpicsTaken = 0;
         foreach (var obj in friendlyEpics)
