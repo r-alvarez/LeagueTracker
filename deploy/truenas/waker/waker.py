@@ -43,7 +43,6 @@ INSECURE.verify_mode = ssl.CERT_NONE
 
 # "rendering" means the PC holds a lease, so it is awake and working;
 # "done"/"failed"/"no-events" need nothing. Only these two mean idle work.
-WAKE_STATUSES = {"pending", "partial"}
 
 
 def log(msg: str) -> None:
@@ -51,18 +50,17 @@ def log(msg: str) -> None:
 
 
 def pending_jobs(base_url: str) -> list[str]:
-    req = urllib.request.Request(f"{base_url}/api/render/queue", headers={"Accept": "application/json"})
+    # One anonymous bit per tracker: how many render jobs wait, across every
+    # account. The per-account queue is owner/agent-only since the tracker
+    # authorizes its own API.
+    req = urllib.request.Request(f"{base_url}/api/render/pending", headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         body = resp.read()
     # A Cloudflare Access sign-in page (HTML, not JSON) lands here too and
     # raises - meaning DNS resolved the tracker via the internet instead of
     # the LAN's split-horizon view. The caller logs it; fix the NAS DNS.
-    rows = json.loads(body)
-    return [
-        str(row.get("matchId") or row.get("MatchId") or "?")
-        for row in rows
-        if str(row.get("status") or row.get("Status") or "").lower() in WAKE_STATUSES
-    ]
+    count = int(json.loads(body).get("pending", 0))
+    return ["job"] * count
 
 
 def send_broadcast() -> None:
@@ -129,7 +127,7 @@ def main() -> None:
                         unifi_down = True
                         log(f"UniFi wake failed: {ex} (not repeated until it recovers)")
             if not was_waking:
-                log(f"{len(jobs)} job(s) waiting ({', '.join(sorted(set(jobs))[:5])}) - sending wake packets")
+                log(f"{len(jobs)} job(s) waiting - sending wake packets")
             was_waking = True
         elif was_waking:
             log("queue drained - going quiet")

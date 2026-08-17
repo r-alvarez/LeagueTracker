@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { account } from '../account'
+import { auth } from '../auth'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts, VodMoment, VodStatus } from '../types'
@@ -548,6 +549,7 @@ export default function MatchDetail() {
   const [clips, setClips] = useState<ClipInfo[]>([])
   const [fullGame, setFullGame] = useState<FullGameStatus | null>(null)
   const [vod, setVod] = useState<VodStatus | null>(null)
+  const canManage = auth.owns(account.current.id)
   const [recapAt, setRecapAt] = useState<number | null>(null)
   const clipRefs = useRef<Record<number, HTMLVideoElement | null>>({})
 
@@ -692,7 +694,7 @@ export default function MatchDetail() {
       {/* The replay re-render is the fallback for matches with no live
           recording (older games, other machines) - when recording data
           exists, the VOD card above owns this slot. */}
-      {!hasVodCard && fullGame && (fullGame.state !== 'none' || m.hasReplay) && (
+      {!hasVodCard && fullGame && (fullGame.state !== 'none' || (m.hasReplay && canManage)) && (
         <div className="card" style={{ marginBottom: 14 }}>
           <h2>
             Full game <span className="mut" style={{ fontWeight: 400 }}>— the whole match as one video, camera on you</span>
@@ -704,6 +706,7 @@ export default function MatchDetail() {
               <p className="mut sm-text" style={{ margin: '8px 0 0' }}>
                 {fullGame.sizeMb} MB{fullGame.renderedUtc && ` · rendered ${new Date(fullGame.renderedUtc).toLocaleDateString()}`}
                 {fullGame.keep ? ' · kept forever' : ' · auto-deleted after the retention window'}
+                {canManage && (<>
                 {' · '}
                 <button className="action" style={{ padding: '0 8px' }}
                   onClick={() => id && api.toggleFullGameKeep(id).then(setFullGame)}>
@@ -714,6 +717,7 @@ export default function MatchDetail() {
                   onClick={() => { if (id && window.confirm('Delete this render? The replay may no longer be re-renderable on a newer patch.')) { void api.deleteFullGame(id).then(() => api.fullGameStatus(id).then(setFullGame)) } }}>
                   delete
                 </button>
+                </>)}
               </p>
             </>
           )}
@@ -725,10 +729,10 @@ export default function MatchDetail() {
           {fullGame.state === 'failed' && (
             <p style={{ margin: 0 }}>
               <span className="loss">Render failed:</span> <span className="mut">{fullGame.error}</span>{' '}
-              <button className="action" onClick={() => id && api.retryRender(id, 'full').then(() => api.fullGameStatus(id).then(setFullGame))}>Retry</button>
+              {canManage && <button className="action" onClick={() => id && api.retryRender(id, 'full').then(() => api.fullGameStatus(id).then(setFullGame))}>Retry</button>}
             </p>
           )}
-          {fullGame.state === 'none' && (
+          {fullGame.state === 'none' && canManage && (
             <p className="mut" style={{ margin: 0 }}>
               <button className="action" onClick={() => id && api.requestFullGame(id).then(setFullGame)}>Render full game</button>
               {' '}~500 MB and a real-time render on the gaming PC — worth it for games you want to study start to finish.
@@ -763,7 +767,7 @@ export default function MatchDetail() {
                     {c.kind === 'fight' && c.cameraChampion
                       ? <span className="mut"> · from {c.cameraChampion}'s view</span>
                       : <span className="mut"> · {c.events.map(e => `${e.kind} ${fmtClock(e.timeSec)}`).join(', ')}</span>}
-                    {c.ready && (
+                    {c.ready && canManage && (
                       <button className="action" style={{ padding: '0 8px', marginLeft: 8 }}
                         title="Delete this clip and queue just this window for a fresh render on the gaming PC"
                         onClick={() => {

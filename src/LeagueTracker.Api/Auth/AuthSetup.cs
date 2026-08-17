@@ -80,6 +80,13 @@ public static class AuthSetup
                 o.Scope.Add("profile");
                 o.Scope.Add("email");
                 o.TokenValidationParameters.NameClaimType = "name";
+                // A session cookie would vanish with the browser window; the
+                // 30-day sliding expiry only means something if it persists.
+                o.Events.OnTicketReceived = ctx =>
+                {
+                    ctx.Properties!.IsPersistent = true;
+                    return Task.CompletedTask;
+                };
                 o.Events.OnTokenValidated = ctx =>
                 {
                     var users = ctx.HttpContext.RequestServices.GetRequiredService<UserStore>();
@@ -101,6 +108,8 @@ public static class AuthSetup
         builder.Services.AddSingleton<IAuthorizationHandler, AccessHandler>();
         builder.Services.AddAuthorization(Policies.AddAll);
     }
+
+    public static AuthenticationProperties PersistentSession() => new() { IsPersistent = true };
 
     // What the session cookie carries: our user, not the provider's.
     public static ClaimsPrincipal SessionPrincipal(User user)

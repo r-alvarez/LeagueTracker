@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { account } from '../account'
+import { auth } from '../auth'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api'
 import type { DeathEvent, VodMoment, VodStatus } from '../types'
@@ -47,6 +48,7 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
 }) {
   const [duration, setDuration] = useState<number | null>(null)
   const [linkDraft, setLinkDraft] = useState('')
+  const canManage = auth.owns(account.current.id)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const youtubeRef = useRef<HTMLIFrameElement | null>(null)
   const ytPlayerRef = useRef<{ seekTo: (s: number, allowAhead: boolean) => void; playVideo: () => void } | null>(null)
@@ -167,6 +169,7 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
   const sortedMoments = [...allMoments].sort((a, b) => a.timeSec - b.timeSec)
 
   if (!hasAnyData) {
+    if (!canManage) return null
     return (
       <div className="card" style={{ marginBottom: 14 }}>
         <h2>
@@ -276,7 +279,7 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
         </div>
 
         <aside style={{ flex: '1 1 260px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {!hasHostedVideo && (
+          {!hasHostedVideo && canManage && (
             <div>
               <div className="sub-h" style={{ marginTop: 0 }}>{vod.youtubeUrl ? 'YouTube link' : 'Link this game'}</div>
               <div style={{ display: 'flex', gap: 6 }}>
@@ -323,7 +326,7 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
           {vod.sizeMb !== null && vod.sizeMb !== undefined && (
             <p className="mut sm-text" style={{ margin: 0 }}>{vod.sizeMb} MB on the tracker</p>
           )}
-          {hasHostedVideo && (
+          {hasHostedVideo && canManage && (
             <button
               className="action"
               style={{ alignSelf: 'flex-start', padding: '0 8px' }}

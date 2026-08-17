@@ -26,7 +26,9 @@ public sealed class FullGameService(LeagueDbContext db, ReplayArchiveService rep
     public string? VideoPath(string matchId) =>
         ValidId(matchId) && File.Exists(Mp4(matchId)) ? Mp4(matchId) : null;
 
-    public string VideoTargetPath(string matchId) => Mp4(matchId);
+    // Null for anything that is not a match id: the one upload target that
+    // skipped ValidId was a path traversal (audit T-B5).
+    public string? VideoTargetPath(string matchId) => ValidId(matchId) ? Mp4(matchId) : null;
 
     public FullGameStatus Status(string matchId, RenderLeaseService leases)
     {

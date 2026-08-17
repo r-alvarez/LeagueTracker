@@ -1,6 +1,6 @@
 import { account } from './account'
 import { csrfHeaders } from './auth'
-import type { AnalyticsSummary, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
+import type { AgentKey, AnalyticsSummary, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
 
 /// Every API call goes through here: account-scoped URL rewriting, the
 /// session cookie, and the CSRF header on writes. Bare fetch() elsewhere is
@@ -60,8 +60,28 @@ export const api = {
   deleteFullGame: async (id: string) => { await apiFetch(`/api/matches/${id}/fullgame`, { method: 'DELETE' }) },
   retryRender: async (id: string, kind: 'clips' | 'full') => { await apiFetch(`/api/render/${id}/retry?kind=${kind}`, { method: 'POST' }) },
   dismissRender: async (id: string, kind: 'clips' | 'full') => { await apiFetch(`/api/render/${id}/dismiss?kind=${kind}`, { method: 'POST' }) },
-  dismissAgentError: async (agent: string) => { await apiFetch(`/api/agents/dismiss-error?agent=${encodeURIComponent(agent)}`, { method: 'POST' }) },
-  restartAgent: async (agent: string) => { await apiFetch(`/api/agents/restart?agent=${encodeURIComponent(agent)}`, { method: 'POST' }) },
+  // My machines (/api/me): keys, live heartbeats, open join codes.
+  myAgents: () => get<MyAgents>('/api/me/agents'),
+  mintJoinCode: async (role: 'recorder' | 'renderer'): Promise<JoinCodeInfo & { pretty: string }> => {
+    const r = await apiFetch(`/api/me/agents/join-code?role=${role}`, { method: 'POST' })
+    if (!r.ok) throw new Error(`join-code -> HTTP ${r.status}`)
+    return r.json()
+  },
+  agentAction: async (id: string, verb: 'approve' | 'revoke' | 'delete' | 'restart' | 'dismiss-error') => {
+    await apiFetch(verb === 'delete' ? `/api/me/agents/${id}` : `/api/me/agents/${id}/${verb}`, { method: verb === 'delete' ? 'DELETE' : 'POST' })
+  },
+  dismissAgentError: async (id: string) => { await apiFetch(`/api/me/agents/${id}/dismiss-error`, { method: 'POST' }) },
+  restartAgent: async (id: string) => { await apiFetch(`/api/me/agents/${id}/restart`, { method: 'POST' }) },
+  // Admin
+  adminAgents: () => get<{ keys: AgentKey[]; live: unknown[] }>('/api/admin/agents'),
+  adminAssignAgent: async (id: string, ownerEmail: string | null, role: string | null) => {
+    const r = await apiFetch(`/api/admin/agents/${id}/assign`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ownerEmail, role }) })
+    if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error ?? `assign -> HTTP ${r.status}`)
+  },
+  adminSetAccountOwner: async (accountId: string, ownerEmail: string | null) => {
+    const r = await apiFetch(`/api/admin/accounts/${accountId}/owner`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ownerEmail }) })
+    if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error ?? `owner -> HTTP ${r.status}`)
+  },
   storage: () => get<StorageInfo>('/api/storage'),
   lens: async (opts: { window?: number; days?: number; role?: string }): Promise<LensResponse | null> => {
     const params = new URLSearchParams()

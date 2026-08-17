@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { account } from '../account'
-import AgentJoin from '../components/AgentJoin'
-import AgentApprovals from '../components/AgentApprovals'
+import { auth } from '../auth'
+import Machines from '../components/Machines'
 import { api } from '../api'
 import type { JobStatus, RenderQueueRow, Status, StorageInfo } from '../types'
 
 export default function DataPage() {
+  // The page has two readers: the owner (jobs, machines, exports, settings)
+  // and everyone else (the public figures and, when signed in, a way to claim
+  // an account nobody owns). The server enforces the same split; this only
+  // decides what to draw.
+  const canManage = auth.owns(account.current.id)
   const [status, setStatus] = useState<Status | null>(null)
   const [job, setJob] = useState<JobStatus | null>(null)
   const [renderQueue, setRenderQueue] = useState<RenderQueueRow[]>([])
@@ -21,7 +26,6 @@ export default function DataPage() {
   // or sim-hang message repeats across many games, so one row per reason with
   // the games listed beats a comma-soup paragraph.
   const reloadRenderQueue = () => api.renderQueue().then(setRenderQueue).catch(() => setRenderQueue([]))
-  const reloadStatus = () => api.status().then(setStatus).catch(console.error)
 
   const failedGroups = (() => {
     const groups = new Map<string, RenderQueueRow[]>()
@@ -35,10 +39,12 @@ export default function DataPage() {
 
   useEffect(() => {
     api.status().then(s => { setStatus(s); setJob(s.job) }).catch(console.error)
-    reloadRenderQueue()
-    api.storage().then(setStorage).catch(() => setStorage(null))
+    if (canManage) {
+      reloadRenderQueue()
+      api.storage().then(setStorage).catch(() => setStorage(null))
+    }
     return () => { if (pollTimer.current) window.clearInterval(pollTimer.current) }
-  }, [])
+  }, [canManage])
 
   const pollJob = () => {
     if (pollTimer.current) window.clearInterval(pollTimer.current)
@@ -62,9 +68,37 @@ export default function DataPage() {
     pollJob()
   }
 
+  if (!canManage) {
+    return (
+      <div className="grid" style={{ gap: 14 }}>
+        <div className="card">
+          <h2>Live capture</h2>
+          <p className="mut" style={{ marginTop: 0 }}>
+            The tracker follows this account automatically: games, timelines, everyone's rank at game time and the LP change
+            are captured within seconds of a game ending.
+          </p>
+          <p>
+            Tracking <strong>{status?.riotId ?? '…'}</strong> · {status?.matches ?? 0} games · {status?.lpSnapshots ?? 0} LP
+            snapshots · {status?.replays ?? 0} replays archived
+          </p>
+        </div>
+        <div className="card">
+          <h2>{status?.account.owned ? 'Owned account' : 'Nobody owns this account yet'}</h2>
+          <p className="mut" style={{ marginTop: 0 }}>
+            {status?.account.owned
+              ? 'Only its owner can run syncs, manage machines, download exports or change what the profile shows.'
+              : auth.signedIn
+                ? 'If this is your Riot account you can claim it: the tracker asks you to set a profile icon in the League client and checks it with Riot.'
+                : 'Sign in to claim it if it is yours.'}
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="grid" style={{ gap: 14 }}>
-      {status && !status.apiKeyConfigured && (
+      {status && status.apiKeyConfigured === false && (
         <div className="card">
           <h2>API key missing</h2>
           <p>
@@ -124,50 +158,7 @@ export default function DataPage() {
         </button>
       </div>
 
-      <AgentJoin />
-
-      <AgentApprovals />
-
-      {status && status.agents.length > 0 && (
-        <div className="card">
-          <h2>Agents</h2>
-          <p className="mut" style={{ marginTop: 0 }}>
-            The recorder/render agents that report to this tracker. Recorders capture the player's own games and publish them;
-            the renderer cuts replay clips for every tracker. Each one pauses from its tray icon.
-          </p>
-          <div className="agent-list">
-            {status.agents.map(a => (
-              <div key={a.agent} className="agent-row">
-                <div className="agent-head">
-                  <span className={`badge ${a.online ? (a.paused ? 'remake' : 'win') : 'loss'}`}>
-                    {a.online ? (a.paused ? 'paused' : 'online') : 'offline'}
-                  </span>
-                  <strong>{a.agent}</strong>
-                  <span className="mut sm-text">v{a.version} · {a.role}{a.user ? ` · ${a.user}` : ''}</span>
-                  <button className="action sm-action" title="Ask this agent to restart on its next heartbeat (when it is idle) - it re-reads settings and updates itself"
-                    onClick={async () => { await api.restartAgent(a.agent); }}>Restart</button>
-                </div>
-                <div className="agent-state">
-                  <span className="agent-state-name">{a.state}</span>
-                  {a.detail && <span className="mut"> — {a.detail}</span>}
-                </div>
-                <dl className="agent-meta">
-                  <div><dt>Seen</dt><dd>{new Date(a.seenUtc).toLocaleTimeString()}</dd></div>
-                  {a.lastRecordingUtc && <div><dt>Last recording</dt><dd>{new Date(a.lastRecordingUtc).toLocaleString()}</dd></div>}
-                  {!a.youTubeReady && <div><dt>YouTube</dt><dd className="warn-text">not authorized</dd></div>}
-                </dl>
-                {a.lastError && (
-                  <div className="agent-error">
-                    <span className="agent-error-label">Last error</span>{a.lastError}
-                    <button className="dismiss-x" title="Dismiss (comes back only if a new error appears)"
-                      onClick={async () => { await api.dismissAgentError(a.agent); reloadStatus() }}>✕</button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <Machines />
 
       {renderQueue.length > 0 && (
         <div className="card">

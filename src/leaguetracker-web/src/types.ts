@@ -21,7 +21,9 @@ export interface JobStatus {
 
 export interface Status {
   riotId: string
-  apiKeyConfigured: boolean
+  account: { id: string; owned: boolean; mediaPublic: boolean }
+  /// null = not the owner's business (visitors never learn the key state)
+  apiKeyConfigured: boolean | null
   matches: number
   rankedMatches: number
   deaths: number
@@ -32,11 +34,12 @@ export interface Status {
   dateTo: string | null
   hideLp: boolean
   ranks: RankInfo[]
-  job: JobStatus
+  job: JobStatus | null
   agents: AgentInfo[]
 }
 
 export interface AgentInfo {
+  id: string
   agent: string
   version: string
   role: string
@@ -48,9 +51,19 @@ export interface AgentInfo {
   lastError: string | null
   machine: string | null
   user: string | null
+  owner: string | null
+  mine: boolean
   seenUtc: string
   online: boolean
 }
+
+export interface AgentKey {
+  id: string; name: string; machine: string; status: 'pending' | 'approved' | 'revoked'; role: 'recorder' | 'renderer'
+  ownerUserId: string | null; ownerEmail?: string | null; bound: boolean
+  createdUtc: string; decidedUtc: string | null; lastSeenUtc: string | null; lastIp: string | null; note: string | null
+}
+export interface JoinCodeInfo { code: string; role: 'recorder' | 'renderer'; expiresUtc: string }
+export interface MyAgents { keys: AgentKey[]; live: AgentInfo[]; joinCodes: JoinCodeInfo[] }
 
 export interface MatchSummary {
   id: string

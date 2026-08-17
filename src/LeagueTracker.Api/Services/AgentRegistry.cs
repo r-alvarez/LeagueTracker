@@ -39,7 +39,9 @@ public sealed record AgentRelease(string Version, string File, long SizeBytes, s
 public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<AccountsOptions> accounts, AccountRegistry registry, IWebHostEnvironment env)
 {
     private readonly object _gate = new();
-    private readonly Dictionary<string, (AgentHeartbeat Beat, DateTime SeenUtc)> _agents = new(StringComparer.OrdinalIgnoreCase);
+    // Keyed by the agent's key record id - the identity the server vouches
+    // for - never by the name the heartbeat carries.
+    private readonly Dictionary<string, (AgentKeyRecord Key, AgentHeartbeat Beat, DateTime SeenUtc)> _agents = new(StringComparer.OrdinalIgnoreCase);
     // The last error the owner has acknowledged, per agent - hidden until a
     // different one arrives (in memory: a dismissed transient never matters
     // after a restart).
@@ -55,55 +57,67 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
         : accounts.Value.DataRoot is { Length: > 0 } root ? Path.Combine(Path.IsPathRooted(root) ? root : Path.Combine(env.ContentRootPath, root), "agent-releases")
         : Path.Combine(registry.Default.DataDir, "agent-releases");
 
-    public void Record(AgentHeartbeat beat)
+    public void Record(AgentKeyRecord key, AgentHeartbeat beat)
     {
-        lock (_gate) _agents[beat.Agent] = (beat, DateTime.UtcNow);
+        lock (_gate) _agents[key.Id] = (key, beat, DateTime.UtcNow);
     }
 
     /// Hide the agent's current last error until a different one comes in.
     /// Queue a command for an agent's next heartbeat (only "restart" today).
     /// A fresh token each time so a re-press fires again; the agent keeps the
     /// last token it ran so a relaunch does not loop.
-    public bool Queue(string agent, string command)
+    public bool Queue(string keyId, string command)
     {
         lock (_gate)
         {
-            if (!_agents.ContainsKey(agent)) return false;
-            _command[agent] = (Guid.NewGuid().ToString("N")[..12], command);
+            if (!_agents.ContainsKey(keyId)) return false;
+            _command[keyId] = (Guid.NewGuid().ToString("N")[..12], command);
             return true;
         }
     }
 
     /// The command pending for an agent (if any) - read by the heartbeat.
-    public (string Token, string Command)? PendingCommand(string agent)
+    public (string Token, string Command)? PendingCommand(string keyId)
     {
-        lock (_gate) return _command.TryGetValue(agent, out var c) ? c : null;
+        lock (_gate) return _command.TryGetValue(keyId, out var c) ? c : null;
     }
 
-    public bool DismissError(string agent)
+    public bool DismissError(string keyId)
     {
         lock (_gate)
         {
-            if (!_agents.TryGetValue(agent, out var a) || a.Beat.LastError is not { Length: > 0 } error) return false;
-            _dismissedError[agent] = error;
+            if (!_agents.TryGetValue(keyId, out var a) || a.Beat.LastError is not { Length: > 0 } error) return false;
+            _dismissedError[keyId] = error;
             return true;
         }
     }
 
-    public List<object> Snapshot()
+    // Everything (admin's view, and the agent-to-agent listing).
+    public List<object> Snapshot() => SnapshotFor(null, admin: true);
+
+    // The machines an owner may see: theirs, plus every renderer (a renderer
+    // serves everyone, so everyone gets to know it exists); an admin sees
+    // all. Windows user names never leave the owner's own view.
+    public List<object> SnapshotFor(string? ownerUserId, bool admin)
     {
         lock (_gate)
         {
-            return [.. _agents.Values.OrderBy(a => a.Beat.Agent).Select(a => (object)new
-            {
-                a.Beat.Agent, a.Beat.Version, a.Beat.Role, a.Beat.Paused, a.Beat.State, a.Beat.Detail,
-                a.Beat.LastRecordingUtc, a.Beat.YouTubeReady,
-                LastError = _dismissedError.TryGetValue(a.Beat.Agent, out var d) && d == a.Beat.LastError ? null : a.Beat.LastError,
-                a.Beat.Machine, a.Beat.User,
-                SeenUtc = a.SeenUtc,
-                // Two missed polls = gone. The agent polls every 60s.
-                Online = DateTime.UtcNow - a.SeenUtc < TimeSpan.FromMinutes(3),
-            })];
+            return [.. _agents.Values
+                .Where(a => admin || a.Key.Role is Registry.AgentRole.Renderer || (ownerUserId is not null && a.Key.OwnerUserId == ownerUserId))
+                .OrderBy(a => a.Key.Name)
+                .Select(a => (object)new
+                {
+                    a.Key.Id, Agent = a.Key.Name, a.Beat.Version, a.Beat.Role, a.Beat.Paused, a.Beat.State, a.Beat.Detail,
+                    a.Beat.LastRecordingUtc, a.Beat.YouTubeReady,
+                    LastError = _dismissedError.TryGetValue(a.Key.Id, out var d) && d == a.Beat.LastError ? null : a.Beat.LastError,
+                    a.Beat.Machine,
+                    User = admin || a.Key.OwnerUserId == ownerUserId ? a.Beat.User : null,
+                    Owner = a.Key.OwnerUserId,
+                    Mine = ownerUserId is not null && a.Key.OwnerUserId == ownerUserId,
+                    SeenUtc = a.SeenUtc,
+                    // Two missed polls = gone. The agent polls every 60s.
+                    Online = DateTime.UtcNow - a.SeenUtc < TimeSpan.FromMinutes(3),
+                })];
         }
     }
 

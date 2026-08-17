@@ -22,8 +22,10 @@ public enum Access
     // Uploads for an account: a recorder whose owner owns it (or the owner).
     AgentRecorder,
     // Render work for an account: a renderer anywhere, or a recorder on its
-    // owner's accounts.
+    // owner's accounts. Agents only - leases and uploads are machine work.
     AgentRender,
+    // Render state and the replay file: those agents, or the owner.
+    RenderRead,
     // Recordings, clips, renders: public when the owner said so, else owner
     // or an agent that could have produced them.
     MediaRead,
@@ -43,6 +45,7 @@ public static class Policies
     public const string Agent = nameof(Access.Agent);
     public const string AgentRecorder = nameof(Access.AgentRecorder);
     public const string AgentRender = nameof(Access.AgentRender);
+    public const string RenderRead = nameof(Access.RenderRead);
     public const string MediaRead = nameof(Access.MediaRead);
 
     public static void AddAll(AuthorizationOptions options)
@@ -73,6 +76,7 @@ public sealed class AccessHandler(IOptions<AuthOptions> auth) : AuthorizationHan
             Access.Agent => caller.IsAgent,
             Access.AgentRecorder => account is not null && (caller.IsAgent ? caller.AgentRole is AgentRole.Recorder && caller.Owns(account) : caller.IsUser && caller.Owns(account)),
             Access.AgentRender => account is not null && caller.IsAgent && (caller.AgentRole is AgentRole.Renderer || caller.Owns(account)),
+            Access.RenderRead => account is not null && (caller.IsAgent ? caller.AgentRole is AgentRole.Renderer || caller.Owns(account) : caller.IsUser && caller.Owns(account)),
             Access.MediaRead => account is not null && (account.MediaPublic
                 ? auth.Value.PublicReads || caller.IsAuthenticated
                 : caller.IsAgent ? caller.AgentRole is AgentRole.Renderer || caller.Owns(account) : caller.Owns(account)),

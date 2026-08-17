@@ -86,6 +86,16 @@ if (builder.Environment.IsDevelopment())
 
 builder.AddTrackerAuth();
 
+// Tracking a Riot ID costs a Riot call, a folder, a database and a permanent
+// poller slot: a signed-in person gets a handful per hour, not a script's worth.
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.AddPolicy("account-add", http => System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
+        http.User.FindFirst(TrackerClaims.UserId)?.Value ?? http.Connection.RemoteIpAddress?.ToString() ?? "anon",
+        _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromHours(1), SegmentsPerWindow = 4, QueueLimit = 0 }));
+});
+
 // Behind Traefik (and Cloudflare in front of it) the socket peer is always the
 // proxy: without this every agent enrolment shared one "IP", the per-IP
 // pending cap locked everyone out after three, and the Data page's LastIp -
@@ -130,6 +140,7 @@ if (app.Environment.IsDevelopment()) app.UseCors();
 app.UseMiddleware<AccountBindingMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 app.UseCsrfGuard();
 app.UseResponseCompression();
 // Hashed bundles never change; everything else (index.html above all) must
@@ -232,17 +243,19 @@ app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry r
         await scope.ServiceProvider.GetRequiredService<TrackedPlayerService>().StorePuuidAsync(resolved.Puuid, ct);
     }
     return Results.Created($"/{account.UrlPath}/", AccountView(account));
-});
+}).RequireAuthorization(Policies.User).RequireRateLimiting("account-add");
 
-// Untrack (the folder stays on the NAS). Configured accounts say no.
-app.MapDelete("/api/accounts/{idOrSlug}", (string idOrSlug, AccountRegistry registry, AccountInitializer initializer) =>
+// Untrack (the folder stays on the NAS). Configured accounts say no; so
+// does anyone but the owner or an admin.
+app.MapDelete("/api/accounts/{idOrSlug}", (string idOrSlug, Caller caller, AccountRegistry registry, AccountInitializer initializer) =>
 {
     var decoded = Uri.UnescapeDataString(idOrSlug);
     if ((registry.ById(decoded) ?? registry.BySlug(decoded)) is not { } account) return Results.NotFound();
+    if (!caller.Owns(account)) return Results.Forbid();
     if (!registry.Remove(account.Id)) return Results.Conflict(new { error = "configured accounts are removed from the compose, not here" });
     initializer.Forget(account.Slug);
     return Results.NoContent();
-});
+}).RequireAuthorization(Policies.User);
 
 static (string? GameName, string? TagLine) ParseRiotId(string? riotId)
 {
@@ -292,33 +305,42 @@ app.MapGet("/api/agent/accounts", (AccountRegistry registry) => Results.Ok(new
     Accounts = registry.All.Select(AccountView),
 })).RequireAuthorization(Policies.Agent);
 
-app.MapPost("/api/agents/dismiss-error", (string agent, AgentRegistry agents) =>
-    agents.DismissError(agent) ? Results.Ok() : Results.NotFound());
-
-// Queue a restart for an agent - it obeys on its next heartbeat when idle
-// (re-reads the profile and self-updates on the way back up).
-app.MapPost("/api/agents/restart", (string agent, AgentRegistry agents) =>
-    agents.Queue(agent, "restart") ? Results.Ok() : Results.NotFound());
-
-app.MapGet("/api/agents", (AgentKeyStore keys) => Results.Ok(keys.All.Select(r => new
-{
-    r.Id, r.Name, r.Machine, Status = r.Status.ToString().ToLowerInvariant(), r.CreatedUtc, r.DecidedUtc, r.LastSeenUtc, r.LastIp, r.Note,
-})));
-app.MapPost("/api/agents/{id}/approve", (string id, AgentKeyStore keys) => keys.Decide(id, AgentKeyStatus.Approved) ? Results.Ok() : Results.NotFound());
-app.MapPost("/api/agents/{id}/revoke", (string id, AgentKeyStore keys) => keys.Decide(id, AgentKeyStatus.Revoked) ? Results.Ok() : Results.NotFound());
-app.MapDelete("/api/agents/{id}", (string id, AgentKeyStore keys) => keys.Delete(id) ? Results.NoContent() : Results.NotFound());
+// Human management of machines lives under /api/me (own) and /api/admin
+// (all) - see ManagementEndpoints. Nothing under /api/agents any more, so
+// no path prefix of the agent slice ever names a human route again.
+app.MapManagementEndpoints();
 
 app.MapGet("/api/agent/profile", (AgentRegistry agents) => Results.Ok(agents.Profile)).RequireAuthorization(Policies.Agent);
 
-app.MapPost("/api/agent/heartbeat", (AgentHeartbeat beat, AgentRegistry agents) =>
+// The heartbeat's identity is the key that authenticated it; the name in
+// the body is display text at most.
+app.MapPost("/api/agent/heartbeat", (AgentHeartbeat beat, Caller caller, AgentRegistry agents) =>
 {
-    if (beat is not { Agent.Length: > 0 }) return Results.BadRequest("agent name required");
-    agents.Record(beat);
-    var pending = agents.PendingCommand(beat.Agent);
+    var key = caller.Agent!;
+    agents.Record(key, beat);
+    var pending = agents.PendingCommand(key.Id);
     return Results.Ok(new { latest = agents.Latest()?.Version, command = pending?.Command, commandToken = pending?.Token });
 }).RequireAuthorization(Policies.Agent);
 
 app.MapGet("/api/agent/agents", (AgentRegistry agents) => Results.Ok(agents.Snapshot())).RequireAuthorization(Policies.Agent);
+
+// The waker on the NAS needs one bit - is render work waiting anywhere -
+// and it has no identity; counts only, across every account.
+app.MapGet("/api/render/pending", async (AccountRegistry registry, AccountScopes scopes, AccountInitializer initializer, CancellationToken ct) =>
+{
+    var pending = 0;
+    foreach (var account in registry.All.Where(initializer.IsReady))
+    {
+        using var scope = scopes.Create(account);
+        var leases = scope.ServiceProvider.GetRequiredService<RenderLeaseService>();
+        var rows = (await scope.ServiceProvider.GetRequiredService<ClipService>().QueueAsync(leases, ct))
+            .Concat(await scope.ServiceProvider.GetRequiredService<FullGameService>().QueueRowsAsync(leases, ct));
+        // The queue rows are the anonymous shapes the Data page renders; the
+        // status is the one field this needs.
+        pending += rows.Count(r => System.Text.Json.JsonSerializer.SerializeToElement(r).GetProperty("Status").GetString() is "pending" or "partial");
+    }
+    return Results.Ok(new { pending });
+});
 
 app.MapGet("/api/agent/release", (AgentRegistry agents) =>
     agents.Latest() is { } release ? Results.Ok(release) : Results.NoContent());
@@ -335,17 +357,34 @@ app.Run();
 void MapAccountApi(RouteGroupBuilder api)
 {
 api.AddEndpointFilter(RequireAvailableAccount);
+// Every endpoint sits in the group of the policy it needs; the groups share
+// the account prefix and the availability filter, and differ only in who
+// may call. Read = Riot-derived data (public once Auth:PublicReads is on),
+// Owner = the account's owner or an admin, Media = recordings/clips/renders
+// (owner-only unless the owner shares them), the agent groups = machines
+// with an approved key bound to the right owner or role.
+var read = api.MapGroup("").RequireAuthorization(Policies.Read);
+var owner = api.MapGroup("").RequireAuthorization(Policies.Owner);
+var media = api.MapGroup("").RequireAuthorization(Policies.MediaRead);
+var recorder = api.MapGroup("").RequireAuthorization(Policies.AgentRecorder);
+var render = api.MapGroup("").RequireAuthorization(Policies.AgentRender);
+var renderRead = api.MapGroup("").RequireAuthorization(Policies.RenderRead);
+
 // --- Status ---------------------------------------------------------------------
 
-api.MapGet("/status", async (AccountContext acct, LeagueDbContext db, LpService lp, TrackedPlayerService player, IRiotKeyProvider keys, JobStatusService jobs, ReplayArchiveService replays, AgentRegistry agents, CancellationToken ct) =>
+read.MapGet("/status", async (AccountContext acct, Caller caller, LeagueDbContext db, LpService lp, TrackedPlayerService player, IRiotKeyProvider keys, JobStatusService jobs, ReplayArchiveService replays, AgentRegistry agents, CancellationToken ct) =>
 {
     var solo = await lp.GetLatestAsync("Solo/Duo", ct);
     var flex = await lp.GetLatestAsync("Flex", ct);
     var hasMatches = await db.Matches.AnyAsync(ct);
+    // Operational state (key, running job, this owner's machines) is the
+    // owner's business; visitors get the public figures only.
+    var manages = caller.Owns(acct.Current) && caller.IsUser;
     return Results.Ok(new
     {
         player.RiotId,
-        ApiKeyConfigured = keys.GetKey() is not null,
+        Account = new { acct.Current.Id, Owned = acct.Current.IsOwned, acct.Current.MediaPublic },
+        ApiKeyConfigured = manages ? keys.GetKey() is not null : (bool?)null,
         Matches = await db.Matches.CountAsync(ct),
         RankedMatches = await db.Matches.CountAsync(m => m.IsRanked, ct),
         Deaths = await db.Deaths.CountAsync(ct),
@@ -361,13 +400,13 @@ api.MapGet("/status", async (AccountContext acct, LeagueDbContext db, LpService 
             Label = $"{s.Tier} {s.Division} {s.Lp} LP",
             AsOfUtc = s.TimestampUtc,
         }),
-        Job = jobs.Snapshot(),
-        Agents = agents.Snapshot(),
+        Job = manages ? jobs.Snapshot() : null,
+        Agents = manages ? agents.SnapshotFor(acct.Current.OwnerUserId, caller.IsAdmin) : [],
     });
 });
 
 // The game being played right now (spectator-v5, refreshed by the poller).
-api.MapGet("/live", (AccountContext acct, LiveGameState live) =>
+read.MapGet("/live", (AccountContext acct, LiveGameState live) =>
     live.Current is { } g
         ? Results.Ok(new
         {
@@ -382,7 +421,7 @@ api.MapGet("/live", (AccountContext acct, LiveGameState live) =>
 
 // --- Matches --------------------------------------------------------------------
 
-api.MapGet("/matches", async (AccountContext acct, LeagueDbContext db, ReplayArchiveService replays, int page = 1, int pageSize = 20, bool? ranked = null,
+read.MapGet("/matches", async (AccountContext acct, LeagueDbContext db, ReplayArchiveService replays, int page = 1, int pageSize = 20, bool? ranked = null,
     string? champion = null, string? opponent = null, string? role = null, string? queue = null, string? patch = null, CancellationToken ct = default) =>
 {
     var query = db.Matches.AsNoTracking();
@@ -450,7 +489,7 @@ api.MapGet("/matches", async (AccountContext acct, LeagueDbContext db, ReplayArc
 
 // Filter options for the match list: every champion/opponent with game counts,
 // plus the patches - so the pickers only ever offer values that exist.
-api.MapGet("/matches/facets", async (LeagueDbContext db, CancellationToken ct) =>
+read.MapGet("/matches/facets", async (LeagueDbContext db, CancellationToken ct) =>
 {
     var champions = await db.Matches.AsNoTracking()
         .GroupBy(m => m.Champion)
@@ -472,13 +511,13 @@ api.MapGet("/matches/facets", async (LeagueDbContext db, CancellationToken ct) =
 });
 
 // The archived official .rofl for a game (playable in the client on the same patch).
-api.MapGet("/matches/{id}/replay", (string id, ReplayArchiveService replays) =>
+renderRead.MapGet("/matches/{id}/replay", (string id, ReplayArchiveService replays) =>
     replays.PathFor(id) is { } path
         ? Results.File(path, "application/octet-stream", $"{id}.rofl")
         : Results.NotFound());
 
 // The planned highlight windows for a game and whether each mp4 has landed yet.
-api.MapGet("/matches/{id}/clips", async (AccountContext acct, string id, ClipService clips, CancellationToken ct) =>
+media.MapGet("/matches/{id}/clips", async (AccountContext acct, string id, ClipService clips, CancellationToken ct) =>
 {
     var plan = await clips.LoadPlanAsync(id, ct);
     return Results.Ok(plan is null
@@ -492,32 +531,32 @@ api.MapGet("/matches/{id}/clips", async (AccountContext acct, string id, ClipSer
 });
 
 // Range processing on: the <video> scrub bar needs partial requests.
-api.MapGet("/matches/{id}/clips/{index:int}", (string id, int index, ClipService clips) =>
+media.MapGet("/matches/{id}/clips/{index:int}", (string id, int index, ClipService clips) =>
     clips.ClipPath(id, index) is { } path
         ? Results.File(path, "video/mp4", enableRangeProcessing: true)
         : Results.NotFound());
 
 // Drop one bad clip (e.g. the render silently captured a hung replay); the
 // window re-enters the render queue and the agent re-creates just that mp4.
-api.MapDelete("/matches/{id}/clips/{index:int}", (string id, int index, ClipService clips) =>
+owner.MapDelete("/matches/{id}/clips/{index:int}", (string id, int index, ClipService clips) =>
     clips.DeleteClip(id, index) ? Results.Ok() : Results.NotFound());
 
 // --- Live-game VODs (recorded by the agent while the player was in game) ---------
 
-api.MapGet("/matches/{id}/vod/status", (string id, VodService vods) =>
+media.MapGet("/matches/{id}/vod/status", (string id, VodService vods) =>
     Results.Ok(vods.Status(id)));
 
-api.MapGet("/matches/{id}/vod", (string id, VodService vods) =>
+media.MapGet("/matches/{id}/vod", (string id, VodService vods) =>
     vods.VideoPath(id) is { } path
         ? Results.File(path, "video/mp4", enableRangeProcessing: true)
         : Results.NotFound());
 
-api.MapGet("/matches/{id}/vod/thumb", (string id, VodService vods) =>
+media.MapGet("/matches/{id}/vod/thumb", (string id, VodService vods) =>
     vods.ThumbPath(id) is { } path
         ? Results.File(path, "image/jpeg")
         : Results.NotFound());
 
-api.MapDelete("/matches/{id}/vod", (string id, VodService vods) =>
+owner.MapDelete("/matches/{id}/vod", (string id, VodService vods) =>
 {
     vods.Delete(id);
     return Results.Ok();
@@ -525,7 +564,7 @@ api.MapDelete("/matches/{id}/vod", (string id, VodService vods) =>
 
 // The match's YouTube upload (storage-free review mode: the video lives on
 // YouTube, the tracker keeps only markers/APM data). Empty url = unlink.
-api.MapPost("/matches/{id}/vod/link", async (string id, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+recorder.MapPost("/matches/{id}/vod/link", async (string id, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
 {
     if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == id, ct)) return Results.NotFound();
     using var doc = await System.Text.Json.JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
@@ -542,7 +581,7 @@ api.MapPost("/matches/{id}/vod/link", async (string id, HttpRequest request, Vod
 // Agent-facing uploads. The mp4 is only accepted for a match this tracker
 // knows - the one agent serves several trackers and offers each VOD to all
 // of them; the owning tracker is the one whose db has the match.
-api.MapPut("/vods/{matchId}", async (string matchId, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+recorder.MapPut("/vods/{matchId}", async (string matchId, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
 {
     if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
     if (vods.TargetPath(matchId, "vod.mp4") is not { } target) return Results.BadRequest();
@@ -564,7 +603,7 @@ api.MapPut("/vods/{matchId}", async (string matchId, HttpRequest request, VodSer
 // Chunked variant of the mp4 upload: Cloudflare caps request bodies around
 // 100MB, so a multi-GB VOD arrives as ordered 64MB pieces appended at their
 // offset, then an atomic commit that checks the assembled size.
-api.MapPut("/vods/{matchId}/chunk", async (string matchId, long offset, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+recorder.MapPut("/vods/{matchId}/chunk", async (string matchId, long offset, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
 {
     if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
     if (vods.TargetPath(matchId, "vod.mp4.part") is not { } part) return Results.BadRequest();
@@ -580,7 +619,7 @@ api.MapPut("/vods/{matchId}/chunk", async (string matchId, long offset, HttpRequ
     return Results.Ok(new { length = file.Length });
 });
 
-api.MapPost("/vods/{matchId}/commit", (string matchId, long size, VodService vods) =>
+recorder.MapPost("/vods/{matchId}/commit", (string matchId, long size, VodService vods) =>
 {
     if (vods.TargetPath(matchId, "vod.mp4.part") is not { } part || !File.Exists(part)) return Results.NotFound();
     if (new FileInfo(part).Length != size)
@@ -595,7 +634,7 @@ api.MapPost("/vods/{matchId}/commit", (string matchId, long size, VodService vod
 // Sidecar pieces (small): recording metadata, input telemetry, thumbnail.
 // Accepted for any known match WITHOUT requiring the mp4 - in the
 // YouTube-hosted mode these are the only bytes the tracker ever stores.
-api.MapPut("/vods/{matchId}/{file}", async (string matchId, string file, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+recorder.MapPut("/vods/{matchId}/{file}", async (string matchId, string file, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
 {
     var name = file switch
     {
@@ -620,33 +659,33 @@ api.MapPut("/vods/{matchId}/{file}", async (string matchId, string file, HttpReq
 
 // --- Full-game renders (opt-in per match; retention-swept unless kept) ----------
 
-api.MapGet("/matches/{id}/fullgame/status", (string id, FullGameService full, RenderLeaseService leases) =>
+media.MapGet("/matches/{id}/fullgame/status", (string id, FullGameService full, RenderLeaseService leases) =>
     Results.Ok(full.Status(id, leases)));
 
-api.MapGet("/matches/{id}/fullgame", (string id, FullGameService full) =>
+media.MapGet("/matches/{id}/fullgame", (string id, FullGameService full) =>
     full.VideoPath(id) is { } path
         ? Results.File(path, "video/mp4", enableRangeProcessing: true)
         : Results.NotFound());
 
-api.MapPost("/matches/{id}/fullgame", (string id, FullGameService full, RenderLeaseService leases) =>
+owner.MapPost("/matches/{id}/fullgame", (string id, FullGameService full, RenderLeaseService leases) =>
     full.Request(id) is { } error
         ? Results.BadRequest(new { error })
         : Results.Ok(full.Status(id, leases)));
 
-api.MapPost("/matches/{id}/fullgame/keep", (string id, FullGameService full, RenderLeaseService leases) =>
+owner.MapPost("/matches/{id}/fullgame/keep", (string id, FullGameService full, RenderLeaseService leases) =>
 {
     full.ToggleKeep(id);
     return Results.Ok(full.Status(id, leases));
 });
 
-api.MapDelete("/matches/{id}/fullgame", (string id, FullGameService full) =>
+owner.MapDelete("/matches/{id}/fullgame", (string id, FullGameService full) =>
 {
     full.Delete(id);
     return Results.Ok();
 });
 
 // Disk usage per artifact family - keeps the storage cost of renders visible.
-api.MapGet("/storage", (DataPaths paths) =>
+owner.MapGet("/storage", (DataPaths paths) =>
 {
     static double DirMb(string dir) => Directory.Exists(dir)
         ? Math.Round(Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length) / 1024.0 / 1024.0, 1)
@@ -666,13 +705,13 @@ api.MapGet("/storage", (DataPaths paths) =>
 
 // --- Render jobs (served to the render agent on the gaming PC) -------------------
 
-api.MapGet("/render/queue", async (ClipService clips, FullGameService full, RenderLeaseService leases, CancellationToken ct) =>
+renderRead.MapGet("/render/queue", async (ClipService clips, FullGameService full, RenderLeaseService leases, CancellationToken ct) =>
     Results.Ok((await clips.QueueAsync(leases, ct)).Concat(await full.QueueRowsAsync(leases, ct))));
 
 // Claim the next renderable job. Clip jobs first (cheap, automatic, serve the
 // review loop), then explicit full-game requests. The plan manifest is written
 // at claim time so uploads can be validated against it.
-api.MapPost("/render/next", async (AccountContext acct, ClipService clips, FullGameService full, RenderLeaseService leases,
+render.MapPost("/render/next", async (AccountContext acct, ClipService clips, FullGameService full, RenderLeaseService leases,
     ReplayArchiveService replays, VodService vods, LeagueDbContext db, string agent = "render-agent", CancellationToken ct = default) =>
 {
     // The agent locks the replay camera onto this player (names as they were at
@@ -746,9 +785,10 @@ api.MapPost("/render/next", async (AccountContext acct, ClipService clips, FullG
     return Results.NoContent();
 });
 
-api.MapPut("/render/{matchId}/full", async (string matchId, HttpRequest request, FullGameService full, CancellationToken ct) =>
+render.MapPut("/render/{matchId}/full", async (string matchId, HttpRequest request, FullGameService full, LeagueDbContext db, CancellationToken ct) =>
 {
     if (full.VideoTargetPath(matchId) is not { } target) return Results.NotFound();
+    if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
 
     // A full game runs to ~500MB; lift the body cap accordingly.
     request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
@@ -764,7 +804,7 @@ api.MapPut("/render/{matchId}/full", async (string matchId, HttpRequest request,
     return Results.Ok(new { bytes = new FileInfo(target).Length });
 });
 
-api.MapPut("/render/{matchId}/clips/{index:int}", async (string matchId, int index, HttpRequest request, ClipService clips, CancellationToken ct) =>
+render.MapPut("/render/{matchId}/clips/{index:int}", async (string matchId, int index, HttpRequest request, ClipService clips, CancellationToken ct) =>
 {
     var plan = await clips.LoadPlanAsync(matchId, ct);
     if (plan is null || index < 0 || index >= plan.Windows.Count) return Results.NotFound();
@@ -784,7 +824,7 @@ api.MapPut("/render/{matchId}/clips/{index:int}", async (string matchId, int ind
     return Results.Ok(new { index, bytes = new FileInfo(target).Length });
 });
 
-api.MapPost("/render/{matchId}/complete", (string matchId, RenderLeaseService leases, ClipService clips, FullGameService full, string kind = "clips") =>
+render.MapPost("/render/{matchId}/complete", (string matchId, RenderLeaseService leases, ClipService clips, FullGameService full, string kind = "clips") =>
 {
     if (kind is "full") full.CompleteRequest(matchId);
     else clips.ClearFailed(matchId);
@@ -792,7 +832,7 @@ api.MapPost("/render/{matchId}/complete", (string matchId, RenderLeaseService le
     return Results.Ok();
 });
 
-api.MapPost("/render/{matchId}/fail", async (string matchId, HttpRequest request, RenderLeaseService leases, ClipService clips, FullGameService full, string kind = "clips", CancellationToken ct = default) =>
+render.MapPost("/render/{matchId}/fail", async (string matchId, HttpRequest request, RenderLeaseService leases, ClipService clips, FullGameService full, string kind = "clips", CancellationToken ct = default) =>
 {
     using var reader = new StreamReader(request.Body);
     var error = await reader.ReadToEndAsync(ct);
@@ -806,16 +846,16 @@ api.MapPost("/render/{matchId}/fail", async (string matchId, HttpRequest request
 // A restarting agent frees the leases a dead previous incarnation of itself
 // took to its grave, so interrupted jobs re-queue immediately instead of
 // waiting out the 30-minute lease.
-api.MapPost("/render/release-stale", (string agent, RenderLeaseService leases) =>
+render.MapPost("/render/release-stale", (string agent, RenderLeaseService leases) =>
     Results.Ok(new { released = leases.ReleaseAgent(agent) }));
 
 
 // Re-queues the match: clears the failed marker AND deletes any existing
 // clips, so both failed and badly-rendered matches get picked up again.
-api.MapPost("/render/{matchId}/dismiss", (string matchId, ClipService clips, FullGameService full, string kind = "clips") =>
+owner.MapPost("/render/{matchId}/dismiss", (string matchId, ClipService clips, FullGameService full, string kind = "clips") =>
     (kind is "full" ? full.Dismiss(matchId) : clips.Dismiss(matchId)) ? Results.Ok() : Results.NotFound());
 
-api.MapPost("/render/{matchId}/retry", (string matchId, ClipService clips, FullGameService full, string kind = "clips") =>
+owner.MapPost("/render/{matchId}/retry", (string matchId, ClipService clips, FullGameService full, string kind = "clips") =>
 {
     if (kind is "full") full.Request(matchId);
     else
@@ -826,7 +866,7 @@ api.MapPost("/render/{matchId}/retry", (string matchId, ClipService clips, FullG
     return Results.Ok();
 });
 
-api.MapGet("/matches/{id}", async (AccountContext acct, string id, LeagueDbContext db, ReplayArchiveService replays, CancellationToken ct) =>
+read.MapGet("/matches/{id}", async (AccountContext acct, string id, LeagueDbContext db, ReplayArchiveService replays, CancellationToken ct) =>
 {
     // Four collection includes in one query = a cartesian product across all of
     // them (millions of rows per match on SQLite). Split runs one query each.
@@ -939,48 +979,48 @@ api.MapGet("/matches/{id}", async (AccountContext acct, string id, LeagueDbConte
 
 // Collapse-focused death analytics over the recent ranked games with timelines.
 // Deliberately centred on collapse count and contest quality, not KDA cosmetics.
-api.MapGet("/analytics/summary", async (LeagueDbContext db, int lastN = 20, CancellationToken ct = default) =>
+read.MapGet("/analytics/summary", async (LeagueDbContext db, int lastN = 20, CancellationToken ct = default) =>
     Results.Ok(await Reports.AnalyticsSummaryAsync(db, lastN, ct)));
 
 // Per-player cumulative curves from the raw timeline (gold/cs/damage/xp).
-api.MapGet("/matches/{id}/series", async (string id, TimelineSeriesService series, CancellationToken ct) =>
+read.MapGet("/matches/{id}/series", async (string id, TimelineSeriesService series, CancellationToken ct) =>
     await series.GetAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent());
 
 // The Lens: coaching scores for the recent window vs the player's own history,
 // optionally scoped to one role (TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY).
-api.MapGet("/lens", async (LensService lens, int window = 20, int? days = null, string? role = null, CancellationToken ct = default) =>
+read.MapGet("/lens", async (LensService lens, int window = 20, int? days = null, string? role = null, CancellationToken ct = default) =>
     await lens.GetAsync(window, days, role, ct) is { } result ? Results.Ok(result) : Results.NoContent());
 
 // Ladder percentiles (Challenges-V1) - how the player ranks vs everyone, the
 // external benchmark the wins-vs-losses analysis can't provide.
-api.MapGet("/challenges/percentiles", async (ChallengesBenchmarkService svc, CancellationToken ct) =>
+read.MapGet("/challenges/percentiles", async (ChallengesBenchmarkService svc, CancellationToken ct) =>
     await svc.GetAsync(ct) is { } result ? Results.Ok(result) : Results.NoContent());
 
 // The Fundamentals ladder: curriculum skills pinned to rank tiers, each scored
 // by self-percentile and anchored on Riot's own challenge levels where mapped.
-api.MapGet("/fundamentals", async (FundamentalsService svc, int window = 20, int? days = null, string? role = null, CancellationToken ct = default) =>
+read.MapGet("/fundamentals", async (FundamentalsService svc, int window = 20, int? days = null, string? role = null, CancellationToken ct = default) =>
     await svc.GetAsync(window, days, role, ct) is { } result ? Results.Ok(result) : Results.NoContent());
 
 // The three questions, answered per game and blind to the result: out-dueled
 // my lane / fights bought the map / stepped with the enemy accounted for.
-api.MapGet("/matches/{id}/review", async (string id, ReviewService svc, CancellationToken ct) =>
+read.MapGet("/matches/{id}/review", async (string id, ReviewService svc, CancellationToken ct) =>
     await svc.GetAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent());
 
 // The between-games review: the moments the player was in, as replay
 // timestamps, for the agent to drive the game client through.
-api.MapGet("/matches/{id}/reel", async (string id, ReviewReelService svc, CancellationToken ct) =>
+read.MapGet("/matches/{id}/reel", async (string id, ReviewReelService svc, CancellationToken ct) =>
     await svc.GetAsync(id, ct) is { } reel ? Results.Ok(reel) : Results.NotFound());
 
 // Verdict triples for a page of matches (the list rows' process chips).
-api.MapGet("/reviews", async (string ids, ReviewService svc, CancellationToken ct) =>
+read.MapGet("/reviews", async (string ids, ReviewService svc, CancellationToken ct) =>
     Results.Ok(await svc.VerdictsAsync(
         ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(100).ToArray(), ct)));
 
 // The dashboard aggregate: coach-style stats over recent ranked games.
 // lastGames takes precedence over days; neither = whole history.
-api.MapGet("/stats", async (AccountContext acct, LeagueDbContext db, int? days, int? lastGames, CancellationToken ct) =>
+read.MapGet("/stats", async (AccountContext acct, LeagueDbContext db, int? days, int? lastGames, CancellationToken ct) =>
     Results.Ok(await Reports.StatsAsync(db, days, lastGames, acct.Current.HideLp, ct)));
-api.MapPost("/ranks/backfill", (AccountScopes scopes, AccountContext acct, JobStatusService jobs, int days = 7) =>
+owner.MapPost("/ranks/backfill", (AccountScopes scopes, AccountContext acct, JobStatusService jobs, int days = 7) =>
 {
     if (!jobs.TryStart("rank-backfill")) return Results.Conflict(jobs.Snapshot());
     _ = Task.Run(async () =>
@@ -998,7 +1038,7 @@ api.MapPost("/ranks/backfill", (AccountScopes scopes, AccountContext acct, JobSt
     return Results.Accepted($"/api/a/{acct.UrlSegment}/jobs/status", jobs.Snapshot());
 });
 
-api.MapPost("/analytics/reprocess", (AccountScopes scopes, AccountContext acct, JobStatusService jobs) =>
+owner.MapPost("/analytics/reprocess", (AccountScopes scopes, AccountContext acct, JobStatusService jobs) =>
 {
     if (!jobs.TryStart("reprocess")) return Results.Conflict(jobs.Snapshot());
     _ = Task.Run(async () =>
@@ -1021,7 +1061,7 @@ api.MapPost("/analytics/reprocess", (AccountScopes scopes, AccountContext acct, 
 // N straight same-session losses (a session chains games ending <3h apart),
 // plus the current tail streak. Winrate-only - no LP, so it works on every
 // instance and doesn't need attribution.
-api.MapGet("/stoploss", async (LeagueDbContext db, CancellationToken ct) =>
+read.MapGet("/stoploss", async (LeagueDbContext db, CancellationToken ct) =>
 {
     var games = await db.Matches.AsNoTracking()
         .Where(m => m.IsRanked && m.DurationSec >= 300)
@@ -1062,7 +1102,7 @@ api.MapGet("/stoploss", async (LeagueDbContext db, CancellationToken ct) =>
 
 // --- LP -------------------------------------------------------------------------
 
-api.MapGet("/lp/history", async (AccountContext acct, LeagueDbContext db, string? queue, CancellationToken ct) =>
+read.MapGet("/lp/history", async (AccountContext acct, LeagueDbContext db, string? queue, CancellationToken ct) =>
 {
     if (acct.Current.HideLp) return Results.Ok(Array.Empty<object>());
     var query = db.LpSnapshots.AsNoTracking();
@@ -1075,7 +1115,7 @@ api.MapGet("/lp/history", async (AccountContext acct, LeagueDbContext db, string
     }));
 });
 
-api.MapGet("/lp/per-game", async (AccountContext acct, LeagueDbContext db, CancellationToken ct) =>
+read.MapGet("/lp/per-game", async (AccountContext acct, LeagueDbContext db, CancellationToken ct) =>
 {
     var rows = await db.Matches.AsNoTracking()
         .Where(m => m.IsRanked)
@@ -1094,7 +1134,7 @@ api.MapGet("/lp/per-game", async (AccountContext acct, LeagueDbContext db, Cance
 
 // --- Background jobs: history backfill + import of the PowerShell exports --------
 
-api.MapPost("/sync/history", (AccountScopes scopes, AccountContext acct, JobStatusService jobs,
+owner.MapPost("/sync/history", (AccountScopes scopes, AccountContext acct, JobStatusService jobs,
     int rankedTarget = 0, int maxMatches = 0, bool timeline = true, bool ranks = true) =>
 {
     if (!jobs.TryStart("history-sync")) return Results.Conflict(jobs.Snapshot());
@@ -1114,9 +1154,19 @@ api.MapPost("/sync/history", (AccountScopes scopes, AccountContext acct, JobStat
     return Results.Accepted($"/api/a/{acct.UrlSegment}/jobs/status", jobs.Snapshot());
 });
 
-api.MapPost("/import", (string path, AccountScopes scopes, AccountContext acct, JobStatusService jobs) =>
+owner.MapPost("/import", (string path, AccountScopes scopes, AccountContext acct, JobStatusService jobs, IWebHostEnvironment env) =>
 {
-    if (!Directory.Exists(path)) return Results.BadRequest(new { error = $"Folder not found: {path}" });
+    // The folder must sit under this account's data folder or the deployment's
+    // import mount: an arbitrary server path was a directory read and an
+    // existence oracle (audit T-B6).
+    var full = Path.GetFullPath(path);
+    var allowedRoots = new[] { Path.GetFullPath(acct.DataDir), Path.GetFullPath("/imports"), Path.GetFullPath(Path.Combine(env.ContentRootPath, "../../imports")) };
+    if (!allowedRoots.Any(root => full.StartsWith(Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || full.Equals(Path.TrimEndingDirectorySeparator(root), StringComparison.OrdinalIgnoreCase)))
+    {
+        return Results.BadRequest(new { error = "Import folders must be inside this account's data folder or the /imports mount" });
+    }
+    if (!Directory.Exists(full)) return Results.BadRequest(new { error = $"Folder not found: {path}" });
+    path = full;
     if (!jobs.TryStart("import")) return Results.Conflict(jobs.Snapshot());
     _ = Task.Run(async () =>
     {
@@ -1133,34 +1183,34 @@ api.MapPost("/import", (string path, AccountScopes scopes, AccountContext acct, 
     return Results.Accepted($"/api/a/{acct.UrlSegment}/jobs/status", jobs.Snapshot());
 });
 
-api.MapGet("/jobs/status", (JobStatusService jobs) => Results.Ok(jobs.Snapshot()));
+owner.MapGet("/jobs/status", (JobStatusService jobs) => Results.Ok(jobs.Snapshot()));
 
 // --- Exports (PowerShell-tooling-compatible CSV shapes + an everything-bundle) --
 
-api.MapGet("/export/matches.csv", async (AccountContext acct, LeagueDbContext db, ReviewService reviews, CancellationToken ct) =>
+owner.MapGet("/export/matches.csv", async (AccountContext acct, LeagueDbContext db, ReviewService reviews, CancellationToken ct) =>
     CsvFile("matches-summary.csv", await Reports.MatchesCsvAsync(db, reviews, acct.Current.HideLp, ct)));
 
-api.MapGet("/export/deaths.csv", async (LeagueDbContext db, CancellationToken ct) =>
+owner.MapGet("/export/deaths.csv", async (LeagueDbContext db, CancellationToken ct) =>
     CsvFile("deaths.csv", await Reports.DeathsCsvAsync(db, ct)));
 
-api.MapGet("/export/ranks.csv", async (AccountContext acct, LeagueDbContext db, CancellationToken ct) =>
+owner.MapGet("/export/ranks.csv", async (AccountContext acct, LeagueDbContext db, CancellationToken ct) =>
     CsvFile("ranks.csv", await Reports.RanksCsvAsync(db, acct.Current.HideLp, ct)));
 
-api.MapGet("/export/lp-history.csv", async (AccountContext acct, LeagueDbContext db, CancellationToken ct) =>
+owner.MapGet("/export/lp-history.csv", async (AccountContext acct, LeagueDbContext db, CancellationToken ct) =>
     CsvFile("lp-history.csv", await Reports.LpHistoryCsvAsync(db, acct.Current.HideLp, ct)));
 
-api.MapGet("/export/challenges.csv", async (LeagueDbContext db, CancellationToken ct) =>
+owner.MapGet("/export/challenges.csv", async (LeagueDbContext db, CancellationToken ct) =>
     CsvFile("challenges.csv", await Reports.ChallengesCsvAsync(db, ct)));
 
-api.MapGet("/export/lane-checkpoints.csv", async (LeagueDbContext db, CancellationToken ct) =>
+owner.MapGet("/export/lane-checkpoints.csv", async (LeagueDbContext db, CancellationToken ct) =>
     CsvFile("lane-checkpoints.csv", await Reports.LaneCheckpointsCsvAsync(db, ct)));
 
-api.MapGet("/export/objectives.csv", async (LeagueDbContext db, CancellationToken ct) =>
+owner.MapGet("/export/objectives.csv", async (LeagueDbContext db, CancellationToken ct) =>
     CsvFile("objectives.csv", await Reports.ObjectivesCsvAsync(db, ct)));
 
 // Everything in one download: every CSV the screens are built from, plus the
 // dashboard aggregate over all games as machine-readable JSON.
-api.MapGet("/export/all.zip", async (AccountContext acct, LeagueDbContext db, ReviewService reviews, LpService lp, TrackedPlayerService player, CancellationToken ct) =>
+owner.MapGet("/export/all.zip", async (AccountContext acct, LeagueDbContext db, ReviewService reviews, LpService lp, TrackedPlayerService player, CancellationToken ct) =>
 {
     var summary = new
     {

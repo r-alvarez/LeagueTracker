@@ -49,7 +49,7 @@ public static class AuthEndpoints
         {
             var (user, _) = users.FromLogin("dev", email.ToLowerInvariant(), email, emailVerified: true, name);
             if (admin && !user.IsAdmin) { users.SetAdmin(user.Id, true); user.IsAdmin = true; }
-            await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, AuthSetup.SessionPrincipal(user));
+            await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, AuthSetup.SessionPrincipal(user), AuthSetup.PersistentSession());
             return returnUrl is { Length: > 0 } ? Results.Redirect(SafeReturn(returnUrl)) : Results.Ok(new { user.Id, user.Email, user.DisplayName, user.IsAdmin });
         });
     }

@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { account, type AccountInfo } from '../account'
+import { auth } from '../auth'
+import { apiFetch } from '../api'
 
 const ADD = '__add__'
 
@@ -23,7 +25,7 @@ export default function AccountSwitch() {
     setBusy(true)
     setError(null)
     try {
-      const resp = await fetch('/api/accounts', {
+      const resp = await apiFetch('/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ riotId: riotId.trim(), region }),
@@ -46,7 +48,7 @@ export default function AccountSwitch() {
           {account.all.map(a => (
             <option key={a.slug} value={a.slug}>{a.label} · {a.riotId}{a.available ? '' : ' · unavailable'}</option>
           ))}
-          {account.canAdd && <option value={ADD}>＋ Add account…</option>}
+          {account.canAdd && auth.signedIn && <option value={ADD}>＋ Add account…</option>}
         </select>
       </label>
       {adding && (
