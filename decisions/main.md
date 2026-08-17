@@ -1392,3 +1392,20 @@ stale one gets one "added column" log line per column, and a real error
 now surfaces - so per-account init at boot is wrapped so one bad db logs
 an error instead of taking every other account's site down (D-B1's floor;
 the 503-per-slug part is still open).
+
+## 2026-08-17 — An account whose db won't open is unavailable, not fatal
+
+**Per-account availability instead of a boot-time crash.** `AccountInitializer`
+owns "create/upgrade this account's SQLite" and remembers the outcome:
+a failure marks the account unavailable, an endpoint filter on every
+account-scoped route group answers 503 with the reason (the global routes -
+account list, agent enrolment, releases - are untouched), the poller skips
+it, `/api/accounts` says so and the switcher/banner show it. Whoever asks
+next after 60 s (a request, the poller, the boot loop) retries, so a
+transient NAS lock heals itself - verified with a db path that could not be
+opened: 503 with "unable to open database file", then 200 within a minute of
+removing the obstruction, "available again" logged once, no poller noise.
+Rejected: keeping the boot-loop try/catch alone (its pages 500'd opaquely
+and nothing retried until a restart), and checking readiness in the binding
+middleware (it runs for static files and global routes too - the endpoint
+filter is exactly the account API's scope).
