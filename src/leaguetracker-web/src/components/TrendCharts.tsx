@@ -22,7 +22,10 @@ const rollWindow = (n: number) =>
 // game; ~6 evenly spread ticks carry the calendar.
 function dateTicks(points: { n: number; date: string }[]) {
   const count = Math.min(6, points.length)
-  const idx = Array.from({ length: count }, (_, i) => Math.round((i * (points.length - 1)) / (count - 1)))
+  // One point = one tick; the spread formula divides by (count - 1) otherwise.
+  const idx = count < 2
+    ? points.map((_, i) => i)
+    : Array.from({ length: count }, (_, i) => Math.round((i * (points.length - 1)) / (count - 1)))
   const ticks = [...new Set(idx)].map(i => points[i].n)
   const labels = new Map(idx.map(i => [points[i].n, fmtDate(points[i].date)]))
   return { ticks, label: (n: number) => labels.get(n) ?? '' }
@@ -51,6 +54,8 @@ export function RollingWinRateChart({ series }: { series: SeriesPoint[] }) {
     if (i >= k) wins -= series[i - k].win ? 1 : 0
     return { ...p, roll: i >= k - 1 ? Math.round((100 * wins) / k) : null }
   }).filter((p): p is SeriesPoint & { roll: number } => p.roll !== null)
+  // Three games make one full window - a single dot, not a line.
+  if (data.length < 2) return <div className="empty">Not enough games in this window.</div>
   const last = data[data.length - 1]
   const { ticks, label } = dateTicks(data)
 
