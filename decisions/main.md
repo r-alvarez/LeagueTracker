@@ -1356,3 +1356,39 @@ back to idle was inside the YouTube publish, so a recorder-only install
 sat at "finalizing" forever and self-update (which waits for idle) never
 ran again. The reset lives in the recorder loop's `finally` around
 `RecordGameAsync`, covering gave-up, no-segments and exceptions too.
+
+## 2026-08-17 — Four more from the audit's "open" list
+
+**Rank lookups tolerate a puuid league-v4 refuses.** Co-op vs AI seats carry
+the literal puuid "BOT" (league-v4 answers 400), and one such participant
+aborted the whole match and put it on the poller's retry-forever list.
+`RankLookupService` short-circuits BOT/empty puuids and turns a non-auth 4xx
+into "no entries" (cached like any answer); 5xx and network faults still
+propagate so the match is retried next pass. Same service serves the rank
+backfill, so it inherits the tolerance.
+
+**Forwarded headers, trusting every hop.** Behind Traefik (and Cloudflare)
+the socket peer was always the proxy, so the enrolment per-IP cap was one
+shared bucket and the Data page's LastIp - the owner's one clue that a
+pending machine is a friend's - was the proxy's address. `KnownNetworks`/
+`KnownProxies` are cleared deliberately: nothing reaches the container
+except through the proxy on the NAS (no host ports), and `CF-Connecting-IP`
+overrides `RemoteIpAddress` when Cloudflare is the edge. Trade-off
+accepted: a caller that could reach the container directly (the local
+docker-compose publishes 5170) can claim any IP - it can already claim
+anything else there.
+
+**Telemetry CSV is culture-invariant UTF-8.** Nordic/Baltic/RTL Windows
+formatted every negative wheel tick and off-primary cursor position with
+U+2212 (or a direction mark), and the ASCII writer turned that into `?`,
+which the server's `long.TryParse` dropped. Invariant formatting on write,
+UTF-8 (no BOM) on both writer and the merge reader.
+
+**Schema upgrades run only the ALTERs a table lacks.** The 21-statement
+try/catch loop made a locked or read-only db indistinguishable from
+"column already exists" and logged ~21 EF `fail:` lines per account at
+every start. `PRAGMA table_info` decides; a current db runs nothing, a
+stale one gets one "added column" log line per column, and a real error
+now surfaces - so per-account init at boot is wrapped so one bad db logs
+an error instead of taking every other account's site down (D-B1's floor;
+the 503-per-slug part is still open).
