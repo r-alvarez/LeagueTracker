@@ -142,7 +142,7 @@ public sealed class LensService(LeagueDbContext db)
 
         double? ScoreOf(IEnumerable<Spec> specs)
         {
-            var pcts = specs.Select(s => MatchMetricRows.Percentile(rows, recent, s.Key, s.HigherIsBetter)).OfType<double>().ToList();
+            var pcts = specs.Select(s => MatchMetricRows.Percentile(baseline, recent, s.Key, s.HigherIsBetter)).OfType<double>().ToList();
             return pcts is { Count: > 0 } ? Math.Round(pcts.Average()) : null;
         }
 

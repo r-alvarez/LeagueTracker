@@ -224,7 +224,7 @@ public sealed class FundamentalsService(LeagueDbContext db, ChallengesBenchmarkS
         {
             var pcts = a.Metrics
                 .Where(s => s.HigherIsBetter is not null)
-                .Select(s => MatchMetricRows.Percentile(rows, recent, s.Key, s.HigherIsBetter!.Value))
+                .Select(s => MatchMetricRows.Percentile(baseline, recent, s.Key, s.HigherIsBetter!.Value))
                 .OfType<double>().ToList();
             var mapped = a.ChallengeIds
                 .Select(id => standingById.GetValueOrDefault(id))

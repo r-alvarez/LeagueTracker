@@ -98,16 +98,36 @@ public static class MatchMetricRows
         return vals is { Count: > 0 } ? vals.Average() : null;
     }
 
-    /// Where the recent window's mean for this key sits within the full history
-    /// (0-100, ties split). Null when either side lacks the data.
+    /// Where the recent window's mean for this key sits among the means of every
+    /// equally long window in the player's EARLIER history (0-100, ties split):
+    /// like against like, and the window never ranks against itself - both of
+    /// which pushed every score towards 50 as the window grew. A history too
+    /// short for five such windows falls back to the baseline's single-game
+    /// values: noisier, but a young account still gets a number. Null when
+    /// either side lacks the data.
     public static double? Percentile(
-        List<Dictionary<string, double>> all, List<Dictionary<string, double>> recent, string key, bool higherIsBetter)
+        List<Dictionary<string, double>> baseline, List<Dictionary<string, double>> recent, string key, bool higherIsBetter)
     {
         if (Mean(recent, key) is not { } target) return null;
-        var vals = all.Where(r => r.ContainsKey(key)).Select(r => r[key]).ToList();
+        var vals = baseline.Where(r => r.ContainsKey(key)).Select(r => r[key]).ToList();
         if (vals.Count < 5) return null;
-        var below = vals.Count(v => v < target) + vals.Count(v => v == target) * 0.5;
-        var pct = below / vals.Count;
+        var windowSize = recent.Count(r => r.ContainsKey(key));
+        var reference = vals.Count >= windowSize + 4 ? RollingMeans(vals, windowSize) : vals;
+        var below = reference.Count(v => v < target) + reference.Count(v => v == target) * 0.5;
+        var pct = below / reference.Count;
         return Math.Round(100 * (higherIsBetter ? pct : 1 - pct));
+    }
+
+    private static List<double> RollingMeans(List<double> vals, int window)
+    {
+        var means = new List<double>(vals.Count - window + 1);
+        var sum = vals.Take(window).Sum();
+        means.Add(sum / window);
+        for (var i = window; i < vals.Count; i++)
+        {
+            sum += vals[i] - vals[i - window];
+            means.Add(sum / window);
+        }
+        return means;
     }
 }
