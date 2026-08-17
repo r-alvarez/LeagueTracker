@@ -3,6 +3,7 @@ using LeagueTracker.Api.Accounts;
 using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Riot;
 using LeagueTracker.Api.Services;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Match = LeagueTracker.Api.Data.Match;
 
@@ -67,13 +68,39 @@ builder.Services.AddHostedService<MatchPollerService>();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins("http://localhost:5173").AllowAnyHeader().AllowAnyMethod()));
 
+// Behind Traefik (and Cloudflare in front of it) the socket peer is always the
+// proxy: without this every agent enrolment shared one "IP", the per-IP
+// pending cap locked everyone out after three, and the Data page's LastIp -
+// the owner's one clue that a pending machine is really a friend's - was the
+// proxy's address. Nothing reaches the container except through the proxy
+// (no host ports on the NAS), so every hop is trusted; Cloudflare's own
+// header carries the client past the edge.
+builder.Services.Configure<ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    o.KnownNetworks.Clear();
+    o.KnownProxies.Clear();
+});
+
 // Compress JSON app-side: the Traefik deployment doesn't compress (the old
 // Caddy proxy did), and this way every proxy setup gets it for free.
 builder.Services.AddResponseCompression(o => o.EnableForHttps = true);
 
 var app = builder.Build();
 
-foreach (var account in app.Services.GetRequiredService<AccountRegistry>().All) InitializeAccount(account);
+foreach (var account in app.Services.GetRequiredService<AccountRegistry>().All)
+{
+    try
+    {
+        InitializeAccount(account);
+    }
+    catch (Exception ex)
+    {
+        // One account's broken db (locked, read-only, torn) must not take every
+        // other account's site down with it - its own pages will fail loudly.
+        app.Logger.LogError(ex, "Account {Slug}: database initialisation failed - its pages will error until fixed", account.Slug);
+    }
+}
 
 // Creates/upgrades an account's SQLite - at startup for every configured
 // account, and again for each one added through the site.
@@ -85,38 +112,74 @@ void InitializeAccount(Account account)
     // WAL lets match pages read while the poller/backfill writes (the default
     // rollback journal blocks readers for the whole write). Persistent setting.
     db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL");
-    // Additive columns land via idempotent ALTERs - EnsureCreated never alters an
-    // existing table, and wiping the db would cost capture-time-only data (ranks, LP).
-    foreach (var alter in new[]
+    // Additive columns land as ALTERs for exactly the columns a table lacks -
+    // checked against PRAGMA table_info first, so an already-current db runs
+    // no statement at all. (Firing every ALTER and swallowing the exception
+    // made a locked or read-only db indistinguishable from "column already
+    // exists", and logged one EF failure per column per account at every start.)
+    var upgrades = new (string Table, string Column, string Definition)[]
     {
-        "ALTER TABLE Matches ADD COLUMN AllyJungler TEXT NULL",
-        "ALTER TABLE Matches ADD COLUMN TotalTimeSpentDead INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE Matches ADD COLUMN LongestTimeSpentLiving INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE Matches ADD COLUMN TotalTimeCcDealt INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE Matches ADD COLUMN ChallengesJson TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE Matches ADD COLUMN AvgUnspentGold INTEGER NULL",
-        "ALTER TABLE Matches ADD COLUMN MaxUnspentGold INTEGER NULL",
-        "ALTER TABLE Matches ADD COLUMN FirstWardSec INTEGER NULL",
-        "ALTER TABLE Matches ADD COLUMN FirstControlWardSec INTEGER NULL",
-        "ALTER TABLE Matches ADD COLUMN WardsFirst10 INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE Matches ADD COLUMN Level6LeadSec INTEGER NULL",
-        "ALTER TABLE Matches ADD COLUMN Level11LeadSec INTEGER NULL",
-        "ALTER TABLE Matches ADD COLUMN Level16LeadSec INTEGER NULL",
-        "ALTER TABLE Matches ADD COLUMN FriendlyEpicObjectives INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE Matches ADD COLUMN ObjectivesPresentFor INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE Matches ADD COLUMN FightsJson TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE Matches ADD COLUMN TeamGoldDiff15 INTEGER NULL",
-        "ALTER TABLE Matches ADD COLUMN TeamGoldDiff20 INTEGER NULL",
-        "ALTER TABLE Matches ADD COLUMN ContestedEpicsTaken INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE Deaths ADD COLUMN EnemyJunglerNear INTEGER NULL",
-        "ALTER TABLE KillEvents ADD COLUMN AssistIds TEXT NOT NULL DEFAULT ''",
-    })
+        ("Matches", "AllyJungler", "TEXT NULL"),
+        ("Matches", "TotalTimeSpentDead", "INTEGER NOT NULL DEFAULT 0"),
+        ("Matches", "LongestTimeSpentLiving", "INTEGER NOT NULL DEFAULT 0"),
+        ("Matches", "TotalTimeCcDealt", "INTEGER NOT NULL DEFAULT 0"),
+        ("Matches", "ChallengesJson", "TEXT NOT NULL DEFAULT ''"),
+        ("Matches", "AvgUnspentGold", "INTEGER NULL"),
+        ("Matches", "MaxUnspentGold", "INTEGER NULL"),
+        ("Matches", "FirstWardSec", "INTEGER NULL"),
+        ("Matches", "FirstControlWardSec", "INTEGER NULL"),
+        ("Matches", "WardsFirst10", "INTEGER NOT NULL DEFAULT 0"),
+        ("Matches", "Level6LeadSec", "INTEGER NULL"),
+        ("Matches", "Level11LeadSec", "INTEGER NULL"),
+        ("Matches", "Level16LeadSec", "INTEGER NULL"),
+        ("Matches", "FriendlyEpicObjectives", "INTEGER NOT NULL DEFAULT 0"),
+        ("Matches", "ObjectivesPresentFor", "INTEGER NOT NULL DEFAULT 0"),
+        ("Matches", "FightsJson", "TEXT NOT NULL DEFAULT ''"),
+        ("Matches", "TeamGoldDiff15", "INTEGER NULL"),
+        ("Matches", "TeamGoldDiff20", "INTEGER NULL"),
+        ("Matches", "ContestedEpicsTaken", "INTEGER NOT NULL DEFAULT 0"),
+        ("Deaths", "EnemyJunglerNear", "INTEGER NULL"),
+        ("KillEvents", "AssistIds", "TEXT NOT NULL DEFAULT ''"),
+    };
+    var connection = db.Database.GetDbConnection();
+    db.Database.OpenConnection();
+    try
     {
-        try { db.Database.ExecuteSqlRaw(alter); } catch { /* column already exists */ }
+        var columnsByTable = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (table, column, definition) in upgrades)
+        {
+            if (!columnsByTable.TryGetValue(table, out var columns))
+            {
+                columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                using var pragma = connection.CreateCommand();
+                pragma.CommandText = $"PRAGMA table_info({table})";
+                using var reader = pragma.ExecuteReader();
+                while (reader.Read()) columns.Add(reader.GetString(1));
+                columnsByTable[table] = columns;
+            }
+            if (columns.Contains(column)) continue;
+            db.Database.ExecuteSqlRaw($"ALTER TABLE {table} ADD COLUMN {column} {definition}");
+            columns.Add(column);
+            app.Logger.LogInformation("Account {Slug}: added column {Table}.{Column}", account.Slug, table, column);
+        }
+    }
+    finally
+    {
+        db.Database.CloseConnection();
     }
     app.Logger.LogInformation("Account {Slug}: {RiotId} at {Dir}", account.Slug, account.RiotId, account.DataDir);
 }
 
+app.UseForwardedHeaders();
+app.Use((http, next) =>
+{
+    if (http.Request.Headers.TryGetValue("CF-Connecting-IP", out var cf)
+        && System.Net.IPAddress.TryParse(cf.FirstOrDefault(), out var client))
+    {
+        http.Connection.RemoteIpAddress = client;
+    }
+    return next(http);
+});
 app.UseMiddleware<AgentAuthMiddleware>();
 app.UseMiddleware<AccountBindingMiddleware>();
 app.UseCors();
