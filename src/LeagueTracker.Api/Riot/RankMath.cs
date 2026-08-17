@@ -53,6 +53,21 @@ public static class RankMath
         return list.FirstOrDefault(e => e.QueueType == preferred) ?? list.FirstOrDefault();
     }
 
+    /// The match-list filter's queue families, by the value the URL carries.
+    /// One table next to QueueName so a queue the UI can name is a queue the
+    /// filter can reach (Swiftplay sat unreachable for weeks otherwise).
+    public static int[]? QueueFamily(string family) => family.ToLowerInvariant() switch
+    {
+        "solo" => [420],
+        "flex" => [440],
+        "normal" => [400, 430, 480, 490],
+        "swiftplay" => [480],
+        "aram" => [450, 720],
+        "arena" => [1700, 1710],
+        "urf" => [900, 1900],
+        _ => null,
+    };
+
     public static string QueueName(int queueId) => queueId switch
     {
         400 => "Normal Draft", 420 => "Ranked Solo/Duo", 430 => "Normal Blind", 440 => "Ranked Flex",

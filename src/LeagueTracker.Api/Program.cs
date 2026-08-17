@@ -353,14 +353,13 @@ api.MapGet("/matches", async (AccountContext acct, LeagueDbContext db, ReplayArc
         var normalized = role.ToUpperInvariant();
         query = query.Where(m => m.Position == normalized);
     }
-    query = queue?.ToLowerInvariant() switch
+    if (queue is { Length: > 0 })
     {
-        "solo" => query.Where(m => m.QueueId == 420),
-        "flex" => query.Where(m => m.QueueId == 440),
-        "normal" => query.Where(m => m.QueueId == 400 || m.QueueId == 430 || m.QueueId == 490),
-        "aram" => query.Where(m => m.QueueId == 450),
-        _ => query,
-    };
+        // An unknown family is a 400, not "everything" - silently returning all
+        // matches reads as "this player has 400 Arena games".
+        if (RankMath.QueueFamily(queue) is not { } queueIds) return Results.BadRequest(new { error = $"Unknown queue '{queue}'" });
+        query = query.Where(m => queueIds.Contains(m.QueueId));
+    }
     // Patches are major.minor; GameVersion carries the full build number.
     if (patch is { Length: > 0 }) query = query.Where(m => m.GameVersion.StartsWith(patch + "."));
 
