@@ -1438,3 +1438,51 @@ one who can flip HDR off (Win+Alt+B) or exclude League from Auto HDR.
 Unverified on this branch: the "on" case ran only through the struct-size
 cross-check (72/84/32/36 bytes, rc 0, `\.\DISPLAY33` matched) - the dev
 box has no HDR-capable display.
+
+## 2026-08-17 — Capture engine on the commercial track: open, with the arguments on record
+
+**Question:** the 29 Jul choice of ScreenRecorderLib over a bundled OBS was
+made for a personal resident agent. Ruben intends to take the app commercial;
+does the choice hold? Not decided today - recorded so the decision is made on
+this list, not on the next bug.
+
+**What still holds.** ScreenRecorderLib is MIT: clean to link in-process, no
+obligations. libobs is GPLv2, so it can only sit behind a process boundary
+(Ascent's `ascent-obs.exe`, Streamlabs) with the host process itself GPL'd and
+its source offered. But that is already our posture: the agent zip ships
+gyan's GPL ffmpeg as a separate exe. Commercially fine and common, but a
+commercial release owes third-party notices and a source offer for the GPL
+bits either way - and a lawyer's pass on H.264 patent-pool terms, which apply
+at distribution volume regardless of engine.
+
+**What flips.** Support cost dominates a product: every odd PC (HDR + Auto HDR
+- today's gap; hybrid laptops; Intel/AMD Media Foundation encoder quirks;
+protected overlays; mode switches; multi-monitor DPI) is a ticket, and each is
+a bug OBS fixed years ago on millions of machines. ScreenRecorderLib is a
+single-maintainer hobby project with its HDR issue (#313) open and unanswered
+since 2024, and its WGC path hard-forces B8G8R8A8 (PR #97) - the first fix we
+need is already a fork. If we fork, we own native capture code anyway, in
+C++/CLI, a form nobody chose; if ownership is inevitable, choose the form.
+Download weight stops mattering (+100 MB is normal for a game recorder).
+
+**Options on the table.**
+- *Keep ScreenRecorderLib, patch as needed.* Right for now; the HDR fork (FP16
+  frame pool on HDR monitors + SDR-white/Reinhard shader, ~200 lines
+  C++/HLSL) is a stopgap worth weeks, not a direction.
+- *libobs host process, Ascent-style* - recommended strategic move. Inherits
+  game-hook capture, HDR->SDR tone-mapping, per-application audio (OBS 28+,
+  would retire ProcessAudioCapture), every vendor encoder. Host = a few
+  hundred lines of C++ (GPL, sources offered) driven over IPC; the agent stays
+  proprietary. First step is a one-week spike: libobs headless from the OBS
+  CMake presets on CI, a minimal host recording the League window to
+  fragmented mp4, IPC to the agent - the spike prices the real cost.
+- *Own C# engine* (WGC + D3D11 + Media Foundation): zero GPL in the box, full
+  per-frame control, and every driver quirk ours - months to harden. Only if
+  GPL-free or per-frame control is a requirement OBS can't meet.
+
+**Trigger:** Ben's next game (the `DisplayHdr` heartbeat flag shipped today
+in a0e77d7). HDR flagged = the first OBS-grade gap is real on a
+default-config Windows 11 + HDR-monitor customer; then choose between the
+quick fork and starting the libobs spike. Whichever way: write down the
+proprietary/GPL boundary (ffmpeg today, libobs tomorrow) and the notice +
+source-offer obligation before anything ships to a paying customer.
