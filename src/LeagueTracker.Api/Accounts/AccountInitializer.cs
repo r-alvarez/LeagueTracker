@@ -53,16 +53,16 @@ public sealed class AccountInitializer(AccountScopes scopes, ILogger<AccountInit
 
     private readonly ConcurrentDictionary<string, State> _states = new(StringComparer.OrdinalIgnoreCase);
 
-    public bool IsReady(Account account) => _states.TryGetValue(account.Slug, out var s) && s.Ready;
+    public bool IsReady(Account account) => _states.TryGetValue(account.Id, out var s) && s.Ready;
 
     // The reason the account is unavailable; null when it is fine (or untried).
-    public string? ErrorFor(Account account) => _states.TryGetValue(account.Slug, out var s) && !s.Ready ? s.Error : null;
+    public string? ErrorFor(Account account) => _states.TryGetValue(account.Id, out var s) && !s.Ready ? s.Error : null;
 
     // True when the account can serve. A failed account is retried at most
     // every RetryEvery, whoever asks (a request, the poller, the boot loop).
     public bool EnsureReady(Account account)
     {
-        var state = _states.GetOrAdd(account.Slug, _ => new State());
+        var state = _states.GetOrAdd(account.Id, _ => new State());
         lock (state)
         {
             if (state.Ready) return true;
@@ -89,7 +89,7 @@ public sealed class AccountInitializer(AccountScopes scopes, ILogger<AccountInit
         }
     }
 
-    public void Forget(string slug) => _states.TryRemove(slug, out _);
+    public void Forget(string accountId) => _states.TryRemove(accountId, out _);
 
     private void Initialize(Account account)
     {

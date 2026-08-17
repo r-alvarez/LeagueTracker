@@ -68,6 +68,15 @@ export default function DataPage() {
     pollJob()
   }
 
+  const [settingsBusy, setSettingsBusy] = useState(false)
+  const setSetting = async (patch: { mediaPublic?: boolean; hideLp?: boolean }) => {
+    setSettingsBusy(true)
+    try {
+      const saved = await api.saveSettings(patch)
+      setStatus(s => s ? { ...s, hideLp: saved.hideLp, account: { ...s.account, mediaPublic: saved.mediaPublic } } : s)
+    } finally { setSettingsBusy(false) }
+  }
+
   if (!canManage) {
     return (
       <div className="grid" style={{ gap: 14 }}>
@@ -156,6 +165,24 @@ export default function DataPage() {
         <button className="action" onClick={async () => { setJob(await api.reprocess()); pollJob() }} disabled={job?.running === true}>
           Reprocess all games
         </button>
+      </div>
+
+      <div className="card">
+        <h2>What visitors see</h2>
+        <p className="mut" style={{ marginTop: 0 }}>
+          Games, stats and coaching pages are visible to everyone who can open this site. Your recordings and clips are
+          yours alone unless you share them; rank and LP can be kept off the pages too.
+        </p>
+        <label className="setting-row">
+          <input type="checkbox" disabled={!status || settingsBusy} checked={status?.account.mediaPublic ?? false}
+            onChange={e => setSetting({ mediaPublic: e.target.checked })} />
+          <span><strong>Share my recordings</strong> <span className="mut">— VODs, YouTube links, clips and full-game renders show on the public profile</span></span>
+        </label>
+        <label className="setting-row">
+          <input type="checkbox" disabled={!status || settingsBusy} checked={status?.hideLp ?? false}
+            onChange={e => setSetting({ hideLp: e.target.checked })} />
+          <span><strong>Hide rank and LP</strong> <span className="mut">— capture continues, the pages just don't show it</span></span>
+        </label>
       </div>
 
       <Machines />

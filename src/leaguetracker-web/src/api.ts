@@ -60,6 +60,11 @@ export const api = {
   deleteFullGame: async (id: string) => { await apiFetch(`/api/matches/${id}/fullgame`, { method: 'DELETE' }) },
   retryRender: async (id: string, kind: 'clips' | 'full') => { await apiFetch(`/api/render/${id}/retry?kind=${kind}`, { method: 'POST' }) },
   dismissRender: async (id: string, kind: 'clips' | 'full') => { await apiFetch(`/api/render/${id}/dismiss?kind=${kind}`, { method: 'POST' }) },
+  saveSettings: async (settings: { mediaPublic?: boolean; hideLp?: boolean; displayName?: string }) => {
+    const r = await apiFetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) })
+    if (!r.ok) throw new Error(`settings -> HTTP ${r.status}`)
+    return r.json() as Promise<{ id: string; mediaPublic: boolean; hideLp: boolean; displayName: string }>
+  },
   // My machines (/api/me): keys, live heartbeats, open join codes.
   myAgents: () => get<MyAgents>('/api/me/agents'),
   mintJoinCode: async (role: 'recorder' | 'renderer'): Promise<JoinCodeInfo & { pretty: string }> => {

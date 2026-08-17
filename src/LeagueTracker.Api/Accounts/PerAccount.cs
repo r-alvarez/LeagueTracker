@@ -10,7 +10,7 @@ public sealed class PerAccount<T>(Func<Account, T> factory) where T : class
 {
     private readonly ConcurrentDictionary<string, T> _instances = new(StringComparer.OrdinalIgnoreCase);
 
-    public T For(Account account) => _instances.GetOrAdd(account.Slug, _ => factory(account));
+    public T For(Account account) => _instances.GetOrAdd(account.Id, _ => factory(account));
 
     public IEnumerable<(Account Account, T Instance)> All(AccountRegistry registry) =>
         registry.All.Select(a => (a, For(a)));

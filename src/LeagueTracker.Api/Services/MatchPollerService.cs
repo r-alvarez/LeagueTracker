@@ -26,6 +26,7 @@ public sealed class MatchPollerService(
     // Per-account pass state: first pass and the retention sweep clock.
     private readonly HashSet<string> _passed = [];
     private readonly Dictionary<string, DateTime> _lastRetentionSweepUtc = [];
+    private readonly Dictionary<string, DateTime> _lastAliasCheckUtc = [];
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -69,6 +70,29 @@ public sealed class MatchPollerService(
             var delay = anyFast ? FastCaptureDelay : TimeSpan.FromSeconds(Math.Max(30, _options.PollSeconds));
             await Task.Delay(delay, ct);
         }
+    }
+
+    private async Task RefreshAliasAsync(Account account, string puuid, RiotApiClient riot, CancellationToken ct)
+    {
+        AccountDto current;
+        try
+        {
+            current = await riot.GetAccountByPuuidAsync(puuid, ct);
+        }
+        catch (RiotApiException ex) when (!ex.IsAuthFailure)
+        {
+            logger.LogWarning("Alias check for {RiotId} answered {Status} - keeping the current name", account.RiotId, ex.StatusCode);
+            return;
+        }
+        if (current.GameName is not { Length: > 0 } || current.TagLine is not { Length: > 0 }) return;
+        if (current.GameName == account.GameName && current.TagLine == account.TagLine) return;
+        var taken = accounts.BySlug($"{current.GameName}-{current.TagLine}");
+        if (taken is not null && taken.Id != account.Id)
+        {
+            logger.LogWarning("{RiotId} is now {New} on Riot's side, but that address belongs to another tracked account - not renaming", account.RiotId, $"{current.GameName}#{current.TagLine}");
+            return;
+        }
+        accounts.Rename(account, current.GameName, current.TagLine);
     }
 
     private async Task CheckLiveGameAsync(LiveGameState live, string puuid, RiotApiClient riot, RankLookupService ranks, CancellationToken ct)
@@ -143,19 +167,27 @@ public sealed class MatchPollerService(
 
         var puuid = await player.GetPuuidAsync(ct);
 
+        // Riot IDs change; the puuid does not. Once a day ask what this player
+        // is called now, so the address follows the rename and the old one 301s.
+        if (DateTime.UtcNow - _lastAliasCheckUtc.GetValueOrDefault(account.Id) > TimeSpan.FromHours(24))
+        {
+            _lastAliasCheckUtc[account.Id] = DateTime.UtcNow;
+            await RefreshAliasAsync(account, puuid, riot, ct);
+        }
+
         await CheckLiveGameAsync(live, puuid, riot, scope.ServiceProvider.GetRequiredService<RankLookupService>(), ct);
 
         // Full-game renders are big; expire unkept ones on a slow cadence.
-        if (DateTime.UtcNow - _lastRetentionSweepUtc.GetValueOrDefault(account.Slug) > TimeSpan.FromHours(6))
+        if (DateTime.UtcNow - _lastRetentionSweepUtc.GetValueOrDefault(account.Id) > TimeSpan.FromHours(6))
         {
-            _lastRetentionSweepUtc[account.Slug] = DateTime.UtcNow;
+            _lastRetentionSweepUtc[account.Id] = DateTime.UtcNow;
             var swept = scope.ServiceProvider.GetRequiredService<FullGameService>().SweepRetention(_options.FullGameRetentionDays);
             if (swept > 0) logger.LogInformation("Retention: deleted {Count} unkept full-game render(s) older than {Days} days", swept, _options.FullGameRetentionDays);
         }
 
         // Service (re)start: grab whatever of the last games' replays is still on
         // offer - the window is ~5 games, so an offline stretch can't be recovered later.
-        if (_passed.Add(account.Slug))
+        if (_passed.Add(account.Id))
         {
             await scope.ServiceProvider.GetRequiredService<ReplayArchiveService>().SweepAsync(puuid, ct);
         }

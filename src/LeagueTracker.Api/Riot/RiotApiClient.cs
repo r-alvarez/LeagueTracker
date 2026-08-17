@@ -16,6 +16,16 @@ public sealed class RiotApiClient(HttpClient http, AccountContext account)
         JsonSerializer.Deserialize<AccountDto>(
             await GetStringAsync($"{RegionalBase}/riot/account/v1/accounts/by-riot-id/{Uri.EscapeDataString(gameName)}/{Uri.EscapeDataString(tagLine)}", ct), Json)!;
 
+    // The current Riot ID for a puuid - the alias check after a rename.
+    public async Task<AccountDto> GetAccountByPuuidAsync(string puuid, CancellationToken ct) =>
+        JsonSerializer.Deserialize<AccountDto>(
+            await GetStringAsync($"{RegionalBase}/riot/account/v1/accounts/by-puuid/{puuid}", ct), Json)!;
+
+    // Profile icon (the ownership claim's proof) - summoner-v4 by puuid.
+    public async Task<SummonerDto> GetSummonerByPuuidAsync(string puuid, CancellationToken ct) =>
+        JsonSerializer.Deserialize<SummonerDto>(
+            await GetStringAsync($"{PlatformBase}/lol/summoner/v4/summoners/by-puuid/{puuid}", ct), Json)!;
+
     public async Task<List<string>> GetMatchIdsAsync(string puuid, int start, int count, bool rankedOnly, CancellationToken ct)
     {
         var typeFilter = rankedOnly ? "type=ranked&" : "";

@@ -253,7 +253,7 @@ app.MapDelete("/api/accounts/{idOrSlug}", (string idOrSlug, Caller caller, Accou
     if ((registry.ById(decoded) ?? registry.BySlug(decoded)) is not { } account) return Results.NotFound();
     if (!caller.Owns(account)) return Results.Forbid();
     if (!registry.Remove(account.Id)) return Results.Conflict(new { error = "configured accounts are removed from the compose, not here" });
-    initializer.Forget(account.Slug);
+    initializer.Forget(account.Id);
     return Results.NoContent();
 }).RequireAuthorization(Policies.User);
 
@@ -403,6 +403,19 @@ read.MapGet("/status", async (AccountContext acct, Caller caller, LeagueDbContex
         Job = manages ? jobs.Snapshot() : null,
         Agents = manages ? agents.SnapshotFor(acct.Current.OwnerUserId, caller.IsAdmin) : [],
     });
+});
+
+// The owner's dials for the profile: whether recordings show to visitors,
+// whether LP/rank stays private, the display name in the switcher.
+owner.MapPut("/settings", (AccountSettingsRequest request, AccountContext acct) =>
+{
+    acct.Registry.Update(acct.Current, a =>
+    {
+        if (request.MediaPublic is { } media) a.MediaPublic = media;
+        if (request.HideLp is { } hide) a.HideLp = hide;
+        if (request.DisplayName is { } name) a.DisplayName = name.Trim()[..Math.Min(name.Trim().Length, 40)];
+    });
+    return Results.Ok(new { acct.Current.Id, acct.Current.MediaPublic, acct.Current.HideLp, acct.Current.DisplayName });
 });
 
 // The game being played right now (spectator-v5, refreshed by the poller).
@@ -1298,5 +1311,7 @@ static IResult CsvFile(string fileName, string csv) =>
     Results.File(Encoding.UTF8.GetBytes(csv), "text/csv", fileName);
 
 public sealed record AddAccountRequest(string RiotId, string Region, string? DisplayName);
+
+public sealed record AccountSettingsRequest(bool? MediaPublic, bool? HideLp, string? DisplayName);
 
 public sealed record EnrollRequest(string Key, string? Name, string? Machine, string? Code);

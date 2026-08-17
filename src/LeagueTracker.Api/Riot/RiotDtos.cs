@@ -1,5 +1,13 @@
 namespace LeagueTracker.Api.Riot;
 
+public sealed class SummonerDto
+{
+    public string Puuid { get; set; } = "";
+    public int ProfileIconId { get; set; }
+    public long SummonerLevel { get; set; }
+    public long RevisionDate { get; set; }
+}
+
 public sealed class AccountDto
 {
     public string Puuid { get; set; } = "";

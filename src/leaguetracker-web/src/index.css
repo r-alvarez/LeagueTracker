@@ -1565,3 +1565,8 @@ table.data.render-failed-table td.reason { color: var(--ink-2); font-size: 12.5p
 .topbar .signin-pill .signout { color: var(--muted); text-decoration: none; border-bottom: 1px dotted currentColor; }
 .topbar .signin-pill .signout:hover { color: var(--accent); }
 .signin-wall { max-width: 520px; margin: 40px auto; text-align: center; }
+
+.setting-row { display: flex; align-items: flex-start; gap: 10px; margin: 8px 0; cursor: pointer; }
+.setting-row input { margin-top: 3px; accent-color: var(--accent); }
+.join-code-box { margin-top: 8px; }
+.join-code { font: 700 26px/1.2 ui-monospace, "Cascadia Code", Consolas, monospace; letter-spacing: 0.12em; color: var(--accent); }
