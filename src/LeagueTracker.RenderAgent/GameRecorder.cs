@@ -174,7 +174,20 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 }
                 if (phase is "InProgress")
                 {
-                    var gaveUp = !await RecordGameAsync(ct);
+                    var gaveUp = false;
+                    try
+                    {
+                        gaveUp = !await RecordGameAsync(ct);
+                    }
+                    finally
+                    {
+                        // Whatever the game left the status at ("recording",
+                        // "finalizing", "uploading"), the pass is over. Without
+                        // this a recorder that never publishes to YouTube sat
+                        // at "finalizing" for good - and self-update and the
+                        // restart command both wait for idle.
+                        AgentStatus.Set(RenderAgent.Paused ? "paused" : "idle");
+                    }
                     if (gaveUp)
                     {
                         // Capture is deterministically broken for this game
