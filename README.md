@@ -1,20 +1,56 @@
 # LeagueTracker
 
-A personal League of Legends tracker: an ASP.NET Core (.NET 10) API with a
-background capture service and a React front end. It watches one player's
-account (mine), records every finished game, and turns the data into analysis
-of my own play — LP progression, team rank context, and death/positioning
+A League of Legends tracker for a small circle of players: an ASP.NET Core
+(.NET 10) API with background capture, a React front end, and an optional
+Windows agent that records games on the player's PC. It follows every tracked
+account, records each finished game, and turns the data into analysis of that
+player's own play - LP progression, team rank context, and death/positioning
 analytics derived from match timelines.
 
 LeagueTracker is a personal, non-commercial tool. It isn't endorsed by Riot
-Games, uses only the documented Riot API, and tracks only my own account.
+Games and uses only the documented Riot API.
+
+## Who sees what
+
+One process serves many tracked accounts at `/{region}/{Name-TAG}/...`
+(`/api/a/{region}/{Name-TAG}/...` underneath). Identity is the app's own:
+
+- **Users** sign in through an OIDC provider (Auth0 today; the app keeps its
+  own user rows and can link a second provider later). Sign-ups are
+  invite-only; anonymous visitors see a sign-in wall until `Auth:PublicReads`
+  is turned on.
+- **Owners** are users who proved a Riot account is theirs (Data & sync →
+  *Is this your Riot account?*: set the profile icon the page names, press
+  Verify) or were assigned it by an admin. Only the owner runs syncs and
+  imports, manages machines, downloads exports, and decides what visitors see
+  (recordings shared or not, rank/LP shown or hidden).
+- **Agents** are machines with a key bound to one user: a *recorder* on the
+  owner's gaming PC uploads that owner's VODs; a *renderer* (admin-admitted)
+  serves everyone's replay-render queue. A new machine joins with a 15-minute
+  join code from the owner's Data page and waits for one Approve click.
+- **Admins** (`Auth:Admins`, comma-separated emails) see and manage every
+  account, machine and user - the *People* card on any Data page.
+
+Every endpoint names its policy (Read, MediaRead, Owner, AgentRecorder,
+AgentRender, RenderRead); the SPA only hides what the server would refuse.
+Users, accounts and agent keys live in `data/registry.db`; each account keeps
+its own folder and SQLite. The full rationale is in
+`decisions/auth-identity-model.md`.
 
 ## Running it
 
 ```powershell
-cd src\LeagueTracker.Api
-dotnet run                      # http://localhost:5170 (API + built SPA)
+cd src\leaguetracker-web && npm install && npm run build   # emits into LeagueTracker.Api\wwwroot
+cd ..\LeagueTracker.Api
+dotnet run --no-launch-profile -- --urls http://localhost:5399 --environment Development
 ```
+
+Development enables `/api/auth/dev-login?email=you@example.com&name=You&admin=true&returnUrl=/`
+(a persistent cookie session with no provider) so the owner and visitor views
+can be reviewed side by side in two browser profiles. A real provider needs
+`Auth:Oidc:Authority`, `ClientId` and `ClientSecret` (user-secrets locally,
+stack env in Docker) and `http://localhost:5399/auth/callback` allowed on the
+provider's application; then `/auth/login`.
 
 Or the whole stack in Docker (app + a Caddy reverse proxy for a friendly
 hostname):
@@ -25,43 +61,36 @@ docker compose up -d            # http://leaguetracker.localhost (and :5170)
 
 Add `127.0.0.1  leaguetracker.localhost` to your hosts file so the name
 resolves for every client (browsers already resolve `*.localhost` to loopback).
+The production stack (`deploy/truenas/compose.yml`) maps `AUTH0_*`,
+`AUTH_ADMINS` and `OWNER_*` environment variables onto the settings above;
+none of them live in the repo.
 
 Front-end development (hot reload, proxies /api to the running API):
 
 ```powershell
 cd src\leaguetracker-web
 npm run dev                     # http://localhost:5173
-npm run build                   # emits into LeagueTracker.Api\wwwroot
 ```
 
 ### API key
 
 Resolution order: `Riot:ApiKey` (user-secrets) → `RIOT_API_KEY` env var →
-first line of the file at `Riot:ApiKeyFile`. The key file is re-read whenever
-it changes on disk, so a refreshed key needs no restart. The key stays
-server-side only — the SPA talks exclusively to this API, never to Riot.
+first line of the file at `Riot:ApiKeyFile` (`data/riot-api-key.txt` by
+default). The key file is re-read whenever it changes on disk, so a refreshed
+key needs no restart. The key stays server-side only - the SPA talks
+exclusively to this API, never to Riot.
 
-Configure the tracked player and routing in `appsettings.json` under `Riot`
-(`GameName`, `TagLine`, `Region`, `Platform`).
-
-### Install as a Windows service (always-on capture)
-
-```powershell
-dotnet publish src\LeagueTracker.Api -c Release -o C:\Services\LeagueTracker
-sc.exe create LeagueTracker binPath= "C:\Services\LeagueTracker\LeagueTracker.Api.exe" start= auto
-sc.exe start LeagueTracker
-```
-
-When publishing, set `Riot:DataDir` and `Riot:ApiKeyFile` to **absolute**
-paths in the published appsettings.json (the defaults are relative to the
-source tree).
+Tracked accounts come from `Accounts:List` in configuration (seeded into the
+registry on boot; `Owner` sets the owner's email) or from the *Add account*
+box on the site (any signed-in user, rate-limited; the account starts
+unowned until claimed).
 
 ## What it captures
 
 - **Live poller** (background service): every `Riot:PollSeconds` it checks for
   newly finished games; each one gets the full match + timeline, all 10
   players' League entries (captured minutes after the game = ranks *at game
-  time*), and my exact LP delta — trusted only when Riot's own win/loss
+  time*), and the player's exact LP delta — trusted only when Riot's own win/loss
   counter moved by exactly one between snapshots, otherwise left blank rather
   than guessed.
 - **History backfill** (`POST /api/sync/history?rankedTarget=N`): bulk pull of
@@ -83,7 +112,7 @@ source tree).
     enemy half and average nearest-ally distance
   - kill and objective event timelines; deaths flagged when they fall within
     90s of a friendly dragon/baron/herald/grubs (overstay signal)
-  - loadouts (summoner spells, keystone, items) and my item
+  - loadouts (summoner spells, keystone, items) and the player's item
     purchase/sell/undo timeline
   - Riot's per-game skillshot counters (`skillshotsHit`/`skillshotsDodged` —
     totals only; the API has no per-event skillshot data)
@@ -99,12 +128,18 @@ snapshots, which only exist at capture time; they're mirrored to
 
 ## Endpoints
 
-`GET /api/status` · `GET /api/matches` · `GET /api/matches/{id}` ·
-`GET /api/lp/history` · `GET /api/lp/per-game` · `GET /api/analytics/summary` ·
-`POST /api/sync/history` · `POST /api/import` · `POST /api/analytics/reprocess` ·
-`GET /api/jobs/status` · CSV exports at
-`GET /api/export/{matches,deaths,ranks,lp-history}.csv` and an
-everything-bundle at `GET /api/export/all.zip`
+Per account, under `/api/a/{region}/{Name-TAG}`: `GET status` · `GET matches` ·
+`GET matches/{id}` · `GET lp/history` · `GET lp/per-game` ·
+`GET analytics/summary` · `POST sync/history` · `POST import` ·
+`POST analytics/reprocess` · `GET jobs/status` · CSV exports at
+`GET export/{matches,deaths,ranks,lp-history}.csv` and an everything-bundle at
+`GET export/all.zip`. Reads need a signed-in session (or `Auth:PublicReads`);
+the POSTs and exports need the owner; cookie-authenticated writes must carry
+`X-Requested-With: LeagueTracker`.
+
+Global: `GET /api/accounts` · `/api/auth/*` (login, logout, me) · `/api/me/*`
+(your accounts, machines, join codes, claims) · `/api/admin/*` ·
+`/api/agent/*` (enrol, heartbeat, releases; agent-key scheme).
 
 ## Riot policy compliance
 
