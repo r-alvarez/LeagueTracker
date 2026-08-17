@@ -35,7 +35,7 @@ public sealed record RenderJob(
 
 /// Path is the server's canonical address ("euw/ImRA-87166"); a server from
 /// before regions only gives the slug, which still resolves.
-public sealed record TrackerAccount(string Slug, string Label, string RiotId, string? Path = null)
+public sealed record TrackerAccount(string Slug, string Label, string RiotId, string? Path = null, string? Puuid = null)
 {
     public string UrlPath => Path is { Length: > 0 } ? string.Join('/', Path.Split('/').Select(Uri.EscapeDataString)) : Uri.EscapeDataString(Slug);
 }
@@ -50,6 +50,7 @@ public sealed class TrackerClient
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly string _agentName;
+    private readonly string _joinCode;
 
     private TrackerClient(string serverUrl, string api, TrackerAccount? account, AgentConfig config, bool keyed)
     {
@@ -58,6 +59,7 @@ public sealed class TrackerClient
         Account = account;
         Keyed = keyed;
         _agentName = config.AgentName;
+        _joinCode = config.JoinCode;
         if (config is { CfAccessClientId.Length: > 0, CfAccessClientSecret.Length: > 0 })
         {
             _http.DefaultRequestHeaders.Add("CF-Access-Client-Id", config.CfAccessClientId);
@@ -73,12 +75,11 @@ public sealed class TrackerClient
     public static TrackerClient ForServer(string serverUrl, AgentConfig config) =>
         new(serverUrl, $"{serverUrl}/api", null, config, keyed: false);
 
-    /// One account on a one-site server. Keyed = this machine is approved
-    /// there, so account calls go through the agent slice (/api/agent/a/...,
-    /// which Access lets through on the key); otherwise the human routes
-    /// behind an Access service token, as before.
+    /// One account on a one-site server. The tracker authorizes its own API,
+    /// so an approved key and an Access service token call the same
+    /// /api/a/... address - one mount, whichever credential this machine has.
     public static TrackerClient ForAccount(string serverUrl, TrackerAccount account, AgentConfig config, bool keyed) =>
-        new(serverUrl, keyed ? $"{serverUrl}/api/agent/a/{account.UrlPath}" : $"{serverUrl}/api/a/{account.UrlPath}", account, config, keyed);
+        new(serverUrl, $"{serverUrl}/api/a/{account.UrlPath}", account, config, keyed);
 
     /// Whether this machine may talk to the server on its key alone.
     public bool Keyed { get; private set; }
@@ -92,7 +93,7 @@ public sealed class TrackerClient
     {
         try
         {
-            var body = JsonSerializer.Serialize(new { key = AgentKey.Load(), name = _agentName, machine = Environment.MachineName });
+            var body = JsonSerializer.Serialize(new { key = AgentKey.Load(), name = _agentName, machine = Environment.MachineName, code = _joinCode is { Length: > 0 } ? _joinCode : null });
             using var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
             using var resp = await _http.PostAsync($"{ServerUrl}/api/agent/enroll", content, ct);
             if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
@@ -132,7 +133,8 @@ public sealed class TrackerClient
                 a.GetProperty("slug").GetString() ?? "",
                 a.TryGetProperty("label", out var l) ? l.GetString() ?? "" : "",
                 a.GetProperty("riotId").GetString() ?? "",
-                a.TryGetProperty("path", out var p) ? p.GetString() : null))];
+                a.TryGetProperty("path", out var p) ? p.GetString() : null,
+                a.TryGetProperty("puuid", out var u) && u.ValueKind is JsonValueKind.String ? u.GetString() : null))];
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {

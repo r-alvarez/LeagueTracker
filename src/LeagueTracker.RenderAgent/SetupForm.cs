@@ -69,6 +69,7 @@ public sealed class SetupForm : Form
         };
 
         _server.Text = current.ServerUrl.Contains("localhost") ? "" : current.ServerUrl;
+        _join.Text = current.JoinCode;
         _cfId.Text = current.CfAccessClientId;
         _cfSecret.Text = current.CfAccessClientSecret;
         foreach (var r in Roles) _role.Items.Add(r.Label);
@@ -100,7 +101,7 @@ public sealed class SetupForm : Form
         var root = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(24, 20, 24, 20), BackColor = Page };
         root.Controls.Add(Header());
         root.Controls.Add(Card("Join",
-            Fields(("Join code", _join, "Paste the code the tracker owner sent you (starts with lt1:) - it fills in the rest of this window."))));
+            Fields(("Join code", _join, "The code from the tracker's Data page (\"Add a machine\") - eight letters like K7Q2-9DFM, or the one-line paste that also fills in the address. It makes this machine yours when it enrols."))));
         _join.TextChanged += (_, _) => ApplyJoinCode(_join.Text);
         root.Controls.Add(Card("Tracker",
             Fields(
@@ -264,13 +265,15 @@ public sealed class SetupForm : Form
         button.Margin = new Padding(8, 0, 0, 0);
     }
 
-    /// lt1:<base64url json> - {server, cfId, cfSecret, role, prefix,
-    /// recordings}. Made in the browser on the tracker's Data page (the
-    /// server never sees the token); one paste instead of three fields.
+    /// lt2:<base64url json> - {server, code, role} from the Data page's "Add
+    /// a machine" (lt1: was the older shape with an Access token instead of a
+    /// code). One paste fills the address and leaves the code in the box; a
+    /// bare eight-letter code just stays as typed.
     private void ApplyJoinCode(string text)
     {
         var code = text.Trim();
-        if (!code.StartsWith("lt1:", StringComparison.OrdinalIgnoreCase)) return;
+        var pasted = code.StartsWith("lt2:", StringComparison.OrdinalIgnoreCase) || code.StartsWith("lt1:", StringComparison.OrdinalIgnoreCase);
+        if (!pasted) return;
         try
         {
             var b64 = code[4..].Replace('-', '+').Replace('_', '/');
@@ -290,6 +293,9 @@ public sealed class SetupForm : Form
             if (Get("recordings") is { Length: > 0 } rec) _recordings.Text = rec;
             _verdict.ForeColor = Good;
             _verdict.Text = "Join code applied - press Test connection, then Save.";
+            // Leave the bare code in the box (TextChanged re-enters and returns
+            // at once - a bare code is not a paste).
+            if (Get("code") is { Length: > 0 } joinCode) _join.Text = joinCode;
         }
         catch (Exception ex) when (ex is FormatException or JsonException)
         {
@@ -320,6 +326,7 @@ public sealed class SetupForm : Form
         return new AgentConfig
         {
             ServerUrl = string.Join(",", _server.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)),
+            JoinCode = _join.Text.Trim().StartsWith("lt", StringComparison.OrdinalIgnoreCase) ? "" : _join.Text.Trim().Replace("-", ""),
             CfAccessClientId = _cfId.Text.Trim(),
             CfAccessClientSecret = _cfSecret.Text.Trim(),
             RecordGames = record,
@@ -383,6 +390,7 @@ public sealed class SetupForm : Form
         }
         void Set<T>(string key, T value) => settings[key] = JsonSerializer.SerializeToElement(value);
         Set("ServerUrl", draft.ServerUrl);
+        Set("JoinCode", draft.JoinCode);
         Set("CfAccessClientId", draft.CfAccessClientId);
         Set("CfAccessClientSecret", draft.CfAccessClientSecret);
         Set("RecordGames", draft.RecordGames);
