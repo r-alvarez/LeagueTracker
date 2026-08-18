@@ -924,13 +924,15 @@ render.MapPost("/render/release-stale", (Caller caller, RenderLeaseService lease
 owner?.MapPost("/render/{matchId}/dismiss", (string matchId, ClipService clips, FullGameService full, string kind = "clips") =>
     (kind is "full" ? full.Dismiss(matchId) : clips.Dismiss(matchId)) ? Results.Ok() : Results.NotFound());
 
-owner?.MapPost("/render/{matchId}/retry", (string matchId, ClipService clips, FullGameService full, string kind = "clips") =>
+// keep=true: lift the failure and let render/next fill in the windows that
+// never landed (a job that died mid-way); default re-renders the lot.
+owner?.MapPost("/render/{matchId}/retry", (string matchId, ClipService clips, FullGameService full, string kind = "clips", bool keep = false) =>
 {
     if (kind is "full") full.Request(matchId);
     else
     {
         clips.ClearFailed(matchId);
-        clips.DeleteClips(matchId);
+        if (!keep) clips.DeleteClips(matchId);
     }
     return Results.Ok();
 });

@@ -224,6 +224,8 @@ export default function DataPage() {
                         <tr key={g.reason}>
                           <td className="reason">
                             {g.reason}
+                            <button className="dismiss-x" title={`Retry all ${g.rows.length} - back into the render queue`}
+                              onClick={async () => { for (const r of g.rows) await api.retryRender(r.matchId, r.kind, true); reloadRenderQueue() }}>↻ all</button>
                             <button className="dismiss-x" title={`Dismiss all ${g.rows.length}`}
                               onClick={async () => { for (const r of g.rows) await api.dismissRender(r.matchId, r.kind); reloadRenderQueue() }}>✕ all</button>
                           </td>
@@ -233,7 +235,9 @@ export default function DataPage() {
                                 <Link to={`/matches/${r.matchId}`} title={r.matchId}>
                                   {r.champion} · {new Date(r.gameEndUtc).toLocaleDateString()}
                                 </Link>
-                                <button className="dismiss-x" title="Dismiss - a dead render (won't retry). Retry it from the match page to bring it back."
+                                <button className="dismiss-x" title="Retry - back into the render queue (the agent picks it up next pass)"
+                                  onClick={async () => { await api.retryRender(r.matchId, r.kind, true); reloadRenderQueue() }}>↻</button>
+                                <button className="dismiss-x" title="Dismiss - a dead render (won't retry); ↻ brings it back"
                                   onClick={async () => { await api.dismissRender(r.matchId, r.kind); reloadRenderQueue() }}>✕</button>
                               </span>
                             ))}

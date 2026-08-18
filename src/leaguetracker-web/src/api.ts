@@ -58,7 +58,7 @@ export const api = {
   requestFullGame: (id: string) => post<FullGameStatus>(`/api/matches/${id}/fullgame`),
   toggleFullGameKeep: (id: string) => post<FullGameStatus>(`/api/matches/${id}/fullgame/keep`),
   deleteFullGame: async (id: string) => { await apiFetch(`/api/matches/${id}/fullgame`, { method: 'DELETE' }) },
-  retryRender: async (id: string, kind: 'clips' | 'full') => { await apiFetch(`/api/render/${id}/retry?kind=${kind}`, { method: 'POST' }) },
+  retryRender: async (id: string, kind: 'clips' | 'full', keep = false) => { await apiFetch(`/api/render/${id}/retry?kind=${kind}${keep ? '&keep=true' : ''}`, { method: 'POST' }) },
   dismissRender: async (id: string, kind: 'clips' | 'full') => { await apiFetch(`/api/render/${id}/dismiss?kind=${kind}`, { method: 'POST' }) },
   saveSettings: async (settings: { mediaPublic?: boolean; hideLp?: boolean; displayName?: string }) => {
     const r = await apiFetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) })
