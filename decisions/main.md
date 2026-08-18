@@ -1076,7 +1076,7 @@ idle-sleep timer. Until then the waker idles harmlessly alongside an always-on
 PC.
 
 **First live sleep test failed - the broadcast never left the NAS's subnet.**
-The PC lives on 10.10.10.x, the NAS on 10.10.40.x; a directed broadcast to
+The PC and the NAS live on different subnets; a directed broadcast to
 another subnet is dropped by the UniFi gateway like by everything else. The
 primary wake path is now the UniFi controller itself: the waker logs into the
 console (`/api/auth/login`, then `cmd/stamgr` `wake-device`) and the gateway
@@ -1571,3 +1571,18 @@ GHCR image by digest instead of rebuilding from source on the NAS; `dotnet
 format --verify-no-changes` + warnings-as-errors as a ci gate; a repository
 LICENSE (the code is currently unlicensed = all rights reserved, which is
 what a commercial track wants until decided otherwise).
+
+## 2026-08-18 — The network leaves the compose file
+
+**`PC_MAC`, `WOL_BROADCAST` and `UNIFI_URL` are Portainer stack env vars.**
+Ruben's realisation on seeing the repo through a stranger's eyes: the public
+compose carried the render PC's MAC, both LAN subnets and the UniFi console
+address. None of it is a credential, but together it is a map of the house
+network, and the UniFi login already lived in the stack environment - the
+mechanism was there, the values just hadn't followed. The waker now refuses to
+start with a clear message when `PC_MAC` is unset instead of crashing on a
+KeyError; the tracker is untouched either way. Deployment order: values into
+the stack environment first, then merge, so the waker never restarts without
+them. History still holds the old values (0 forks, 0 watchers since July, so
+"possibly seen"), which is why this is a mitigation and the repo's visibility
+remains the open decision - not rushed, Ruben is away from his equipment.

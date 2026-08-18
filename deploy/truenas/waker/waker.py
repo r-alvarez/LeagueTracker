@@ -5,7 +5,7 @@ waiting. The render agent is pull-based, so a sleeping PC cannot discover
 its own work - this loop is what summons it.
 
 Two delivery paths, because the NAS and the PC sit on different subnets
-(NAS 10.10.40.x, PC 10.10.10.x) and routers drop directed broadcasts:
+and routers drop directed broadcasts:
 
 - UniFi controller API (primary, needs UNIFI_USER/UNIFI_PASS): asks the
   gateway to send the magic packet, which originates INSIDE the PC's VLAN
@@ -27,7 +27,7 @@ import time
 import urllib.request
 
 TRACKERS = [u.strip().rstrip("/") for u in os.environ.get("TRACKER_URLS", "").split(",") if u.strip()]
-MAC = os.environ["PC_MAC"].replace(":", "").replace("-", "").lower()
+MAC = os.environ.get("PC_MAC", "").replace(":", "").replace("-", "").lower()
 BROADCAST = os.environ.get("WOL_BROADCAST", "255.255.255.255")
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
 
@@ -97,6 +97,8 @@ def send_unifi_wake() -> None:
 def main() -> None:
     if not TRACKERS:
         raise SystemExit("TRACKER_URLS is empty - nothing to watch")
+    if len(MAC) != 12:
+        raise SystemExit("PC_MAC is not set (or not a MAC address) - set it in the Portainer stack environment")
     unifi_on = bool(UNIFI_URL and UNIFI_USER and UNIFI_PASS)
     log(f"watching {len(TRACKERS)} tracker(s), waking {MAC} every {POLL_SECONDS}s while work waits "
         f"(UniFi API: {'on via ' + UNIFI_URL if unifi_on else 'OFF - set UNIFI_URL/USER/PASS; broadcast alone does not cross subnets'})")

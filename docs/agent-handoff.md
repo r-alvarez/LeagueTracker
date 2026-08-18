@@ -48,8 +48,9 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
    `deploy\publish-agent.ps1 -ReleaseDir <NAS>\apps\leaguetracker\agent-releases`
    - version = `yyyy.M.d.HHmm`, zip bundles ffmpeg; agents update themselves
      when idle (no game, no upload) within the hour or on the next heartbeat.
-4. **Waker:** `PC_MAC` / `WOL_BROADCAST` in the compose now belong to the
-   render box, not the gaming PC - update when the renderer moves.
+4. **Waker:** `PC_MAC` / `WOL_BROADCAST` / `UNIFI_URL` are Portainer stack
+   env vars (with `UNIFI_USER`/`UNIFI_PASS`), never in the compose - they
+   describe the render box's network; update them when the renderer moves.
 5. **Agent enrolment (once).** Cloudflare Zero Trust → Access → Applications
    → Add → Self-hosted: domain `league.rjav-tech.co.uk`, **path `api/agent`**,
    one policy with action **Bypass**, include Everyone. Path applications win
