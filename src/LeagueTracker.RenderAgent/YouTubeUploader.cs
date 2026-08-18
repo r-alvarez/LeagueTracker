@@ -340,11 +340,15 @@ public sealed class YouTubeUploader(AgentConfig config)
                       $"?client_id={Uri.EscapeDataString(config.YouTubeClientId)}" +
                       $"&redirect_uri={Uri.EscapeDataString(redirect)}" +
                       $"&response_type=code&scope={Uri.EscapeDataString(Scope)}" +
-                      "&access_type=offline&prompt=consent" +
+                      // select_account: with a live Google session the flow otherwise
+                      // binds the token to the account's default channel and never
+                      // offers the brand channel (learned live: "SUDNEMESIS" instead
+                      // of the Ruben Alvarez channel, 18 Aug 2026).
+                      "&access_type=offline&prompt=select_account%20consent" +
                       $"&code_challenge={Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)))}" +
                       $"&code_challenge_method=S256&state={expectedState}";
 
-        Log.Info("Opening the Google consent page - pick the channel's account and allow YouTube upload access");
+        Log.Info("Opening the Google consent page - pick the account AND the channel the videos should land on (brand channels are listed under the account), then allow YouTube upload access");
         Process.Start(new ProcessStartInfo(authUrl) { UseShellExecute = true });
 
         string? code;

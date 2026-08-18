@@ -72,20 +72,29 @@ $env:LT_YOUTUBE_CLIENT_SECRET = $secret
 $env:LT_SERVER_URL = "http://localhost"   # skips the first-run setup window; the auth flow never contacts a tracker
 $env:LT_NO_TRAY = "1"
 try {
-    & $exe --youtube-auth
-    $code = $LASTEXITCODE
+    # The agent is a windowed app: "& exe" would return at once and the exit
+    # code would be stale. Start-Process -Wait blocks until the consent flow
+    # ends and hands back the real code.
+    $proc = Start-Process -FilePath $exe -ArgumentList "--youtube-auth" -Wait -PassThru -NoNewWindow
+    $code = $proc.ExitCode
 } finally {
     Remove-Item Env:LT_YOUTUBE_CLIENT_ID, Env:LT_YOUTUBE_CLIENT_SECRET, Env:LT_SERVER_URL, Env:LT_NO_TRAY -ErrorAction SilentlyContinue
 }
 
 $tokenFile = Join-Path $scratch "youtube-token.json"
+$logFile = Join-Path $scratch "agent.log"
 if ($code -ne 0 -or -not (Test-Path $tokenFile)) {
     Write-Host ""
-    Write-Host "Authorization did not complete (exit $code). The agent's log is at $(Join-Path $scratch 'agent.log')." -ForegroundColor Yellow
+    Write-Host "Authorization did not complete (exit $code). The agent said:" -ForegroundColor Yellow
+    if (Test-Path $logFile) { Get-Content $logFile | Select-Object -Last 4 | ForEach-Object { "  $_" } }
+    Remove-Item $scratch -Recurse -Force -ErrorAction SilentlyContinue
     exit 1
 }
 
 $token = (Get-Content $tokenFile -Raw | ConvertFrom-Json).refresh_token
+$channelLine = (Get-Content $logFile | Select-String "YouTube authorized for channel" | Select-Object -Last 1)
+Write-Host ""
+if ($channelLine) { Write-Host "  $($channelLine.Line.Substring(11))" -ForegroundColor Cyan }
 Write-Host ""
 Write-Host "Refresh token for this client + channel (paste it where it belongs, then close this window):" -ForegroundColor Green
 Write-Host ""
