@@ -291,7 +291,10 @@ app.MapPost("/api/agents/{id}/approve", (string id, AgentKeyStore keys) => keys.
 app.MapPost("/api/agents/{id}/revoke", (string id, AgentKeyStore keys) => keys.Decide(id, AgentKeyStatus.Revoked) ? Results.Ok() : Results.NotFound());
 app.MapDelete("/api/agents/{id}", (string id, AgentKeyStore keys) => keys.Delete(id) ? Results.NoContent() : Results.NotFound());
 
-app.MapGet("/api/agent/profile", (AgentRegistry agents) => Results.Ok(agents.Profile));
+// The middleware put the calling key's record on the request; its name is
+// the agent name, which selects the per-agent overrides.
+app.MapGet("/api/agent/profile", (HttpContext http, AgentRegistry agents) =>
+    Results.Ok(agents.ProfileFor((http.Items[AgentAuthMiddleware.ItemKey] as AgentKeyRecord)?.Name)));
 
 app.MapPost("/api/agent/heartbeat", (AgentHeartbeat beat, AgentRegistry agents) =>
 {

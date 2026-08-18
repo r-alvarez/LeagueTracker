@@ -14,6 +14,25 @@ public sealed class AgentOptions
 {
     public Dictionary<string, string> Profile { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// Per-agent overrides layered on Profile, keyed by the agent's enrolled
+    /// name: Agent__Profiles__<name>__YouTubeClientId=... gives one machine
+    /// its own YouTube OAuth client (own Google project = own daily quota)
+    /// while everything else stays shared. Blank values do not override.
+    public Dictionary<string, Dictionary<string, string>> Profiles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// The shared profile with the named agent's overrides on top (blank
+    /// overrides ignored: an unset stack env var must not blank a value).
+    public IReadOnlyDictionary<string, string> ProfileFor(string? agentName)
+    {
+        if (agentName is not { Length: > 0 } || !Profiles.TryGetValue(agentName, out var overrides)) return Profile;
+        var merged = new Dictionary<string, string>(Profile, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in overrides)
+        {
+            if (value is { Length: > 0 }) merged[key] = value;
+        }
+        return merged;
+    }
+
     /// Folder holding LeagueTracker.RenderAgent-<version>.zip builds. Blank =
     /// <Accounts:DataRoot or the default account's DataDir>/agent-releases -
     /// process-wide, not per account.
@@ -57,6 +76,8 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
     private (string Path, DateTime ModifiedUtc, string Sha)? _shaCache;
 
     public IReadOnlyDictionary<string, string> Profile => options.Value.Profile;
+
+    public IReadOnlyDictionary<string, string> ProfileFor(string? agentName) => options.Value.ProfileFor(agentName);
 
     public string ReleaseDir => options.Value.ReleaseDir is { Length: > 0 } dir ? dir
         : accounts.Value.DataRoot is { Length: > 0 } root ? Path.Combine(Path.IsPathRooted(root) ? root : Path.Combine(env.ContentRootPath, root), "agent-releases")

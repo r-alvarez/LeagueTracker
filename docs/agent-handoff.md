@@ -38,10 +38,13 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
    tracker then serves them from `GET /api/agent/profile`; agents pull them at
    start and hourly. Rotate the token here, never on a friend's machine.
    - Quota: 10,000 units/day **per Google Cloud project** = ~6 uploads/day
-     across everyone sharing that project. If three players fill it, either
-     request a quota increase or give each tracker its own OAuth client
-     (own project → own quota) via per-service `Agent__Profile__YouTube*`
-     overrides - all still authorized against the same channel.
+     across everyone sharing that project (`videos.insert` costs 1,600). Two
+     ways out, in order: give a busy player's agent its own project via
+     per-agent overrides - `Agent__Profiles__<agent name>__YouTubeClientId /
+     ClientSecret / RefreshToken` on the tracker, blank = shared values; the
+     refresh token is minted for the *same channel* with the new client
+     (`--youtube-auth` with `LT_YOUTUBE_CLIENT_ID/SECRET` set) - and, for a
+     product, Google's YouTube API quota-extension audit.
 2. **Release folder.** `mkdir /mnt/MediaPool/apps/leaguetracker/agent-releases`
    (`/data/agent-releases` in the container; the tracker also mirrors GitHub releases into it).
 3. **Publish the agent** from the dev machine:
