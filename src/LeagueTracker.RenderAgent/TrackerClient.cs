@@ -354,12 +354,35 @@ public sealed class TrackerClient
         var url = job.IsFullGame
             ? $"{Api}/render/{job.MatchId}/full"
             : $"{Api}/render/{job.MatchId}/clips/{index}";
-        await using var file = File.OpenRead(mp4Path);
-        using var content = new StreamContent(file);
-        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("video/mp4");
-        using var resp = await _http.PutAsync(url, content, ct);
-        resp.EnsureSuccessStatusCode();
+        // One PUT, tens of MB, and the proxy in front of the tracker drops a
+        // body that takes over ~60s: this transfer gets the line (the paced
+        // VOD/YouTube uploads on the same machine yield to it) and a few
+        // tries - a stall mid-body surfaces as an IO error, not a status.
+        using var priority = UploadThrottle.Shared?.Priority();
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await using var file = File.OpenRead(mp4Path);
+                using var content = new StreamContent(file);
+                content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("video/mp4");
+                using var resp = await _http.PutAsync(url, content, ct);
+                resp.EnsureSuccessStatusCode();
+                return;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException && !ct.IsCancellationRequested && attempt < 3)
+            {
+                Log.Warn($"Upload of {Path.GetFileName(mp4Path)} failed ({Root(ex).Message}) - retry {attempt + 1}/3 in {10 * attempt}s");
+                await Task.Delay(TimeSpan.FromSeconds(10 * attempt), ct);
+            }
+            catch (HttpRequestException ex) when (ex.InnerException is not null)
+            {
+                throw new HttpRequestException($"{ex.Message} ({Root(ex).Message})", ex, ex.StatusCode);
+            }
+        }
     }
+
+    private static Exception Root(Exception ex) { while (ex.InnerException is { } inner) ex = inner; return ex; }
 
     /// Offers a recorded live-game VOD to this tracker. False when the
     /// tracker doesn't know the match (it belongs to another account's

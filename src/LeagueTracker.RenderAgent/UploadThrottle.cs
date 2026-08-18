@@ -47,11 +47,29 @@ public sealed class UploadThrottle
     // The line's measured idle upstream, if known (Mbps, for logs/UI).
     public double? IdleMbps => _idleBytesPerSecond is { } b ? b * 8 / 1_000_000 : null;
 
+    // Someone with a short leash is on the line (a render clip: one PUT that
+    // the proxy abandons after 60s) - the paced bulk uploads step back to a
+    // trickle until it is through, rather than starving it.
+    private int _priorityTransfers;
+    private const long YieldBytesPerSecond = 1_000_000 / 8;      // 1 Mbps
+
+    public IDisposable Priority()
+    {
+        Interlocked.Increment(ref _priorityTransfers);
+        return new Release(this);
+    }
+    private sealed class Release(UploadThrottle owner) : IDisposable
+    {
+        private int _done;
+        public void Dispose() { if (Interlocked.Exchange(ref _done, 1) == 0) Interlocked.Decrement(ref owner._priorityTransfers); }
+    }
+
     // Bytes per second allowed right now; null = unlimited.
     public long? CapBytesPerSecond
     {
         get
         {
+            if (Volatile.Read(ref _priorityTransfers) > 0) return YieldBytesPerSecond;
             if (!_inGame()) return null;
             if (_config.UploadInGameMbps > 0) return (long)(_config.UploadInGameMbps * 1_000_000 / 8);
             var measured = _idleBytesPerSecond is { } idle ? (long)(idle * InGameShare) : UnmeasuredBytesPerSecond;
