@@ -20,7 +20,6 @@ public sealed class AccountRegistry
     private readonly List<Account> _all = [];
     private readonly Dictionary<string, Account> _bySlug = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Account> _byId = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, Account> _byHost = new(StringComparer.OrdinalIgnoreCase);
     private readonly string? _root;
     private readonly IWebHostEnvironment _env;
     private readonly RegistryDatabase _registry;
@@ -52,7 +51,6 @@ public sealed class AccountRegistry
 
     public Account? BySlug(string? slug) { lock (_gate) return slug is { Length: > 0 } && _bySlug.TryGetValue(slug, out var a) ? a : null; }
     public Account? ById(string? id) { lock (_gate) return id is { Length: > 0 } && _byId.TryGetValue(id, out var a) ? a : null; }
-    public Account? ByHost(string? host) { lock (_gate) return host is { Length: > 0 } && _byHost.TryGetValue(host, out var a) ? a : null; }
     public Account? ByPuuid(string? puuid) { lock (_gate) return puuid is { Length: > 0 } ? _all.FirstOrDefault(a => a.Puuid == puuid) : null; }
 
     // A slug this account used to answer to - the 301 source. Case-insensitive
@@ -117,7 +115,6 @@ public sealed class AccountRegistry
             _all.Remove(account);
             _bySlug.Remove(account.Slug);
             _byId.Remove(account.Id);
-            foreach (var host in account.HostList) _byHost.Remove(host);
             using var db = _registry.Open();
             db.Accounts.Where(a => a.Id == account.Id).ExecuteDelete();
             _log.LogInformation("Account removed from tracking: {RiotId} (folder kept: {Dir})", account.RiotId, account.DataDir);
@@ -166,7 +163,6 @@ public sealed class AccountRegistry
         _all.Add(account);
         _bySlug[account.Slug] = account;
         _byId[account.Id] = account;
-        foreach (var host in account.HostList) _byHost[host] = account;
     }
 
     private void Persist(Account account)
@@ -211,7 +207,6 @@ public sealed class AccountRegistry
         match.Region = configured.Region;
         match.Platform = configured.Platform;
         match.DataDir = dataDir;
-        match.Hosts = configured.Hosts;
         match.DisplayName = configured.DisplayName;
         match.HideLp = configured.HideLp;
         match.FromConfig = true;
@@ -250,7 +245,7 @@ public sealed class AccountRegistry
             {
                 Id = Ids.New(),
                 GameName = a.GameName, TagLine = a.TagLine, Platform = a.Platform, Region = a.Region,
-                DisplayName = a.DisplayName, HideLp = a.HideLp, Hosts = a.Hosts,
+                DisplayName = a.DisplayName, HideLp = a.HideLp,
                 DataDir = a.DataDir is { Length: > 0 } dir ? Rooted(dir) : Path.Combine(_root, a.UrlSlug),
                 CreatedUtc = DateTime.UtcNow,
             };

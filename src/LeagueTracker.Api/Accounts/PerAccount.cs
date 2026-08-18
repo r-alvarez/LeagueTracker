@@ -40,14 +40,12 @@ public static class AccountServiceCollectionExtensions
     }
 }
 
-/// Binds the request's account after routing and before authorization:
-/// /api/a/{region}/{slug}/... (canonical), /api/a/{slug}/... (the first
-/// one-site build), /api/agent/a/{region}/{slug}/... (agents mid-update) -
-/// all read from the route values the router already decoded, so there is
-/// exactly one URL per account. Otherwise the Host header (legacy
-/// per-account hostnames), otherwise the default account. A slug the
-/// account used before a rename answers with a permanent redirect to the
-/// address it has now.
+/// Binds the request's account after routing and before authorization from
+/// the route values the router already decoded (/api/a/{region}/{slug}), so
+/// there is exactly one URL per account; a slug the account used before a
+/// rename answers with a permanent redirect to the address it has now.
+/// Requests that name no account (the global routes) bind the default, which
+/// is what /api/accounts reports as "current".
 public sealed class AccountBindingMiddleware(RequestDelegate next, AccountRegistry registry)
 {
     public async Task InvokeAsync(HttpContext http)
@@ -77,7 +75,7 @@ public sealed class AccountBindingMiddleware(RequestDelegate next, AccountRegist
                 return;
             }
         }
-        account ??= registry.ByHost(http.Request.Host.Host) ?? registry.Default;
+        account ??= registry.Default;
         context.Bind(account);
         await next(http);
     }

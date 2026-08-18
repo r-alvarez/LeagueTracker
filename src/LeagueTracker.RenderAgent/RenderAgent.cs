@@ -70,12 +70,9 @@ public sealed class RenderAgent(AgentConfig config)
 
         // The NAS may be rebooting or the stack redeploying when we start (we
         // run at logon) - wait for a tracker rather than giving up.
-        // Reachability first (anonymous ping, or the Access-token'd status
-        // on a server from before enrolment), then who we are to each server:
-        // enrol this machine's key; "approved" means the agent slice is ours,
-        // "pending" means a human has to click Approve on the Data page -
-        // wait for that unless an Access token gets us in the old way.
-        var hasAccessToken = config is { CfAccessClientId.Length: > 0, CfAccessClientSecret.Length: > 0 };
+        // Reachability first (anonymous ping), then who we are to each server:
+        // enrol this machine's key; "approved" means we may work, "pending"
+        // means a human has to click Approve on the Data page - wait for that.
         while (true)
         {
             var reachable = 0;
@@ -104,16 +101,13 @@ public sealed class RenderAgent(AgentConfig config)
                         Log.Info($"{server.ServerUrl}: this machine is approved - talking on its key");
                         break;
                     case "pending":
-                        if (hasAccessToken) { usable++; if (!announcedPending) Log.Info($"{server.ServerUrl}: enrolment pending (Access token in use meanwhile - approve on the Data page to drop it)"); }
-                        else if (!announcedPending) Log.Info($"{server.ServerUrl}: waiting for approval - open the site's Data page and press Approve for \"{config.AgentName}\"");
+                        if (!announcedPending) Log.Info($"{server.ServerUrl}: waiting for approval - open the site's Data page and press Approve for \"{config.AgentName}\"");
                         break;
                     case "revoked":
                         if (!announcedPending) Log.Error($"{server.ServerUrl}: this machine has been revoked - re-approve it on the Data page (or delete agent.key to enrol as new)");
                         break;
                     default:
-                        // Old server or no enrolment: the Access token is the way.
-                        if (hasAccessToken) usable++;
-                        else if (!announcedPending) Log.Warn($"{server.ServerUrl}: no enrolment answer and no Access token configured");
+                        if (!announcedPending) Log.Warn($"{server.ServerUrl}: no enrolment answer - is this a LeagueTracker server?");
                         break;
                 }
             }

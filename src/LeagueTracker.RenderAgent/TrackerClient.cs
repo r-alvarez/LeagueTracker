@@ -60,13 +60,8 @@ public sealed class TrackerClient
         Keyed = keyed;
         _agentName = config.AgentName;
         _joinCode = config.JoinCode;
-        if (config is { CfAccessClientId.Length: > 0, CfAccessClientSecret.Length: > 0 })
-        {
-            _http.DefaultRequestHeaders.Add("CF-Access-Client-Id", config.CfAccessClientId);
-            _http.DefaultRequestHeaders.Add("CF-Access-Client-Secret", config.CfAccessClientSecret);
-        }
-        // Always presented; the server ignores it on Access-authenticated
-        // routes and requires it on the agent slice.
+        // The one credential this machine has: its own key, presented on every
+        // call; the tracker decides what the key may do.
         _http.DefaultRequestHeaders.Add("X-Agent-Key", AgentKey.Load());
     }
 
@@ -75,9 +70,8 @@ public sealed class TrackerClient
     public static TrackerClient ForServer(string serverUrl, AgentConfig config) =>
         new(serverUrl, $"{serverUrl}/api", null, config, keyed: false);
 
-    /// One account on a one-site server. The tracker authorizes its own API,
-    /// so an approved key and an Access service token call the same
-    /// /api/a/... address - one mount, whichever credential this machine has.
+    /// One account on a one-site server, addressed the way the site addresses
+    /// it; the key on the request is what makes it the agent's call.
     public static TrackerClient ForAccount(string serverUrl, TrackerAccount account, AgentConfig config, bool keyed) =>
         new(serverUrl, $"{serverUrl}/api/a/{account.UrlPath}", account, config, keyed);
 
@@ -87,8 +81,8 @@ public sealed class TrackerClient
     public void MarkKeyed() => Keyed = true;
 
     /// Enrol (or re-announce) this machine and learn where it stands:
-    /// "approved", "pending", "revoked", or null when the server predates
-    /// enrolment or is unreachable (then the Access token is the only way).
+    /// "approved", "pending", "revoked", or null when the server is
+    /// unreachable.
     public async Task<string?> EnrollAsync(CancellationToken ct)
     {
         try
@@ -166,9 +160,9 @@ public sealed class TrackerClient
             using var resp = await _http.GetAsync($"{Api}/status", ct);
             if (resp.IsSuccessStatusCode && !IsJson(resp))
             {
-                // Cloudflare Access answers walled-off requests with a 200
-                // sign-in page - that's the API being unreachable, not up.
-                Log.Warn($"{ServerUrl} answered with a sign-in page, not the API - check the Access service token (CfAccessClientId/Secret)");
+                // A sign-in page (Cloudflare Access still in front of the API,
+                // or the wrong address) is the API being unreachable, not up.
+                Log.Warn($"{ServerUrl} answered with a sign-in page, not the API - is the tracker URL right, and is /api bypassed at the edge?");
                 return false;
             }
             return resp.IsSuccessStatusCode;
@@ -204,7 +198,7 @@ public sealed class TrackerClient
         resp.EnsureSuccessStatusCode();
         if (!IsJson(resp))
         {
-            throw new InvalidOperationException("got a sign-in page instead of a job - check the Access service token (CfAccessClientId/Secret)");
+            throw new InvalidOperationException("got a sign-in page instead of a job - the tracker's /api is not reachable from here without a browser session");
         }
         return JsonSerializer.Deserialize<RenderJob>(await resp.Content.ReadAsStringAsync(ct), Json);
     }

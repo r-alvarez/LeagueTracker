@@ -108,7 +108,8 @@ accounts/{id}/owner) · `/api/agent/enroll|ping|release*` anon ·
 
 Legacy mounts still alive on purpose: Host-header `/api` and `/api/a/{slug}`
 (full API, same policies) and `/api/agent/a/{region}/{slug}` (agent subset
-only). They go in the follow-up commit after the agents update (step 5.7).
+only). They go with `auth/legacy-mounts-removal` after the agents update
+(step 5.7).
 
 ## 5. Cutover (do in this order; also `docs/agent-handoff.md` §E)
 
@@ -143,9 +144,10 @@ only). They go in the follow-up commit after the agents update (step 5.7).
    unassigned; assign each (recorders → the player's email, render box → you,
    role renderer). Publish the agent build (`deploy\publish-agent.ps1`);
    watch `/api/me/agents` heartbeats report the new version. Then set
-   `Agents__AllowUnbound=false`, and make the follow-up commit that removes
-   the Host-header `/api` group, `/api/a/{slug}`, `/api/agent/a/...`, the
-   `Hosts` bindings and the `CfAccess*` fields in the agent config.
+   `Agents__AllowUnbound=false`, and merge `auth/legacy-mounts-removal` (the
+   follow-up, already prepared on top of this branch: removes the Host-header
+   `/api` group, `/api/a/{slug}`, `/api/agent/a/...`, the `Hosts` bindings,
+   the `CfAccess*` fields in the agent config, and points the waker at one URL).
 8. **Waker**: it now polls `/api/render/pending`; the stack rebuild picks it up.
 9. Later, the public launch: `Auth__PublicReads=true`, site-wide Access app
    off. Nothing in-process changes.
