@@ -112,6 +112,9 @@ jobs:
           "since=$since" >> $env:GITHUB_OUTPUT
           if ($release -eq 'true') { Write-Host "agent files changed since $since - releasing" }
           else { Write-Host "no agent changes since $since - nothing to release" }
+          # git diff --quiet's exit code 1 (= changes) is the answer, not a
+          # failure; the pwsh shell would otherwise fail the step on it.
+          exit 0
 
   publish:
     name: Build and release
