@@ -20,6 +20,7 @@ on:
       - src/LeagueTracker.ReplayLauncher/**
       - deploy/publish-agent.ps1
       - deploy/agent-setup.iss
+      - deploy/screenrecorderlib/**
       - .github/workflows/agent-release.yml
   workflow_dispatch:
 
@@ -70,6 +71,15 @@ jobs:
 
       - name: Install Inno Setup ${{ env.INNOSETUP_VERSION }}
         run: choco install innosetup --version ${{ env.INNOSETUP_VERSION }} --no-progress -y
+
+      # The WGC engine ships as our build of ScreenRecorderLib (upstream at a
+      # pinned commit + HDR tone-map patch, deploy/screenrecorderlib). C++/CLI,
+      # so it needs MSBuild with the VC.CLI component - on windows-latest.
+      - uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
+
+      - name: Build ScreenRecorderLib (HDR tone-map)
+        shell: pwsh
+        run: .\deploy\screenrecorderlib\build.ps1
 
       - name: Build zip and installer
         id: build

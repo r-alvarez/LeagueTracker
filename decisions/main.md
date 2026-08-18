@@ -1486,3 +1486,47 @@ default-config Windows 11 + HDR-monitor customer; then choose between the
 quick fork and starting the libobs spike. Whichever way: write down the
 proprietary/GPL boundary (ffmpeg today, libobs tomorrow) and the notice +
 source-offer obligation before anything ships to a paying customer.
+
+## 2026-08-18 — HDR desktops are tone-mapped, not warned about
+
+**Ben's data settled it: `displayHdr: true`, engine `h264_mf_wgc`, 3440x1440.**
+An HDR ultrawide, WGC in use, and the VOD is the 8-bit clamp of an Auto HDR
+game. Ruben's brief: the agent must work on that PC as it is - Ben "wouldn't
+know" about HDR settings and neither will customers - so the 17 Aug warning
+becomes a fix. Ascent gets this from its bundled OBS (28+ requests FP16 from
+WGC and tone-maps with SDR white + Reinhard); we get it from a patch on
+ScreenRecorderLib.
+
+**How.** `deploy/screenrecorderlib/hdr-tonemap.patch` on upstream v6.6.0
+(commit 39ad1e2f, MIT): the WGC path probes the captured display through
+`IDXGIOutput6::GetDesc1` (HDR = `RGB_FULL_G2084_NONE_P2020`, plus
+MaxLuminance) and `DisplayConfigGetDeviceInfo(GET_SDR_WHITE_LEVEL)`; on an
+HDR desktop the frame pool is `R16G16B16A16Float` (scRGB) and every frame is
+drawn through `HdrToneMapShader.hlsl` into the usual BGRA8 texture: divide by
+SDR white (every SDR pixel returns to the exact 8-bit value the app drew - the
+same trick Windows itself uses to place SDR on an HDR desktop), extended
+Reinhard on max(R,G,B) from a 0.85 knee to the display peak (hue kept, no
+clip; SDR white lands at 246/255, the price of headroom, and values <=235
+round-trip exactly - checked numerically), sRGB-encode. Everything after the
+frame - crop, resize, Media Foundation encode, our watchdog and PCM audio -
+is untouched, and SDR desktops keep the stock BGRA8 pool. A device that
+can't build the pipeline logs and keeps the old behaviour; the env var
+`SCREENRECORDERLIB_HDR_TONEMAP=0` (agent: `HdrToneMap: false`) is the kill
+switch, since the library has no option surface for it.
+
+**Build.** No fork repo: the patch lives here, `build.ps1` clones the pinned
+commit, applies it and builds the x64 Release C++/CLI DLL, and
+`publish-agent.ps1` ships it over the NuGet copy (warns loudly if absent).
+The release workflow runs it on windows-latest (VC.CLI component present);
+it also builds end-to-end on the dev box's VS 2026, which is how the patch
+was checked - compile only, no capture, per the no-GPU-on-the-work-PC rule.
+Upstream bump = re-pin, re-apply, regenerate (README in the folder).
+
+**Left as is, deliberately.** ddagrab on an HDR desktop still records the
+Desktop Duplication clamp (no HDR path in DDA at all, ScreenRecorderLib #349
+shows the same); it only runs when WGC fails to start, and the agent now
+pins a heartbeat error naming that exact situation instead of the old
+"turn HDR off" advice. Recording *as* HDR (HEVC PQ) was not built - the
+review player, clips and YouTube path are SDR. Unverified until Ben's next
+game: the tone-mapped output itself (no HDR display within reach); the
+failure modes all degrade to today's behaviour, not to a lost recording.

@@ -30,3 +30,6 @@ docker-compose.override.yml
 src/LeagueTracker.RenderAgent/bin/
 src/LeagueTracker.RenderAgent/obj/
 __pycache__/
+
+# Our ScreenRecorderLib build (deploy/screenrecorderlib/build.ps1 output)
+deploy/screenrecorderlib/out/

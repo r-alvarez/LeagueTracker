@@ -44,6 +44,17 @@ if ($LASTEXITCODE -ne 0) { throw "replay launcher publish failed" }
 # theirs and the updater never touches it.
 Move-Item (Join-Path $out "appsettings.json") (Join-Path $out "appsettings.template.json") -Force
 
+# Our ScreenRecorderLib (upstream + HDR tone-map, deploy/screenrecorderlib)
+# replaces the stock NuGet copy. Without it HDR desktops record bleached -
+# fine for a dev zip, not for a release; the release workflow builds it first.
+$patchedRecorder = Join-Path $root "deploy\screenrecorderlib\out\ScreenRecorderLib.dll"
+if (Test-Path $patchedRecorder) {
+    Copy-Item $patchedRecorder (Join-Path $out "ScreenRecorderLib.dll") -Force
+    Write-Host "  bundled ScreenRecorderLib with HDR tone-mapping"
+} else {
+    Write-Warning "deploy\screenrecorderlib\out\ScreenRecorderLib.dll not built - shipping the stock library (HDR desktops record bleached); run deploy\screenrecorderlib\build.ps1"
+}
+
 $ffmpeg = (Get-Command ffmpeg -ErrorAction SilentlyContinue).Source
 # A package-manager shim (chocolatey, scoop) is a few KB that launches the
 # real exe elsewhere - copying it ships nothing. Real ffmpeg is tens of MB.

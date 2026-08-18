@@ -322,7 +322,6 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             }
 
             var hdrDisplay = DisplayHdr.IsOnFor(g.Rect) is true;
-            if (hdrDisplay) WarnHdrDisplay();
 
             var segNo = state.Segments.Count + 1;
             var segBase = $"{state.BaseName}.seg{segNo:00}";
@@ -336,6 +335,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             // back to CPU x264 (driver/session limit). Either way a startup
             // failure gets one different-engine retry before counting.
             var useWgc = config.CaptureBackend.Trim().Equals("wgc", StringComparison.OrdinalIgnoreCase);
+            if (hdrDisplay) NoteHdrDisplay(wgc: useWgc);
             var result = useWgc
                 ? await CaptureWgcAsync(partPath, eventsPath, g, ct)
                 : await CaptureAsync(partPath, eventsPath, g, nvenc: true, ct);
@@ -344,6 +344,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 Log.Warn(useWgc
                     ? "WGC capture failed at startup - falling back to ffmpeg ddagrab"
                     : "NVENC capture failed at startup - falling back to CPU encoding");
+                if (hdrDisplay && useWgc) NoteHdrDisplay(wgc: false);
                 result = await CaptureAsync(partPath, eventsPath, g, nvenc: useWgc, ct);
             }
 
@@ -927,15 +928,22 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         Log.Warn($"Game-live signal not seen within the wait window ({(everSaw ? "clock stalled" : "no Live Client response")}) - capturing anyway");
     }
 
-    /// The desktop is HDR, so what both engines capture is the 8-bit clamp
-    /// of it - brighter, paler, highlights blown - and nothing later in the
-    /// pipeline can restore the screen's colours. Logged per capture segment
-    /// and pinned on the heartbeat, where the tray and the Data page show it
-    /// to the player who can actually flip the switch.
-    private static void WarnHdrDisplay()
+    /// The desktop is HDR. Our ScreenRecorderLib build captures it as scRGB
+    /// and tone-maps to SDR on the GPU (deploy/screenrecorderlib), so the WGC
+    /// engine records what the screen shows; Desktop Duplication has no HDR
+    /// path, so a ddagrab segment on an HDR desktop is the washed-out clamp
+    /// and the player is told so on the heartbeat (tray + Data page).
+    private void NoteHdrDisplay(bool wgc)
     {
-        const string message = "HDR is on for the display the game runs on - the recording will look brighter and paler than the screen "
-            + "(the capture is 8-bit SDR and clips HDR). Turn Windows HDR off while playing (Win+Alt+B), or disable Auto HDR / RTX HDR for League.";
+        if (wgc && config.HdrToneMap)
+        {
+            Log.Info("HDR display - WGC captures scRGB and tone-maps to SDR");
+            return;
+        }
+        var message = wgc
+            ? "HDR is on for the game's display and HdrToneMap is off - the recording will look brighter and paler than the screen."
+            : "HDR is on for the game's display and the capture fell back to Desktop Duplication (ddagrab), which has no HDR path - "
+              + "this recording will look washed out. WGC is the engine that handles HDR; check why it would not start (agent.log).";
         Log.Warn(message);
         AgentStatus.LastError = message;
     }
@@ -1109,6 +1117,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         // 70 - adjust after comparing real game bitrates if needed.
         var quality = Math.Clamp(96 - config.RecordQuality, 40, 95);
         var rect = (Math.Max(0, g.Rect.X), Math.Max(0, g.Rect.Y), g.Rect.Width & ~1, g.Rect.Height & ~1);
+        WgcRecorder.ConfigureHdrToneMap(config.HdrToneMap);
         var startedUtc = DateTime.UtcNow;
         using var recorder = WgcRecorder.TryStart(partPath, rect, fps, quality);
         if (recorder is null)
