@@ -125,11 +125,11 @@ try
     }
     // Third loop, same reasoning: it only reads the client and the trackers,
     // so nothing it does can disturb a recording in flight.
-    if (config.PostGameReview && agent.ResolvedLeagueRoot is { } reviewRoot)
+    if (config.PostGameReview && config.RecordGames && agent.ResolvedLeagueRoot is { } reviewRoot)
     {
         loops.Add(new ReplayReview(config, reviewRoot, agent.Trackers).RunAsync(cts.Token));
     }
-    else if (config.PostGameReview)
+    else if (config.PostGameReview && config.RecordGames)
     {
         Log.Warn("Post-game review is on but no League install was resolved (mock mode?) - not started");
     }

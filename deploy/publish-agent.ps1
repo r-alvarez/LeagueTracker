@@ -18,12 +18,18 @@
 .PARAMETER Keep
   How many older zips to leave in ReleaseDir (default 3).
 
+.PARAMETER RequirePatchedRecorder
+  Fail instead of warn when deploy/screenrecorderlib/out/ScreenRecorderLib.dll
+  (our HDR tone-mapping build) is missing - the release workflow's setting, so
+  a release can never ship the stock library by accident.
+
 .EXAMPLE
   .\deploy\publish-agent.ps1 -ReleaseDir E:\TrueNas\apps\leaguetracker\agent-releases
 #>
 param(
     [string]$ReleaseDir = "",
-    [int]$Keep = 3
+    [int]$Keep = 3,
+    [switch]$RequirePatchedRecorder
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,6 +49,19 @@ if ($LASTEXITCODE -ne 0) { throw "replay launcher publish failed" }
 # The build's appsettings is a template: the live file on each machine is
 # theirs and the updater never touches it.
 Move-Item (Join-Path $out "appsettings.json") (Join-Path $out "appsettings.template.json") -Force
+
+# Our ScreenRecorderLib (upstream + HDR tone-map, deploy/screenrecorderlib)
+# replaces the stock NuGet copy. Without it HDR desktops record bleached -
+# fine for a dev zip, not for a release; the release workflow builds it first.
+$patchedRecorder = Join-Path $root "deploy\screenrecorderlib\out\ScreenRecorderLib.dll"
+if (Test-Path $patchedRecorder) {
+    Copy-Item $patchedRecorder (Join-Path $out "ScreenRecorderLib.dll") -Force
+    Write-Host "  bundled ScreenRecorderLib with HDR tone-mapping"
+} elseif ($RequirePatchedRecorder) {
+    throw "deploy\screenrecorderlib\out\ScreenRecorderLib.dll is missing and -RequirePatchedRecorder is set - run deploy\screenrecorderlib\build.ps1 (in CI: the screenrecorderlib job's artifact)"
+} else {
+    Write-Warning "deploy\screenrecorderlib\out\ScreenRecorderLib.dll not built - shipping the stock library (HDR desktops record bleached); run deploy\screenrecorderlib\build.ps1"
+}
 
 $ffmpeg = (Get-Command ffmpeg -ErrorAction SilentlyContinue).Source
 # A package-manager shim (chocolatey, scoop) is a few KB that launches the

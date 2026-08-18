@@ -93,6 +93,12 @@ public sealed class AgentConfig
     /// to ddagrab per segment if it won't start.
     public string CaptureBackend { get; set; } = "wgc";
 
+    /// On an HDR desktop the WGC engine captures scRGB and tone-maps it to
+    /// SDR on the GPU (deploy/screenrecorderlib), which is what makes Auto
+    /// HDR / RTX HDR games record the way they look. Off = the stock 8-bit
+    /// capture, which clips HDR to white; a support knob, not a preference.
+    public bool HdrToneMap { get; set; } = true;
+
     /// Which queue kinds get recorded, comma-separated: ranked-solo,
     /// ranked-flex, normal (draft/blind/swiftplay/quickplay), aram, clash,
     /// coop-ai, urf, nexus-blitz, arena, brawl, doom-bots, custom (customs +
@@ -123,9 +129,10 @@ public sealed class AgentConfig
 
     /// Open the finished game's review reel in the browser once it lands on
     /// its tracker - but only when the next game isn't already being queued
-    /// for. Off by default: it takes over the screen, which is only welcome
-    /// if you asked for it.
-    public bool PostGameReview { get; set; }
+    /// for. On by default for every recording agent (the review is the point
+    /// of the recording); queueing up straight away skips it, and it never
+    /// runs on a renderer-only box.
+    public bool PostGameReview { get; set; } = true;
 
     /// How long to let the end-of-game screens settle before deciding whether
     /// a review is wanted. Long enough that hitting "play again" immediately
@@ -196,6 +203,7 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_RECORD_QUEUES") is { Length: > 0 } queues) config.RecordQueues = queues;
         if (Environment.GetEnvironmentVariable("LT_RECORD_AUDIO") is { Length: > 0 } audio) config.RecordAudio = audio is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_CAPTURE_BACKEND") is { Length: > 0 } backend) config.CaptureBackend = backend;
+        if (Environment.GetEnvironmentVariable("LT_HDR_TONEMAP") is { Length: > 0 } toneMap) config.HdrToneMap = toneMap is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_YOUTUBE_UPLOAD") is { Length: > 0 } yt) config.YouTubeUpload = yt is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_YOUTUBE_CLIENT_ID") is { Length: > 0 } ytId) config.YouTubeClientId = ytId;
         if (Environment.GetEnvironmentVariable("LT_YOUTUBE_CLIENT_SECRET") is { Length: > 0 } ytSecret) config.YouTubeClientSecret = ytSecret;

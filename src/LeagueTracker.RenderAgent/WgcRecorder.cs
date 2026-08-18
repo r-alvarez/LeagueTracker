@@ -12,6 +12,12 @@ namespace LeagueTracker.RenderAgent;
 /// promise), written as paced PCM beside the segment and muxed at finalize.
 public sealed class WgcRecorder : IDisposable
 {
+    /// Our ScreenRecorderLib build (deploy/screenrecorderlib) tone-maps HDR
+    /// desktops to SDR unless this process variable says not to - the
+    /// library has no API surface for it, the environment is the switch.
+    public static void ConfigureHdrToneMap(bool enabled) =>
+        Environment.SetEnvironmentVariable("SCREENRECORDERLIB_HDR_TONEMAP", enabled ? null : "0");
+
     private readonly Recorder _recorder;
     private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<string?> _done = new(TaskCreationOptions.RunContinuationsAsynchronously);

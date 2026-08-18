@@ -100,6 +100,16 @@ start, one CPU-encoder retry (x264 veryfast) happens before giving up on
 that game. The game must be on the primary display (fullscreen or
 borderless both work - Desktop Duplication captures either).
 
+HDR desktops (Windows HDR, Auto HDR, RTX HDR) are handled by the WGC engine:
+the agent's ScreenRecorderLib build (`deploy/screenrecorderlib`) captures the
+desktop as scRGB and tone-maps it to SDR on the GPU, so the VOD looks like the
+screen. The stock library - and the ddagrab fallback, which has no HDR path -
+would record the 8-bit clamp instead: brighter, paler, highlights blown. The
+agent probes the display at each capture start, records `displayHdr` in the
+game's `.json`, and warns on the heartbeat (tray + Data page "Last error")
+only when an HDR desktop ends up on a path that can't handle it. `HdrToneMap:
+false` (or `LT_HDR_TONEMAP=0`) forces the stock behaviour - a support knob.
+
 ### Automatic YouTube publishing
 
 With `YouTubeUpload` on, every finished recording is uploaded to the

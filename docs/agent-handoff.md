@@ -142,7 +142,7 @@ Uninstall: `LeagueTracker.RenderAgent.exe --uninstall` (recordings stay).
 
 Same zip, same setup window: the one URL (every account is discovered), a
 **renderer** join code (only an admin can mint one - the renderer reaches
-every account's render work), "This machine is: Renderer" (RecordGames off), `PostGameReview` off,
+every account's render work), "This machine is: Renderer" (RecordGames off; the post-game review only runs on recording machines),
 League installed and a client logged in (Vanguard only allows replays through
 the client; any account works), and `IdleSeconds` can drop to ~10 since
 nobody uses it. `--install` as above. Renders run whenever no game process
@@ -155,6 +155,11 @@ is up on that box; the gaming PCs are never used for rendering again.
 - **Updates** never overwrite `appsettings.json` or `youtube-token.json`;
   the previous build stays as `*.prev`. A failed update is logged, reported
   in the heartbeat's `lastError`, and retried at the next published version.
+- **HDR desktops record correctly through WGC** (the agent's own
+  ScreenRecorderLib build tone-maps scRGB to SDR). If a player's card shows
+  the "HDR is on ... fell back to Desktop Duplication" error, WGC failed to
+  start on their PC and that game recorded washed out - the fix is whatever
+  stopped WGC (agent.log), not their HDR setting.
 - **Profile precedence:** local `appsettings.json` > `LT_*` env > tracker
   profile > built-in default. A friend can override anything locally; the
   tracker fills the rest.

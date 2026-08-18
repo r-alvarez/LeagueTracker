@@ -1,0 +1,3 @@
+# The patch carries upstream's mixed line endings byte-for-byte; any
+# conversion would stop it applying.
+*.patch -text

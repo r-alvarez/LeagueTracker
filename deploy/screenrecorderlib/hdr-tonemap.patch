@@ -1,0 +1,701 @@
+diff -ruN -x '*.user' -x .vs a/ScreenRecorderLibNative/HdrToneMap.cpp b/ScreenRecorderLibNative/HdrToneMap.cpp
+--- a/ScreenRecorderLibNative/HdrToneMap.cpp	1970-01-01 00:00:00.000000000 +0000
++++ b/ScreenRecorderLibNative/HdrToneMap.cpp	2026-08-18 07:32:55.799446100 +0100
+@@ -0,0 +1,268 @@
++#include "HdrToneMap.h"
++#include "CommonTypes.h"
++#include "DX.util.h"
++#include "Cleanup.h"
++#include "Util.h"
++#include "VertexShader.h"
++#include "HdrToneMapShader.h"
++#include <atlbase.h>
++#include <comdef.h>
++#include <vector>
++#include <string>
++
++using namespace DirectX;
++
++namespace
++{
++	// SDRWhiteLevel is in units of 1/1000 of 80 nits (the scRGB reference).
++	bool TryGetSdrWhiteNits(_In_ const WCHAR *gdiDeviceName, _Out_ float *pNits)
++	{
++		*pNits = 80.0f;
++		UINT32 pathCount = 0, modeCount = 0;
++		if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS) {
++			return false;
++		}
++		std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
++		std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
++		if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths.data(), &modeCount, modes.data(), nullptr) != ERROR_SUCCESS) {
++			return false;
++		}
++		for (UINT32 i = 0; i < pathCount; i++) {
++			DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName{};
++			sourceName.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
++			sourceName.header.size = sizeof(sourceName);
++			sourceName.header.adapterId = paths[i].sourceInfo.adapterId;
++			sourceName.header.id = paths[i].sourceInfo.id;
++			if (DisplayConfigGetDeviceInfo(&sourceName.header) != ERROR_SUCCESS
++				|| _wcsicmp(sourceName.viewGdiDeviceName, gdiDeviceName) != 0) {
++				continue;
++			}
++			DISPLAYCONFIG_SDR_WHITE_LEVEL whiteLevel{};
++			whiteLevel.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL;
++			whiteLevel.header.size = sizeof(whiteLevel);
++			whiteLevel.header.adapterId = paths[i].targetInfo.adapterId;
++			whiteLevel.header.id = paths[i].targetInfo.id;
++			if (DisplayConfigGetDeviceInfo(&whiteLevel.header) != ERROR_SUCCESS || whiteLevel.SDRWhiteLevel == 0) {
++				return false;
++			}
++			*pNits = whiteLevel.SDRWhiteLevel / 1000.0f * 80.0f;
++			return true;
++		}
++		return false;
++	}
++}
++
++DISPLAY_HDR_INFO GetDisplayHdrInfo(_In_ HMONITOR monitor)
++{
++	DISPLAY_HDR_INFO info{};
++	CComPtr<IDXGIFactory1> factory;
++	if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
++		return info;
++	}
++	CComPtr<IDXGIAdapter1> adapter;
++	for (UINT a = 0; factory->EnumAdapters1(a, &adapter) != DXGI_ERROR_NOT_FOUND; a++, adapter.Release()) {
++		CComPtr<IDXGIOutput> output;
++		for (UINT o = 0; adapter->EnumOutputs(o, &output) != DXGI_ERROR_NOT_FOUND; o++, output.Release()) {
++			DXGI_OUTPUT_DESC desc{};
++			if (FAILED(output->GetDesc(&desc)) || desc.Monitor != monitor) {
++				continue;
++			}
++			CComPtr<IDXGIOutput6> output6;
++			DXGI_OUTPUT_DESC1 desc1{};
++			if (FAILED(output->QueryInterface(IID_PPV_ARGS(&output6))) || FAILED(output6->GetDesc1(&desc1))) {
++				return info; // pre-1803 DXGI: no HDR desktops either
++			}
++			info.IsHdr = desc1.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
++			// Displays that don't advertise a peak (or advertise nonsense) get
++			// HDR1000's; the number only shapes the roll-off, and 1000 nits is
++			// where Windows itself parks unknown panels.
++			info.MaxLuminanceNits = desc1.MaxLuminance >= 100.0f ? desc1.MaxLuminance : 1000.0f;
++			float sdrWhite;
++			if (TryGetSdrWhiteNits(desc.DeviceName, &sdrWhite)) {
++				info.SdrWhiteNits = sdrWhite;
++			}
++			return info;
++		}
++	}
++	return info;
++}
++
++bool IsHdrToneMappingEnabled()
++{
++	WCHAR value[8]{};
++	DWORD length = GetEnvironmentVariableW(L"SCREENRECORDERLIB_HDR_TONEMAP", value, ARRAYSIZE(value));
++	return !(length == 1 && value[0] == L'0');
++}
++
++HdrToneMapper::HdrToneMapper() :
++	m_Device(nullptr),
++	m_DeviceContext(nullptr),
++	m_VertexShader(nullptr),
++	m_PixelShader(nullptr),
++	m_InputLayout(nullptr),
++	m_Sampler(nullptr),
++	m_ParamsBuffer(nullptr),
++	m_SourceCopy(nullptr)
++{
++}
++
++HdrToneMapper::~HdrToneMapper()
++{
++	CleanRefs();
++}
++
++void HdrToneMapper::CleanRefs()
++{
++	SafeRelease(&m_SourceCopy);
++	SafeRelease(&m_ParamsBuffer);
++	SafeRelease(&m_Sampler);
++	SafeRelease(&m_InputLayout);
++	SafeRelease(&m_PixelShader);
++	SafeRelease(&m_VertexShader);
++	SafeRelease(&m_DeviceContext);
++	SafeRelease(&m_Device);
++}
++
++HRESULT HdrToneMapper::Initialize(_In_ ID3D11DeviceContext *pDeviceContext, _In_ ID3D11Device *pDevice)
++{
++	CleanRefs();
++	m_Device = pDevice;
++	m_DeviceContext = pDeviceContext;
++	m_Device->AddRef();
++	m_DeviceContext->AddRef();
++
++	HRESULT hr = m_Device->CreateVertexShader(g_VS, ARRAYSIZE(g_VS), nullptr, &m_VertexShader);
++	RETURN_ON_BAD_HR(hr);
++	D3D11_INPUT_ELEMENT_DESC layout[] =
++	{
++		{ "SV_POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
++		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }
++	};
++	hr = m_Device->CreateInputLayout(layout, ARRAYSIZE(layout), g_VS, ARRAYSIZE(g_VS), &m_InputLayout);
++	RETURN_ON_BAD_HR(hr);
++	hr = m_Device->CreatePixelShader(g_HdrToneMapPS, ARRAYSIZE(g_HdrToneMapPS), nullptr, &m_PixelShader);
++	RETURN_ON_BAD_HR(hr);
++
++	// Point sampling: the quad maps 1:1 onto the destination, so any
++	// filtering would only blur.
++	D3D11_SAMPLER_DESC samplerDesc{};
++	samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
++	samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
++	samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
++	samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
++	samplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
++	samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
++	hr = m_Device->CreateSamplerState(&samplerDesc, &m_Sampler);
++	RETURN_ON_BAD_HR(hr);
++
++	D3D11_BUFFER_DESC paramsDesc{};
++	paramsDesc.Usage = D3D11_USAGE_DEFAULT;
++	paramsDesc.ByteWidth = sizeof(TONEMAP_PARAMS);
++	paramsDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
++	hr = m_Device->CreateBuffer(&paramsDesc, nullptr, &m_ParamsBuffer);
++	RETURN_ON_BAD_HR(hr);
++	return hr;
++}
++
++HRESULT HdrToneMapper::Convert(_In_ ID3D11Texture2D *pSource, _Inout_ ID3D11Texture2D *pDestination, _In_ D3D11_BOX sourceRegion, _In_ DISPLAY_HDR_INFO display)
++{
++	if (!m_Device) {
++		return E_NOT_VALID_STATE;
++	}
++	UINT width = sourceRegion.right - sourceRegion.left;
++	UINT height = sourceRegion.bottom - sourceRegion.top;
++	if (width == 0 || height == 0) {
++		return S_FALSE;
++	}
++	D3D11_TEXTURE2D_DESC sourceDesc{};
++	pSource->GetDesc(&sourceDesc);
++	// The frame pool's own textures are not guaranteed shader-bindable, so
++	// the region is copied into one that is (a GPU-side copy, no readback).
++	D3D11_TEXTURE2D_DESC copyDesc{};
++	if (m_SourceCopy) {
++		m_SourceCopy->GetDesc(&copyDesc);
++	}
++	if (!m_SourceCopy || copyDesc.Width != width || copyDesc.Height != height || copyDesc.Format != sourceDesc.Format) {
++		SafeRelease(&m_SourceCopy);
++		copyDesc = {};
++		copyDesc.Width = width;
++		copyDesc.Height = height;
++		copyDesc.MipLevels = 1;
++		copyDesc.ArraySize = 1;
++		copyDesc.Format = sourceDesc.Format;
++		copyDesc.SampleDesc.Count = 1;
++		copyDesc.Usage = D3D11_USAGE_DEFAULT;
++		copyDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
++		HRESULT hr = m_Device->CreateTexture2D(&copyDesc, nullptr, &m_SourceCopy);
++		RETURN_ON_BAD_HR(hr);
++	}
++	m_DeviceContext->CopySubresourceRegion(m_SourceCopy, 0, 0, 0, 0, pSource, 0, &sourceRegion);
++
++	CComPtr<ID3D11ShaderResourceView> srv;
++	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
++	srvDesc.Format = copyDesc.Format;
++	srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
++	srvDesc.Texture2D.MipLevels = 1;
++	HRESULT hr = m_Device->CreateShaderResourceView(m_SourceCopy, &srvDesc, &srv);
++	RETURN_ON_BAD_HR(hr);
++	CComPtr<ID3D11RenderTargetView> rtv;
++	hr = m_Device->CreateRenderTargetView(pDestination, nullptr, &rtv);
++	RETURN_ON_BAD_HR(hr);
++
++	TONEMAP_PARAMS params{};
++	params.SdrScale = 80.0f / max(display.SdrWhiteNits, 1.0f);
++	params.Peak = max(display.MaxLuminanceNits / max(display.SdrWhiteNits, 1.0f), 1.2f);
++	params.Knee = 0.85f;
++	m_DeviceContext->UpdateSubresource(m_ParamsBuffer, 0, nullptr, &params, 0, 0);
++
++	VERTEX vertices[] =
++	{
++		{ XMFLOAT3(-1.0f, -1.0f, 0), XMFLOAT2(0.0f, 1.0f) },
++		{ XMFLOAT3(-1.0f, 1.0f, 0), XMFLOAT2(0.0f, 0.0f) },
++		{ XMFLOAT3(1.0f, -1.0f, 0), XMFLOAT2(1.0f, 1.0f) },
++		{ XMFLOAT3(1.0f, -1.0f, 0), XMFLOAT2(1.0f, 1.0f) },
++		{ XMFLOAT3(-1.0f, 1.0f, 0), XMFLOAT2(0.0f, 0.0f) },
++		{ XMFLOAT3(1.0f, 1.0f, 0), XMFLOAT2(1.0f, 0.0f) },
++	};
++	D3D11_BUFFER_DESC vertexDesc{};
++	vertexDesc.Usage = D3D11_USAGE_DEFAULT;
++	vertexDesc.ByteWidth = sizeof(vertices);
++	vertexDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
++	D3D11_SUBRESOURCE_DATA vertexData{};
++	vertexData.pSysMem = vertices;
++	CComPtr<ID3D11Buffer> vertexBuffer;
++	hr = m_Device->CreateBuffer(&vertexDesc, &vertexData, &vertexBuffer);
++	RETURN_ON_BAD_HR(hr);
++
++	D3D11_VIEWPORT previousViewport{};
++	UINT viewportCount = 1;
++	m_DeviceContext->RSGetViewports(&viewportCount, &previousViewport);
++	SetViewPort(m_DeviceContext, static_cast<float>(width), static_cast<float>(height), static_cast<float>(sourceRegion.left), static_cast<float>(sourceRegion.top));
++
++	UINT stride = sizeof(VERTEX);
++	UINT offset = 0;
++	ID3D11Buffer *vertexBuffers[] = { vertexBuffer };
++	ID3D11RenderTargetView *targets[] = { rtv };
++	ID3D11ShaderResourceView *resources[] = { srv };
++	ID3D11Buffer *constants[] = { m_ParamsBuffer };
++	m_DeviceContext->IASetInputLayout(m_InputLayout);
++	m_DeviceContext->IASetVertexBuffers(0, 1, vertexBuffers, &stride, &offset);
++	m_DeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
++	m_DeviceContext->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
++	m_DeviceContext->OMSetRenderTargets(1, targets, nullptr);
++	m_DeviceContext->VSSetShader(m_VertexShader, nullptr, 0);
++	m_DeviceContext->PSSetShader(m_PixelShader, nullptr, 0);
++	m_DeviceContext->PSSetConstantBuffers(0, 1, constants);
++	m_DeviceContext->PSSetShaderResources(0, 1, resources);
++	m_DeviceContext->PSSetSamplers(0, 1, &m_Sampler);
++	m_DeviceContext->Draw(ARRAYSIZE(vertices), 0);
++
++	ID3D11ShaderResourceView *nullResources[] = { nullptr };
++	ID3D11RenderTargetView *nullTargets[] = { nullptr };
++	m_DeviceContext->PSSetShaderResources(0, 1, nullResources);
++	m_DeviceContext->OMSetRenderTargets(1, nullTargets, nullptr);
++	if (viewportCount > 0) {
++		m_DeviceContext->RSSetViewports(1, &previousViewport);
++	}
++	return S_OK;
++}
+diff -ruN -x '*.user' -x .vs a/ScreenRecorderLibNative/HdrToneMap.h b/ScreenRecorderLibNative/HdrToneMap.h
+--- a/ScreenRecorderLibNative/HdrToneMap.h	1970-01-01 00:00:00.000000000 +0000
++++ b/ScreenRecorderLibNative/HdrToneMap.h	2026-08-18 07:32:55.799446100 +0100
+@@ -0,0 +1,54 @@
++#pragma once
++#include <d3d11.h>
++#include <dxgi1_6.h>
++#include <windows.h>
++
++// The colour state of one display, as far as an 8-bit capture cares: whether
++// the desktop is composited in HDR (scRGB), where Windows puts SDR white on it,
++// and how bright it can go.
++struct DISPLAY_HDR_INFO
++{
++	bool IsHdr = false;
++	float SdrWhiteNits = 80.0f;
++	float MaxLuminanceNits = 1000.0f;
++};
++
++// HDR state of the display that owns the monitor handle. Never fails: an
++// unknown display reads as SDR, which is the pre-existing behaviour.
++DISPLAY_HDR_INFO GetDisplayHdrInfo(_In_ HMONITOR monitor);
++
++// Set SCREENRECORDERLIB_HDR_TONEMAP=0 in the process environment to force
++// the plain 8-bit capture on HDR displays (kill switch for a host app).
++bool IsHdrToneMappingEnabled();
++
++// Draws an scRGB FP16 texture into a B8G8R8A8_UNORM texture through the
++// HdrToneMap pixel shader.
++class HdrToneMapper
++{
++public:
++	HdrToneMapper();
++	~HdrToneMapper();
++	HRESULT Initialize(_In_ ID3D11DeviceContext *pDeviceContext, _In_ ID3D11Device *pDevice);
++	// Converts sourceRegion of pSource (R16G16B16A16_FLOAT, scRGB) into the
++	// same region of pDestination (B8G8R8A8_UNORM, must be bindable as a
++	// render target). Both textures must be at least as large as the region.
++	HRESULT Convert(_In_ ID3D11Texture2D *pSource, _Inout_ ID3D11Texture2D *pDestination, _In_ D3D11_BOX sourceRegion, _In_ DISPLAY_HDR_INFO display);
++private:
++	struct TONEMAP_PARAMS
++	{
++		float SdrScale;
++		float Peak;
++		float Knee;
++		float Padding;
++	};
++	void CleanRefs();
++
++	ID3D11Device *m_Device;
++	ID3D11DeviceContext *m_DeviceContext;
++	ID3D11VertexShader *m_VertexShader;
++	ID3D11PixelShader *m_PixelShader;
++	ID3D11InputLayout *m_InputLayout;
++	ID3D11SamplerState *m_Sampler;
++	ID3D11Buffer *m_ParamsBuffer;
++	ID3D11Texture2D *m_SourceCopy;
++};
+diff -ruN -x '*.user' -x .vs a/ScreenRecorderLibNative/HdrToneMapShader.hlsl b/ScreenRecorderLibNative/HdrToneMapShader.hlsl
+--- a/ScreenRecorderLibNative/HdrToneMapShader.hlsl	1970-01-01 00:00:00.000000000 +0000
++++ b/ScreenRecorderLibNative/HdrToneMapShader.hlsl	2026-08-18 07:32:55.799446100 +0100
+@@ -0,0 +1,57 @@
++// HDR desktop (scRGB FP16, linear light, BT.709 primaries, 1.0 = 80 nits) to
++// SDR sRGB 8-bit. Windows scales SDR content on an HDR desktop by the SDR
++// white level, so dividing by it puts every SDR pixel back where the app drew
++// it, and the sRGB curve returns the exact 8-bit values it had. Only content
++// above SDR white (Auto HDR / RTX HDR / native HDR highlights) is touched:
++// an extended-Reinhard roll-off from the knee up to the display's peak,
++// driven by max(R,G,B) so hue is kept, instead of the clip an 8-bit capture
++// would do. The knee sits at 0.85, so SDR white lands at ~246/255 - the
++// price of not clipping, and invisible next to what a clip does.
++
++Texture2D tx : register(t0);
++SamplerState samLinear : register(s0);
++
++cbuffer ToneMapParams : register(b0)
++{
++	float SdrScale;   // 80 / SDR white nits: scRGB -> SDR-relative linear
++	float Peak;       // display peak in SDR-white units (>= 1.2)
++	float Knee;       // roll-off start in SDR-relative linear (0.85)
++	float Padding;
++};
++
++struct PS_INPUT
++{
++	float4 Pos : SV_POSITION;
++	float2 Tex : TEXCOORD;
++};
++
++float RollOff(float m)
++{
++	// Extended Reinhard between the knee and the peak, both rescaled so the
++	// knee is 0 and SDR white is 1: unit slope at the knee (no visible seam),
++	// exactly 1.0 at the display peak, monotone in between.
++	float span = 1.0 - Knee;
++	float x = (m - Knee) / span;
++	float p = max((Peak - Knee) / span, 1.0);
++	float f = x * (1.0 + x / (p * p)) / (1.0 + x);
++	return Knee + span * min(f, 1.0);
++}
++
++float3 LinearToSrgb(float3 c)
++{
++	float3 lo = c * 12.92;
++	float3 hi = 1.055 * pow(max(c, 0.0), 1.0 / 2.4) - 0.055;
++	return c <= 0.0031308 ? lo : hi;
++}
++
++float4 PS(PS_INPUT input) : SV_Target
++{
++	float4 sample = tx.Sample(samLinear, input.Tex);
++	float3 rgb = max(sample.rgb, 0.0) * SdrScale;
++	float m = max(rgb.r, max(rgb.g, rgb.b));
++	if (m > Knee)
++	{
++		rgb *= RollOff(m) / m;
++	}
++	return float4(LinearToSrgb(saturate(rgb)), 1.0);
++}
+diff -ruN -x '*.user' -x .vs a/ScreenRecorderLibNative/ScreenRecorderLibNative.vcxproj b/ScreenRecorderLibNative/ScreenRecorderLibNative.vcxproj
+--- a/ScreenRecorderLibNative/ScreenRecorderLibNative.vcxproj	2026-08-18 07:32:55.444223600 +0100
++++ b/ScreenRecorderLibNative/ScreenRecorderLibNative.vcxproj	2026-08-18 07:32:55.579677900 +0100
+@@ -49,6 +49,7 @@
+     <ClInclude Include="CaptureBase.h" />
+     <ClInclude Include="Screengrab.h" />
+     <ClInclude Include="WASAPINotify.h" />
++    <ClInclude Include="HdrToneMap.h" />
+     <ClInclude Include="WindowsGraphicsCapture.h" />
+     <ClInclude Include="WindowsGraphicsCapture.util.h" />
+     <ClInclude Include="Cleanup.h" />
+@@ -83,6 +84,7 @@
+     <ClCompile Include="Screengrab.cpp" />
+     <ClCompile Include="Util.cpp" />
+     <ClCompile Include="WASAPINotify.cpp" />
++    <ClCompile Include="HdrToneMap.cpp" />
+     <ClCompile Include="WindowsGraphicsCapture.cpp" />
+     <ClCompile Include="RecordingManager.cpp">
+       <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</CompileAsManaged>
+@@ -141,6 +143,44 @@
+       <ObjectFileOutput Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
+       </ObjectFileOutput>
+     </FxCompile>
++    <FxCompile Include="HdrToneMapShader.hlsl">
++      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
++      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
++      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">Pixel</ShaderType>
++      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Pixel</ShaderType>
++      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
++      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">Pixel</ShaderType>
++      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">PS</EntryPointName>
++      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">PS</EntryPointName>
++      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">PS</EntryPointName>
++      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">PS</EntryPointName>
++      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">PS</EntryPointName>
++      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">PS</EntryPointName>
++      <VariableName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">g_HdrToneMapPS</VariableName>
++      <VariableName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">g_HdrToneMapPS</VariableName>
++      <VariableName Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">g_HdrToneMapPS</VariableName>
++      <VariableName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">g_HdrToneMapPS</VariableName>
++      <VariableName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">g_HdrToneMapPS</VariableName>
++      <VariableName Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">g_HdrToneMapPS</VariableName>
++      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)%(Filename).h</HeaderFileOutput>
++      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)%(Filename).h</HeaderFileOutput>
++      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(OutDir)%(Filename).h</HeaderFileOutput>
++      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)%(Filename).h</HeaderFileOutput>
++      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)%(Filename).h</HeaderFileOutput>
++      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">$(OutDir)%(Filename).h</HeaderFileOutput>
++      <ObjectFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'"></ObjectFileOutput>
++      <ObjectFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug|x64'"></ObjectFileOutput>
++      <ObjectFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'"></ObjectFileOutput>
++      <ObjectFileOutput Condition="'$(Configuration)|$(Platform)'=='Release|Win32'"></ObjectFileOutput>
++      <ObjectFileOutput Condition="'$(Configuration)|$(Platform)'=='Release|x64'"></ObjectFileOutput>
++      <ObjectFileOutput Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'"></ObjectFileOutput>
++      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">4.0</ShaderModel>
++      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">4.0</ShaderModel>
++      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">4.0</ShaderModel>
++      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">4.0</ShaderModel>
++      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">4.0</ShaderModel>
++      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">4.0</ShaderModel>
++    </FxCompile>
+     <FxCompile Include="VertexShader.hlsl">
+       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Vertex</ShaderType>
+       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
+diff -ruN -x '*.user' -x .vs a/ScreenRecorderLibNative/WindowsGraphicsCapture.cpp b/ScreenRecorderLibNative/WindowsGraphicsCapture.cpp
+--- a/ScreenRecorderLibNative/WindowsGraphicsCapture.cpp	2026-08-18 07:32:55.450901500 +0100
++++ b/ScreenRecorderLibNative/WindowsGraphicsCapture.cpp	2026-08-18 07:32:55.589016400 +0100
+@@ -39,7 +39,10 @@
+ 	m_CursorOffsetX(0),
+ 	m_CursorOffsetY(0),
+ 	m_CursorScaleX(1.0),
+-	m_CursorScaleY(1.0)
++	m_CursorScaleY(1.0),
++	m_FramePoolFormat(winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized),
++	m_DisplayHdr{},
++	m_ToneMapper(nullptr)
+ {
+ 	RtlZeroMemory(&m_CurrentData, sizeof(m_CurrentData));
+ 	m_NewFrameEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+@@ -66,6 +69,14 @@
+ 	RETURN_ON_BAD_HR(hr);
+ 	m_TextureManager = make_unique<TextureManager>();
+ 	RETURN_ON_BAD_HR(hr = m_TextureManager->Initialize(pDeviceContext, pDevice));
++	// A device that can't build the tone-map pipeline just keeps the plain
++	// 8-bit capture on HDR displays - the behaviour before it existed.
++	m_ToneMapper = make_unique<HdrToneMapper>();
++	HRESULT toneMapHr = m_ToneMapper->Initialize(pDeviceContext, pDevice);
++	if (FAILED(toneMapHr)) {
++		LOG_WARN(L"HDR tone mapping unavailable (0x%08x) - HDR displays will be captured as 8-bit SDR", toneMapHr);
++		m_ToneMapper.reset();
++	}
+ 	if (SUCCEEDED(hr)) {
+ 		m_IsInitialized = true;
+ 	}
+@@ -201,6 +212,7 @@
+ 	m_RecordingSource = &recordingSource;
+ 	hr = GetCaptureItem(recordingSource, &m_CaptureItem);
+ 	if (SUCCEEDED(hr)) {
++		ConfigureFramePoolFormat(recordingSource);
+ 		// Get DXGI device
+ 		CComPtr<IDXGIDevice> DxgiDevice = nullptr;
+ 		hr = m_Device->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void **>(&DxgiDevice));
+@@ -217,7 +229,7 @@
+ 			// the frame pool was created on. This also means that the creating thread
+ 			// must have a DispatcherQueue. If you use this method, it's best not to do
+ 			// it on the UI thread. 
+-			m_framePool = winrt::Direct3D11CaptureFramePool::CreateFreeThreaded(direct3DDevice, winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, m_CaptureItem.Size());
++			m_framePool = winrt::Direct3D11CaptureFramePool::CreateFreeThreaded(direct3DDevice, m_FramePoolFormat, 2, m_CaptureItem.Size());
+ 
+ 			m_session = m_framePool.CreateCaptureSession(m_CaptureItem);
+ 
+@@ -403,7 +415,7 @@
+ 			newFramePoolSize.Width += 100;
+ 			newFramePoolSize.Height += 100;
+ 		}
+-		m_framePool.Recreate(direct3DDevice, winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized, 1, newFramePoolSize);
++		m_framePool.Recreate(direct3DDevice, m_FramePoolFormat, 1, newFramePoolSize);
+ 		LOG_TRACE(L"Recreated WGC Frame Pool size [%d,%d]", newFramePoolSize.Width, newFramePoolSize.Height);
+ 	}
+ 	catch (winrt::hresult_error const &ex)
+@@ -417,6 +429,50 @@
+ 	return hr;
+ }
+ 
++void WindowsGraphicsCapture::ConfigureFramePoolFormat(_In_ RECORDING_SOURCE_BASE &recordingSource)
++{
++	m_FramePoolFormat = winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized;
++	m_DisplayHdr = {};
++	if (!m_ToneMapper || !IsHdrToneMappingEnabled()) {
++		return;
++	}
++	HMONITOR monitor = nullptr;
++	if (recordingSource.Type == RecordingSourceType::Window) {
++		monitor = MonitorFromWindow(recordingSource.SourceWindow, MONITOR_DEFAULTTONEAREST);
++	}
++	else {
++		CComPtr<IDXGIOutput> output = nullptr;
++		if (SUCCEEDED(GetOutputForDeviceName(recordingSource.SourcePath, &output)) && output) {
++			DXGI_OUTPUT_DESC outputDesc{};
++			if (SUCCEEDED(output->GetDesc(&outputDesc))) {
++				monitor = outputDesc.Monitor;
++			}
++		}
++	}
++	if (!monitor) {
++		return;
++	}
++	m_DisplayHdr = GetDisplayHdrInfo(monitor);
++	if (m_DisplayHdr.IsHdr) {
++		// An 8-bit pool on an HDR desktop hands back the clamp of scRGB, not
++		// the picture: SDR white boosted, HDR highlights clipped. FP16 keeps
++		// the real values so the tone-mapper can produce an SDR frame.
++		m_FramePoolFormat = winrt::DirectXPixelFormat::R16G16B16A16Float;
++		LOG_INFO(L"HDR display: capturing scRGB FP16 and tone-mapping to SDR (SDR white %.0f nits, peak %.0f nits)", m_DisplayHdr.SdrWhiteNits, m_DisplayHdr.MaxLuminanceNits);
++	}
++}
++
++HRESULT WindowsGraphicsCapture::CopyFrameToTexture(_In_ ID3D11Texture2D *pSurfaceTexture, _Inout_ ID3D11Texture2D *pFrame, _In_ D3D11_BOX sourceRegion)
++{
++	D3D11_TEXTURE2D_DESC surfaceDesc{};
++	pSurfaceTexture->GetDesc(&surfaceDesc);
++	if (surfaceDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT && m_ToneMapper) {
++		return m_ToneMapper->Convert(pSurfaceTexture, pFrame, sourceRegion, m_DisplayHdr);
++	}
++	m_DeviceContext->CopySubresourceRegion(pFrame, 0, 0, 0, 0, pSurfaceTexture, 0, &sourceRegion);
++	return S_OK;
++}
++
+ HRESULT WindowsGraphicsCapture::ProcessRecordingTimeout(_Inout_ GRAPHICS_FRAME_DATA *pData)
+ {
+ 	if (m_RecordingSource->Type == RecordingSourceType::Window) {
+@@ -438,6 +494,7 @@
+ 				desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+ 				desc.SampleDesc.Count = 1;
+ 				desc.Usage = D3D11_USAGE_DEFAULT;
++				desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+ 				RETURN_ON_BAD_HR(m_Device->CreateTexture2D(&desc, nullptr, &pData->Frame));
+ 			}
+ 			else {
+@@ -524,7 +581,11 @@
+ 				auto surfaceTexture = Graphics::Capture::Util::GetDXGIInterfaceFromObject<ID3D11Texture2D>(frame.Surface());
+ 				D3D11_TEXTURE2D_DESC newFrameDesc;
+ 				surfaceTexture->GetDesc(&newFrameDesc);
+-				newFrameDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
++				// The delivered frame is always BGRA8, whatever the pool holds:
++				// an FP16 (HDR) surface is tone-mapped into it, an 8-bit one
++				// copied. Render-target bindable so that draw can land here.
++				newFrameDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
++				newFrameDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+ 				newFrameDesc.Width = newFrameSize.Width;
+ 				newFrameDesc.Height = newFrameSize.Height;
+ 				SafeRelease(&pData->Frame);
+@@ -559,7 +620,7 @@
+ 			sourceRegion.front = 0;
+ 			sourceRegion.back = 1;
+ 			auto surfaceTexture = Graphics::Capture::Util::GetDXGIInterfaceFromObject<ID3D11Texture2D>(frame.Surface());
+-			m_DeviceContext->CopySubresourceRegion(pData->Frame, 0, 0, 0, 0, surfaceTexture.get(), 0, &sourceRegion);
++			RETURN_ON_BAD_HR(hr = CopyFrameToTexture(surfaceTexture.get(), pData->Frame, sourceRegion));
+ 			m_HaveDeliveredFirstFrame = true;
+ 			QueryPerformanceCounter(&pData->Timestamp);
+ 			frame.Close();
+diff -ruN -x '*.user' -x .vs a/ScreenRecorderLibNative/WindowsGraphicsCapture.h b/ScreenRecorderLibNative/WindowsGraphicsCapture.h
+--- a/ScreenRecorderLibNative/WindowsGraphicsCapture.h	2026-08-18 07:32:55.450959500 +0100
++++ b/ScreenRecorderLibNative/WindowsGraphicsCapture.h	2026-08-18 07:32:55.589016400 +0100
+@@ -1,48 +1,57 @@
+-#pragma once
+-#include "ScreenCaptureBase.h"
+-#include "CommonTypes.h"
+-#include "TextureManager.h"
+-#include <memory>
+-#include "WindowsGraphicsCapture.util.h"
+-#include "MouseManager.h"
+-class WindowsGraphicsCapture : public CaptureBase
+-{
+-public:
+-	WindowsGraphicsCapture();
+-	virtual ~WindowsGraphicsCapture();
+-	virtual HRESULT Initialize(_In_ ID3D11DeviceContext *pDeviceContext, _In_ ID3D11Device *pDevice) override;
+-	virtual HRESULT AcquireNextFrame(_In_ DWORD timeoutMillis, _Outptr_opt_ ID3D11Texture2D **ppFrame) override;
+-	virtual HRESULT WriteNextFrameToSharedSurface(_In_ DWORD timeoutMillis, _Inout_ ID3D11Texture2D *pSharedSurf, INT offsetX, INT offsetY, _In_ RECT destinationRect, _In_opt_ ID3D11Texture2D *pTexture = nullptr) override;
+-	virtual HRESULT StartCapture(_In_ RECORDING_SOURCE_BASE &recordingSource) override;
+-	virtual HRESULT StopCapture();
+-	virtual HRESULT GetNativeSize(_In_ RECORDING_SOURCE_BASE &recordingSource, _Out_ SIZE *nativeMediaSize) override;
+-	virtual HRESULT GetMouse(_Inout_ PTR_INFO *pPtrInfo, _In_ RECT frameCoordinates, _In_ int offsetX, _In_ int offsetY) override;
+-	virtual inline std::wstring Name() override { return L"WindowsGraphicsCapture"; };
+-
+-private:
+-	void OnFrameArrived(winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool const &sender, winrt::Windows::Foundation::IInspectable const &args);
+-	HRESULT GetNextFrame(_In_ DWORD timeoutMillis, _Inout_ GRAPHICS_FRAME_DATA *pData);
+-	HRESULT GetCaptureItem(_In_ RECORDING_SOURCE_BASE &recordingSource, _Out_ winrt::Windows::Graphics::Capture::GraphicsCaptureItem *item);
+-	HRESULT RecreateFramePool(_Inout_ GRAPHICS_FRAME_DATA *pData, _In_ winrt::Windows::Graphics::SizeInt32 newSize);
+-	HRESULT ProcessRecordingTimeout(_Inout_ GRAPHICS_FRAME_DATA *pData);
+-	bool IsRecordingSessionStale();
+-	winrt::Windows::Graphics::Capture::GraphicsCaptureItem m_CaptureItem;
+-	winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool m_framePool;
+-	winrt::Windows::Graphics::Capture::GraphicsCaptureSession m_session;
+-
+-	std::unique_ptr<MouseManager> m_MouseManager;
+-	int m_CursorOffsetX;
+-	int m_CursorOffsetY;
+-	float m_CursorScaleX;
+-	float m_CursorScaleY;
+-	bool m_IsInitialized;
+-	HANDLE m_NewFrameEvent;
+-	bool m_HaveDeliveredFirstFrame;
+-	std::atomic<bool> m_closed;
+-	RECT m_LastFrameRect;
+-	GRAPHICS_FRAME_DATA m_CurrentData;
+-	LARGE_INTEGER m_QPCFrequency;
+-	LARGE_INTEGER m_LastSampleReceivedTimeStamp;
+-	LARGE_INTEGER m_LastCaptureSessionRestart;
+-
++#pragma once
++#include "ScreenCaptureBase.h"
++#include "CommonTypes.h"
++#include "TextureManager.h"
++#include <memory>
++#include "WindowsGraphicsCapture.util.h"
++#include "MouseManager.h"
++#include "HdrToneMap.h"
++class WindowsGraphicsCapture : public CaptureBase
++{
++public:
++	WindowsGraphicsCapture();
++	virtual ~WindowsGraphicsCapture();
++	virtual HRESULT Initialize(_In_ ID3D11DeviceContext *pDeviceContext, _In_ ID3D11Device *pDevice) override;
++	virtual HRESULT AcquireNextFrame(_In_ DWORD timeoutMillis, _Outptr_opt_ ID3D11Texture2D **ppFrame) override;
++	virtual HRESULT WriteNextFrameToSharedSurface(_In_ DWORD timeoutMillis, _Inout_ ID3D11Texture2D *pSharedSurf, INT offsetX, INT offsetY, _In_ RECT destinationRect, _In_opt_ ID3D11Texture2D *pTexture = nullptr) override;
++	virtual HRESULT StartCapture(_In_ RECORDING_SOURCE_BASE &recordingSource) override;
++	virtual HRESULT StopCapture();
++	virtual HRESULT GetNativeSize(_In_ RECORDING_SOURCE_BASE &recordingSource, _Out_ SIZE *nativeMediaSize) override;
++	virtual HRESULT GetMouse(_Inout_ PTR_INFO *pPtrInfo, _In_ RECT frameCoordinates, _In_ int offsetX, _In_ int offsetY) override;
++	virtual inline std::wstring Name() override { return L"WindowsGraphicsCapture"; };
++
++private:
++	void OnFrameArrived(winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool const &sender, winrt::Windows::Foundation::IInspectable const &args);
++	HRESULT GetNextFrame(_In_ DWORD timeoutMillis, _Inout_ GRAPHICS_FRAME_DATA *pData);
++	HRESULT GetCaptureItem(_In_ RECORDING_SOURCE_BASE &recordingSource, _Out_ winrt::Windows::Graphics::Capture::GraphicsCaptureItem *item);
++	HRESULT RecreateFramePool(_Inout_ GRAPHICS_FRAME_DATA *pData, _In_ winrt::Windows::Graphics::SizeInt32 newSize);
++	void ConfigureFramePoolFormat(_In_ RECORDING_SOURCE_BASE &recordingSource);
++	HRESULT CopyFrameToTexture(_In_ ID3D11Texture2D *pSurfaceTexture, _Inout_ ID3D11Texture2D *pFrame, _In_ D3D11_BOX sourceRegion);
++	HRESULT ProcessRecordingTimeout(_Inout_ GRAPHICS_FRAME_DATA *pData);
++	bool IsRecordingSessionStale();
++	winrt::Windows::Graphics::Capture::GraphicsCaptureItem m_CaptureItem;
++	winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool m_framePool;
++	winrt::Windows::Graphics::Capture::GraphicsCaptureSession m_session;
++
++	std::unique_ptr<MouseManager> m_MouseManager;
++	int m_CursorOffsetX;
++	int m_CursorOffsetY;
++	float m_CursorScaleX;
++	float m_CursorScaleY;
++	bool m_IsInitialized;
++	HANDLE m_NewFrameEvent;
++	bool m_HaveDeliveredFirstFrame;
++	std::atomic<bool> m_closed;
++	RECT m_LastFrameRect;
++	GRAPHICS_FRAME_DATA m_CurrentData;
++	LARGE_INTEGER m_QPCFrequency;
++	LARGE_INTEGER m_LastSampleReceivedTimeStamp;
++	LARGE_INTEGER m_LastCaptureSessionRestart;
++	// HDR desktops are captured as scRGB FP16 and tone-mapped to BGRA8 on
++	// the GPU, so everything downstream still sees the 8-bit frames it always
++	// did. SDR desktops keep the plain BGRA8 pool.
++	winrt::Windows::Graphics::DirectX::DirectXPixelFormat m_FramePoolFormat;
++	DISPLAY_HDR_INFO m_DisplayHdr;
++	std::unique_ptr<HdrToneMapper> m_ToneMapper;
++
+ };
+\ No newline at end of file

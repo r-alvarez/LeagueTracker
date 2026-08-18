@@ -1409,3 +1409,165 @@ Rejected: keeping the boot-loop try/catch alone (its pages 500'd opaquely
 and nothing retried until a restart), and checking readiness in the binding
 middleware (it runs for static files and global routes too - the endpoint
 filter is exactly the account API's scope).
+
+## 2026-08-17 — HDR desktops are detected and called out, not silently recorded
+
+**Ben's VOD (TheCosmicPeach, ARAM, 17 Aug) plays bleached: normal blacks,
+mids ~2.5x brighter than a same-engine SR capture, 12.6% of the game area
+clipped to pure white.** Both engines (ddagrab and WGC via ScreenRecorderLib)
+read the DWM-composited desktop as 8-bit BGRA. On an HDR desktop that read
+is a clamp of scRGB, not a conversion: Windows' SDR-content brightness
+boost, Auto HDR / RTX HDR highlight expansion and anything above 1.0 clip
+to white while the dark end stays put - which is exactly the histogram
+signature, and not the signature of a colour-range or matrix mistag (a
+tv/pc range mix-up would move the HUD's blacks, and they sit at 9/255 in
+both captures). Nothing after capture can undo it, so the recorder now
+probes the game display's colour mode at every segment start
+(`DisplayHdr`: QueryDisplayConfig + DisplayConfigGetDeviceInfo, the 24H2
+`_2` query first so ACM/WCG desktops - which capture fine - don't trip it,
+the legacy advanced-colour bit on older builds), warns in the log, pins the
+warning on the heartbeat's `lastError` (tray icon + Data page, dismissable)
+and stamps `displayHdr` into the game's metadata json.
+
+Rejected: capturing 10/16-bit and tone-mapping in the agent (ddagrab
+`output_fmt=auto` + libplacebo/zscale, or an HDR frame pool in WGC). It
+doubles the frame bytes at 1440p60, needs a tone-map nobody agrees on, and
+still cannot show "what was on the screen" - the screen was HDR. League is
+an SDR game; the right recording is the SDR desktop, and the player is the
+one who can flip HDR off (Win+Alt+B) or exclude League from Auto HDR.
+Unverified on this branch: the "on" case ran only through the struct-size
+cross-check (72/84/32/36 bytes, rc 0, `\.\DISPLAY33` matched) - the dev
+box has no HDR-capable display.
+
+## 2026-08-17 — Capture engine on the commercial track: open, with the arguments on record
+
+**Question:** the 29 Jul choice of ScreenRecorderLib over a bundled OBS was
+made for a personal resident agent. Ruben intends to take the app commercial;
+does the choice hold? Not decided today - recorded so the decision is made on
+this list, not on the next bug.
+
+**What still holds.** ScreenRecorderLib is MIT: clean to link in-process, no
+obligations. libobs is GPLv2, so it can only sit behind a process boundary
+(Ascent's `ascent-obs.exe`, Streamlabs) with the host process itself GPL'd and
+its source offered. But that is already our posture: the agent zip ships
+gyan's GPL ffmpeg as a separate exe. Commercially fine and common, but a
+commercial release owes third-party notices and a source offer for the GPL
+bits either way - and a lawyer's pass on H.264 patent-pool terms, which apply
+at distribution volume regardless of engine.
+
+**What flips.** Support cost dominates a product: every odd PC (HDR + Auto HDR
+- today's gap; hybrid laptops; Intel/AMD Media Foundation encoder quirks;
+protected overlays; mode switches; multi-monitor DPI) is a ticket, and each is
+a bug OBS fixed years ago on millions of machines. ScreenRecorderLib is a
+single-maintainer hobby project with its HDR issue (#313) open and unanswered
+since 2024, and its WGC path hard-forces B8G8R8A8 (PR #97) - the first fix we
+need is already a fork. If we fork, we own native capture code anyway, in
+C++/CLI, a form nobody chose; if ownership is inevitable, choose the form.
+Download weight stops mattering (+100 MB is normal for a game recorder).
+
+**Options on the table.**
+- *Keep ScreenRecorderLib, patch as needed.* Right for now; the HDR fork (FP16
+  frame pool on HDR monitors + SDR-white/Reinhard shader, ~200 lines
+  C++/HLSL) is a stopgap worth weeks, not a direction.
+- *libobs host process, Ascent-style* - recommended strategic move. Inherits
+  game-hook capture, HDR->SDR tone-mapping, per-application audio (OBS 28+,
+  would retire ProcessAudioCapture), every vendor encoder. Host = a few
+  hundred lines of C++ (GPL, sources offered) driven over IPC; the agent stays
+  proprietary. First step is a one-week spike: libobs headless from the OBS
+  CMake presets on CI, a minimal host recording the League window to
+  fragmented mp4, IPC to the agent - the spike prices the real cost.
+- *Own C# engine* (WGC + D3D11 + Media Foundation): zero GPL in the box, full
+  per-frame control, and every driver quirk ours - months to harden. Only if
+  GPL-free or per-frame control is a requirement OBS can't meet.
+
+**Trigger:** Ben's next game (the `DisplayHdr` heartbeat flag shipped today
+in a0e77d7). HDR flagged = the first OBS-grade gap is real on a
+default-config Windows 11 + HDR-monitor customer; then choose between the
+quick fork and starting the libobs spike. Whichever way: write down the
+proprietary/GPL boundary (ffmpeg today, libobs tomorrow) and the notice +
+source-offer obligation before anything ships to a paying customer.
+
+## 2026-08-18 — HDR desktops are tone-mapped, not warned about
+
+**Ben's data settled it: `displayHdr: true`, engine `h264_mf_wgc`, 3440x1440.**
+An HDR ultrawide, WGC in use, and the VOD is the 8-bit clamp of an Auto HDR
+game. Ruben's brief: the agent must work on that PC as it is - Ben "wouldn't
+know" about HDR settings and neither will customers - so the 17 Aug warning
+becomes a fix. Ascent gets this from its bundled OBS (28+ requests FP16 from
+WGC and tone-maps with SDR white + Reinhard); we get it from a patch on
+ScreenRecorderLib.
+
+**How.** `deploy/screenrecorderlib/hdr-tonemap.patch` on upstream v6.6.0
+(commit 39ad1e2f, MIT): the WGC path probes the captured display through
+`IDXGIOutput6::GetDesc1` (HDR = `RGB_FULL_G2084_NONE_P2020`, plus
+MaxLuminance) and `DisplayConfigGetDeviceInfo(GET_SDR_WHITE_LEVEL)`; on an
+HDR desktop the frame pool is `R16G16B16A16Float` (scRGB) and every frame is
+drawn through `HdrToneMapShader.hlsl` into the usual BGRA8 texture: divide by
+SDR white (every SDR pixel returns to the exact 8-bit value the app drew - the
+same trick Windows itself uses to place SDR on an HDR desktop), extended
+Reinhard on max(R,G,B) from a 0.85 knee to the display peak (hue kept, no
+clip; SDR white lands at 246/255, the price of headroom, and values <=235
+round-trip exactly - checked numerically), sRGB-encode. Everything after the
+frame - crop, resize, Media Foundation encode, our watchdog and PCM audio -
+is untouched, and SDR desktops keep the stock BGRA8 pool. A device that
+can't build the pipeline logs and keeps the old behaviour; the env var
+`SCREENRECORDERLIB_HDR_TONEMAP=0` (agent: `HdrToneMap: false`) is the kill
+switch, since the library has no option surface for it.
+
+**Build.** No fork repo: the patch lives here, `build.ps1` clones the pinned
+commit, applies it and builds the x64 Release C++/CLI DLL, and
+`publish-agent.ps1` ships it over the NuGet copy (warns loudly if absent).
+The release workflow runs it on windows-2022 - windows-latest is now a VS
+2026 image whose v143 toolset has no ATL headers (two red runs before the
+job moved), and building with the 2026 toolset would tie the DLL to a newer
+VC runtime than the players' PCs are known to have. It also builds
+end-to-end on the dev box's VS 2026, which is how the patch was checked -
+compile only, no capture, per the no-GPU-on-the-work-PC rule. Shipped as
+agent 2026.818.654.20.
+Upstream bump = re-pin, re-apply, regenerate (README in the folder).
+
+**Left as is, deliberately.** ddagrab on an HDR desktop still records the
+Desktop Duplication clamp (no HDR path in DDA at all, ScreenRecorderLib #349
+shows the same); it only runs when WGC fails to start, and the agent now
+pins a heartbeat error naming that exact situation instead of the old
+"turn HDR off" advice. Recording *as* HDR (HEVC PQ) was not built - the
+review player, clips and YouTube path are SDR. Unverified until Ben's next
+game: the tone-mapped output itself (no HDR display within reach); the
+failure modes all degrade to today's behaviour, not to a lost recording.
+
+## 2026-08-18 — Release pipeline: gated on ci, one build of the engine, notices in the box
+
+**The agent release now follows a green `ci` instead of racing it.** Until
+today `agent-release.yml` fired on push to main in parallel with `ci.yml`, so
+a commit that failed the API tests or the agent build still shipped an agent.
+It is now `workflow_run` on `ci` completing successfully for main; a `gate`
+job checks out the commit ci tested and releases only if the agent paths
+(agent, launcher, publish script, installer script, ScreenRecorderLib patch,
+the workflow itself) changed since the newest `agent-*` tag - a diff against
+the last release, not the push event's path filter, so multi-commit pushes
+and manual re-runs decide the same way. `workflow_dispatch` re-releases the
+latest green main.
+
+**ScreenRecorderLib is built once, in ci, on windows-2022.** A
+`screenrecorderlib` job builds the patched DLL (cache keyed on the folder's
+hash), uploads it as an artifact, and the release downloads that artifact for
+the same commit - the windows-2022 pin is confined to the one job that needs
+it, the release runs on windows-latest, and a patch that stops applying fails
+the push that broke it. `publish-agent.ps1 -RequirePatchedRecorder` throws
+rather than warns when the DLL is absent, and the release step refuses a zip
+whose ScreenRecorderLib.dll is not byte-identical to ci's build; its hash is
+in the release notes.
+
+**`THIRD-PARTY-NOTICES.md` ships in the zip and installer.** GPL ffmpeg with
+a source location and offer, ScreenRecorderLib MIT with the modification
+notice and patch location, .NET runtime, Inno Setup - the distribution
+homework from the commercial-track entry, done while it was cheap.
+`SECURITY.md` points at private vulnerability reporting (the repo setting
+itself needs an admin toggle - the API token here can't).
+
+**Deliberately not done, awaiting Ruben's call:** a ruleset on main (required
+ci checks, no force-push, admin bypass); Portainer deploying the attested
+GHCR image by digest instead of rebuilding from source on the NAS; `dotnet
+format --verify-no-changes` + warnings-as-errors as a ci gate; a repository
+LICENSE (the code is currently unlicensed = all rights reserved, which is
+what a commercial track wants until decided otherwise).

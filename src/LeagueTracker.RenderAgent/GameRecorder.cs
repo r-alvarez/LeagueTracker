@@ -129,6 +129,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         public int Height { get; set; }
         public bool HasAudio { get; set; }
         public string Encoder { get; set; } = "";
+        public bool DisplayHdr { get; set; }
         /// An already-finalized faststart mp4 (the game resumed after its
         /// first chunk was finalized - agent restart) rather than a raw
         /// fragmented .part segment.
@@ -320,6 +321,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 g = g with { Rect = liveRect };
             }
 
+            var hdrDisplay = DisplayHdr.IsOnFor(g.Rect) is true;
+
             var segNo = state.Segments.Count + 1;
             var segBase = $"{state.BaseName}.seg{segNo:00}";
             var partPath = Path.Combine(PartsDir, $"{segBase}.part.mp4");
@@ -332,6 +335,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             // back to CPU x264 (driver/session limit). Either way a startup
             // failure gets one different-engine retry before counting.
             var useWgc = config.CaptureBackend.Trim().Equals("wgc", StringComparison.OrdinalIgnoreCase);
+            if (hdrDisplay) NoteHdrDisplay(wgc: useWgc);
             var result = useWgc
                 ? await CaptureWgcAsync(partPath, eventsPath, g, ct)
                 : await CaptureAsync(partPath, eventsPath, g, nvenc: true, ct);
@@ -340,6 +344,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 Log.Warn(useWgc
                     ? "WGC capture failed at startup - falling back to ffmpeg ddagrab"
                     : "NVENC capture failed at startup - falling back to CPU encoding");
+                if (hdrDisplay && useWgc) NoteHdrDisplay(wgc: false);
                 result = await CaptureAsync(partPath, eventsPath, g, nvenc: useWgc, ct);
             }
 
@@ -377,6 +382,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 Height = g.Rect.Height & ~1,
                 HasAudio = result.HasAudio,
                 Encoder = result.Encoder,
+                DisplayHdr = hdrDisplay,
                 ClockMap = [.. result.ClockMap.Select(p => new[] { p.VideoSec, p.GameSec })],
             });
             state.ActivePlayer ??= result.ActivePlayer;
@@ -922,6 +928,26 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         Log.Warn($"Game-live signal not seen within the wait window ({(everSaw ? "clock stalled" : "no Live Client response")}) - capturing anyway");
     }
 
+    /// The desktop is HDR. Our ScreenRecorderLib build captures it as scRGB
+    /// and tone-maps to SDR on the GPU (deploy/screenrecorderlib), so the WGC
+    /// engine records what the screen shows; Desktop Duplication has no HDR
+    /// path, so a ddagrab segment on an HDR desktop is the washed-out clamp
+    /// and the player is told so on the heartbeat (tray + Data page).
+    private void NoteHdrDisplay(bool wgc)
+    {
+        if (wgc && config.HdrToneMap)
+        {
+            Log.Info("HDR display - WGC captures scRGB and tone-maps to SDR");
+            return;
+        }
+        var message = wgc
+            ? "HDR is on for the game's display and HdrToneMap is off - the recording will look brighter and paler than the screen."
+            : "HDR is on for the game's display and the capture fell back to Desktop Duplication (ddagrab), which has no HDR path - "
+              + "this recording will look washed out. WGC is the engine that handles HDR; check why it would not start (agent.log).";
+        Log.Warn(message);
+        AgentStatus.LastError = message;
+    }
+
     private async Task<CaptureResult?> CaptureAsync(string partPath, string eventsPath, GameWindowInfo g, bool nvenc, CancellationToken ct)
     {
         var fps = Math.Clamp(config.RecordFramerate, 15, 120);
@@ -1091,6 +1117,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         // 70 - adjust after comparing real game bitrates if needed.
         var quality = Math.Clamp(96 - config.RecordQuality, 40, 95);
         var rect = (Math.Max(0, g.Rect.X), Math.Max(0, g.Rect.Y), g.Rect.Width & ~1, g.Rect.Height & ~1);
+        WgcRecorder.ConfigureHdrToneMap(config.HdrToneMap);
         var startedUtc = DateTime.UtcNow;
         using var recorder = WgcRecorder.TryStart(partPath, rect, fps, quality);
         if (recorder is null)
@@ -1397,6 +1424,9 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 height = sized.Height,
                 fps = Math.Clamp(config.RecordFramerate, 15, 120),
                 encoder = string.Join("+", segments.Select(s => s.Seg.Encoder).Where(e => e.Length > 0).Distinct()),
+                // Captured off an HDR desktop = colours are the clamp, not the
+                // screen; the flag says why a VOD looks bleached.
+                displayHdr = segments.Any(s => s.Seg.DisplayHdr),
                 // Capture seams (each entry is one uninterrupted capture) -
                 // lets the review UI mark where footage gaps are.
                 segments = segments.Select(s => new
@@ -1567,7 +1597,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var state = new RecordingState { BaseName = $"wgc-test-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}" };
         var part = Path.Combine(recorder.PartsDir, $"{state.BaseName}.seg01.part.mp4");
         var events = Path.Combine(recorder.MetaDir, $"{state.BaseName}.seg01.events.csv.gz");
-        Log.Info($"WGC test: 10s of the primary desktop at {fps}fps (MF quality {quality})...");
+        Log.Info($"WGC test: 10s of the primary desktop at {fps}fps (MF quality {quality}); primary display HDR {DescribeHdr(DisplayHdr.IsOnFor((0, 0, 1, 1)))}...");
         Process? noise = null;
         if (config.RecordAudio)
         {
@@ -1621,6 +1651,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         Log.Info("WGC test complete");
     }
 
+    private static string DescribeHdr(bool? hdr) => hdr switch { true => "ON (expect bleached colours)", false => "off", null => "unknown" };
+
     /// Pipeline smoke test without a game: record the primary desktop for 10s
     /// through the exact capture/encode/finalize path (LT_RECORD_TEST=1).
     public static async Task RecordTestAsync(AgentConfig config, string ffmpeg, CancellationToken ct)
@@ -1631,7 +1663,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var baseName = $"record-test-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}";
         var part = Path.Combine(recorder.PartsDir, $"{baseName}.part.mp4");
         var fps = Math.Clamp(config.RecordFramerate, 15, 120);
-        Log.Info($"Record test: 10s of the primary desktop at {fps}fps...");
+        Log.Info($"Record test: 10s of the primary desktop at {fps}fps; primary display HDR {DescribeHdr(DisplayHdr.IsOnFor((0, 0, 1, 1)))}...");
         var events = Path.Combine(recorder.MetaDir, $"{baseName}.events.csv.gz");
         // Audio path needs a process that actually plays sound - spawn one
         // looping a stock Windows wav and capture ITS process, exactly as a
