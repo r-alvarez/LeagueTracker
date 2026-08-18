@@ -271,6 +271,31 @@ app.MapPost("/api/agents/dismiss-error", (string agent, AgentRegistry agents) =>
 app.MapPost("/api/agents/restart", (string agent, AgentRegistry agents) =>
     agents.Queue(agent, "restart") ? Results.Ok() : Results.NotFound());
 
+// Ask an agent for its log: it ships the tail of agent.log on its next
+// heartbeat (no idle gate - reading a file disturbs nothing), and the file
+// appears on the agent's row within a minute.
+app.MapPost("/api/agents/sendlog", (string agent, AgentRegistry agents) =>
+    agents.Queue(agent, "sendlog") ? Results.Ok() : Results.NotFound());
+
+app.MapGet("/api/agents/{agent}/logs", (string agent, AgentRegistry agents) => Results.Ok(agents.Logs(agent)));
+
+app.MapGet("/api/agents/{agent}/logs/{file}", (string agent, string file, AgentRegistry agents) =>
+    agents.LogPath(agent, file) is { } path
+        ? Results.File(path, "text/plain; charset=utf-8")
+        : Results.NotFound());
+
+// The agent's side of "sendlog": the keyed slice, so only an approved agent
+// can write here, and only under its own name.
+app.MapPost("/api/agent/log", async (HttpContext http, AgentRegistry agents, CancellationToken ct) =>
+{
+    if (http.Items[AgentAuthMiddleware.ItemKey] is not AgentKeyRecord record) return Results.Unauthorized();
+    using var reader = new StreamReader(http.Request.Body, System.Text.Encoding.UTF8);
+    var text = await reader.ReadToEndAsync(ct);
+    if (text.Length > 2_000_000) text = text[^2_000_000..];
+    var file = agents.StoreLog(record.Name, text);
+    return Results.Ok(new { file });
+});
+
 // Enrolled keys, each joined with the heartbeat of the agent running under
 // it (version, state, last error) and the newest published build, so the
 // access table can say who is on what.
@@ -284,6 +309,7 @@ app.MapGet("/api/agents", (AgentKeyStore keys, AgentRegistry agents) =>
         {
             r.Id, r.Name, r.Machine, Status = r.Status.ToString().ToLowerInvariant(), r.CreatedUtc, r.DecidedUtc, r.LastSeenUtc, r.LastIp, r.Note,
             Live = agents.Find(r.Name, r.Machine),
+            Logs = agents.Logs(r.Name),
         }),
     });
 });

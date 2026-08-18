@@ -48,6 +48,8 @@ public sealed record AgentHeartbeat(
     string Agent, string Version, string Role, bool Paused, string State, string? Detail,
     DateTime? LastRecordingUtc, bool YouTubeReady, string? LastError, string? Machine, string? User);
 
+public sealed record AgentLogInfo(string File, DateTime WhenUtc, long SizeBytes);
+
 /// One agent as the Data page sees it: its last heartbeat plus whether it
 /// is still reporting.
 public sealed record AgentLive(
@@ -79,13 +81,64 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
 
     public IReadOnlyDictionary<string, string> ProfileFor(string? agentName) => options.Value.ProfileFor(agentName);
 
-    public string ReleaseDir => options.Value.ReleaseDir is { Length: > 0 } dir ? dir
-        : accounts.Value.DataRoot is { Length: > 0 } root ? Path.Combine(Path.IsPathRooted(root) ? root : Path.Combine(env.ContentRootPath, root), "agent-releases")
-        : Path.Combine(registry.Default.DataDir, "agent-releases");
+    public string ReleaseDir => options.Value.ReleaseDir is { Length: > 0 } dir ? dir : Path.Combine(DataRootDir, "agent-releases");
+
+    /// Where process-wide agent things live: the accounts' data root, or the
+    /// default account's folder on a single-account tracker.
+    private string DataRootDir => accounts.Value.DataRoot is { Length: > 0 } root
+        ? (Path.IsPathRooted(root) ? root : Path.Combine(env.ContentRootPath, root))
+        : registry.Default.DataDir;
 
     public void Record(AgentHeartbeat beat)
     {
         lock (_gate) _agents[beat.Agent] = (beat, DateTime.UtcNow);
+    }
+
+    /// Where agents' shipped logs live: <data root>/agent-logs/<agent>/
+    /// <utc stamp>.log, newest few kept.
+    public string LogDir => Path.Combine(DataRootDir, "agent-logs");
+
+    private const int LogsKeptPerAgent = 5;
+
+    /// Stores a log the agent shipped on the owner's "sendlog" command.
+    /// Returns the stored file name.
+    public string StoreLog(string agent, string text)
+    {
+        var dir = Path.Combine(LogDir, SafeName(agent));
+        Directory.CreateDirectory(dir);
+        var file = $"{DateTime.UtcNow:yyyyMMdd-HHmmss}.log";
+        File.WriteAllText(Path.Combine(dir, file), text);
+        foreach (var old in Directory.EnumerateFiles(dir, "*.log").OrderByDescending(f => f).Skip(LogsKeptPerAgent))
+        {
+            try { File.Delete(old); } catch { /* next store retries */ }
+        }
+        return file;
+    }
+
+    public List<AgentLogInfo> Logs(string agent)
+    {
+        var dir = Path.Combine(LogDir, SafeName(agent));
+        if (!Directory.Exists(dir)) return [];
+        return [.. Directory.EnumerateFiles(dir, "*.log")
+            .Select(f => new FileInfo(f))
+            .OrderByDescending(f => f.Name)
+            .Select(f => new AgentLogInfo(f.Name, f.LastWriteTimeUtc, f.Length))];
+    }
+
+    public string? LogPath(string agent, string file)
+    {
+        // The name is ours (a stamp + .log); anything else is not a log we stored.
+        if (!System.Text.RegularExpressions.Regex.IsMatch(file, @"^\d{8}-\d{6}\.log$")) return null;
+        var path = Path.Combine(LogDir, SafeName(agent), file);
+        return File.Exists(path) ? path : null;
+    }
+
+    /// Agent names are machine names by default and can hold anything a
+    /// user typed; the folder name keeps only what every file system takes.
+    private static string SafeName(string agent)
+    {
+        var chars = agent.Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_').ToArray();
+        return chars.Length is 0 ? "_" : new string(chars);
     }
 
     /// Hide the agent's current last error until a different one comes in.

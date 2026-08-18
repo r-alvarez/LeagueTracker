@@ -265,6 +265,22 @@ public sealed class TrackerClient
         }
     }
 
+    /// Ships the tail of agent.log to the tracker (owner asked for it via the
+    /// heartbeat's "sendlog" command). Best-effort: false = not delivered.
+    public async Task<bool> UploadLogAsync(string text, CancellationToken ct)
+    {
+        try
+        {
+            using var content = new StringContent(text, System.Text.Encoding.UTF8, "text/plain");
+            using var resp = await _http.PostAsync($"{ServerUrl}/api/agent/log?agent={Uri.EscapeDataString(_agentName)}", content, ct);
+            return resp.IsSuccessStatusCode;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
     /// Tells the tracker this agent is alive and what it is doing. Returns
     /// the newest published agent version the tracker knows of (null = none
     /// or an old tracker).

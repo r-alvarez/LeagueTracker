@@ -283,6 +283,31 @@ public static class Log
         try { if (new FileInfo(LogPath) is { Exists: true, Length: > 5_000_000 }) File.Delete(LogPath); } catch { /* keep logging best-effort */ }
     }
 
+    /// The newest maxBytes of the log, for shipping to the tracker on
+    /// request - the owner's way to see a customer's machine without asking
+    /// them to find and send a file.
+    public static string Tail(int maxBytes)
+    {
+        lock (Gate)
+        {
+            try
+            {
+                if (!File.Exists(LogPath)) return "";
+                using var stream = new FileStream(LogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                var start = Math.Max(0, stream.Length - maxBytes);
+                stream.Seek(start, SeekOrigin.Begin);
+                using var reader = new StreamReader(stream);
+                var text = reader.ReadToEnd();
+                // Cutting into a line is worse than losing it: start at the next full line.
+                return start == 0 ? text : text[(text.IndexOf((char)10) + 1)..];
+            }
+            catch (Exception ex)
+            {
+                return $"(could not read {LogPath}: {ex.Message})";
+            }
+        }
+    }
+
     public static void Info(string message) => Write($"[{DateTime.Now:HH:mm:ss}] {message}");
     public static void Warn(string message) => Write($"[{DateTime.Now:HH:mm:ss}] WARN {message}");
     public static void Error(string message) => Write($"[{DateTime.Now:HH:mm:ss}] ERROR {message}");

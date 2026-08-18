@@ -2,10 +2,13 @@ import { Fragment, useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import type { AgentInfo } from '../types'
 
+interface AgentLog { file: string; whenUtc: string; sizeBytes: number }
+
 interface AgentKey {
   id: string; name: string; machine: string; status: 'pending' | 'approved' | 'revoked'
   createdUtc: string; decidedUtc: string | null; lastSeenUtc: string | null; lastIp: string | null; note: string | null
   live: AgentInfo | null
+  logs: AgentLog[]
 }
 
 interface AgentAccess { latestVersion: string | null; agents: AgentKey[] }
@@ -20,6 +23,9 @@ interface AgentAccess { latestVersion: string | null; agents: AgentKey[] }
 export default function AgentApprovals() {
   const [access, setAccess] = useState<AgentAccess | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  // Rows whose log was just requested: the file lands on the next heartbeat,
+  // so the button reads "asked" until the list shows a newer file.
+  const [logAsked, setLogAsked] = useState<Record<string, number>>({})
 
   const load = useCallback(() => {
     fetch('/api/agents').then(r => (r.ok ? r.json() : null)).then(setAccess).catch(() => setAccess(null))
@@ -94,6 +100,14 @@ export default function AgentApprovals() {
                     <strong>{k.name}</strong>
                     {k.machine && k.machine !== k.name && <span className="mut sm-text"> · {k.machine}</span>}
                     {live && live.role !== 'full' && <span className="mut sm-text"> · {live.role}</span>}
+                    {k.logs.length > 0 && (
+                      <div className="sm-text">
+                        <a href={`/api/agents/${encodeURIComponent(k.name)}/logs/${k.logs[0].file}`} target="_blank" rel="noreferrer"
+                          title={`agent.log tail shipped ${when(k.logs[0].whenUtc)} (${Math.round(k.logs[0].sizeBytes / 1024)} KB)${k.logs.length > 1 ? ` · ${k.logs.length - 1} older` : ''}`}>
+                          log · {whenShort(k.logs[0].whenUtc)}
+                        </a>
+                      </div>
+                    )}
                   </td>
                   <td>{live?.user ?? <span className="mut">—</span>}</td>
                   <td>
@@ -127,6 +141,11 @@ export default function AgentApprovals() {
                       {live && <>
                         <button className="action sm-action" title="Ask this agent to restart on its next heartbeat (when it is idle) - it re-reads settings and updates itself"
                           disabled={busy === k.id} onClick={async () => { setBusy(k.id); try { await api.restartAgent(live.agent) } finally { setBusy(null) } }}>Restart</button>{' '}
+                        <button className="action sm-action" title="Ask this agent to send the tail of its agent.log - it arrives on the next heartbeat (about a minute)"
+                          disabled={busy === k.id || !!logAsked[k.id]}
+                          onClick={async () => { setBusy(k.id); try { await api.requestAgentLog(live.agent); setLogAsked(a => ({ ...a, [k.id]: Date.now() })) } finally { setBusy(null) } }}>
+                          {logAsked[k.id] && !(k.logs[0] && new Date(k.logs[0].whenUtc).getTime() > logAsked[k.id]) ? 'Log asked…' : 'Log'}
+                        </button>{' '}
                       </>}
                       <button className="action sm-action" disabled={busy === k.id} onClick={() => act(k.id, 'revoke')}>Revoke</button>
                     </>}
