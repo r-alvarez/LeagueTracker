@@ -1,5 +1,5 @@
 # --- SPA build ---------------------------------------------------------------
-FROM node:24-alpine AS web
+FROM node:26-alpine AS web
 WORKDIR /web
 COPY src/leaguetracker-web/package*.json ./
 # npm ci refuses Windows-generated lockfiles that lack the linux/wasm optional
