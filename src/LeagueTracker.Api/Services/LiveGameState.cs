@@ -19,6 +19,13 @@ public sealed record LiveGameSnapshot(
     public double? AvgAllyRankValue { get; init; }
     public double? AvgEnemyRankValue { get; init; }
 
+    /// Spectator's gameStartTime runs 30.1s ahead of match-v5's gameStartTimestamp,
+    /// which is where the in-game clock reads 0:00 - measured on three EUW games,
+    /// identical to the tenth of a second. Its gameLength is worse (negative in a
+    /// game's first minutes, ~150s behind later), so the banner clock anchors here.
+    private static readonly TimeSpan SpectatorStartLead = TimeSpan.FromSeconds(30);
+    public DateTime? ClockStartUtc => StartedUtc + SpectatorStartLead;
+
     /// Spectator reports gameStartTime as 0 until a few minutes in; treat that as unknown.
     public static LiveGameSnapshot Parse(string raw, string myPuuid)
     {

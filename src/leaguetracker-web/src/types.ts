@@ -666,6 +666,8 @@ export interface LiveGame {
   queueId: number
   queue: string
   startedUtc: string | null
+  /** Where the in-game clock reads 0:00 (spectator's start, calibrated server-side). */
+  clockStartUtc: string | null
   detectedUtc: string
   myChampionId: number
   myTeamId: number

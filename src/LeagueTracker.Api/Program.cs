@@ -355,7 +355,7 @@ api.MapGet("/live", (AccountContext acct, LiveGameState live) =>
         ? Results.Ok(new
         {
             g.MatchId, g.QueueId, Queue = RankMath.QueueName(g.QueueId),
-            g.StartedUtc, g.DetectedUtc, g.MyChampionId, g.MyTeamId,
+            g.StartedUtc, g.ClockStartUtc, g.DetectedUtc, g.MyChampionId, g.MyTeamId,
             AvgAllyRank = !acct.Current.HideLp && g.AvgAllyRankValue is { } ally ? RankMath.ToLabel(ally) : null,
             AvgEnemyRank = !acct.Current.HideLp && g.AvgEnemyRankValue is { } enemy ? RankMath.ToLabel(enemy) : null,
             RankGapLp = !acct.Current.HideLp && g is { AvgAllyRankValue: { } a, AvgEnemyRankValue: { } e } ? (int?)Math.Round(e - a) : null,
