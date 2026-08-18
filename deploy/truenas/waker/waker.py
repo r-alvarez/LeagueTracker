@@ -24,6 +24,7 @@ import os
 import socket
 import ssl
 import time
+import urllib.error
 import urllib.request
 
 TRACKERS = [u.strip().rstrip("/") for u in os.environ.get("TRACKER_URLS", "").split(",") if u.strip()]
@@ -92,24 +93,29 @@ def send_broadcast() -> None:
         s.sendto(packet, (BROADCAST, 9))
 
 
+def unifi_call(step: str, url: str, body: dict, headers: dict):
+    # Name the step and quote the console's reply: a bare "HTTP Error 404"
+    # cannot say whether the login or the wake command failed, nor why.
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json", **headers})
+    try:
+        return urllib.request.urlopen(req, timeout=15, context=INSECURE)
+    except urllib.error.HTTPError as ex:
+        reply = ex.read(300).decode("utf-8", "replace").strip()
+        raise RuntimeError(f"{step} ({url}) answered HTTP {ex.code}: {reply or ex.reason}") from None
+
+
 def send_unifi_wake() -> None:
     """Log in to the UniFi console and ask it to wake the PC. Raises on any
     failure so the caller can log the outage once instead of every poll."""
-    body = json.dumps({"username": UNIFI_USER, "password": UNIFI_PASS}).encode()
-    req = urllib.request.Request(
-        f"{UNIFI_URL}/api/auth/login", data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=15, context=INSECURE) as resp:
+    with unifi_call("login", f"{UNIFI_URL}/api/auth/login", {"username": UNIFI_USER, "password": UNIFI_PASS}, {}) as resp:
         cookie = resp.headers.get("Set-Cookie", "").split(";")[0]
         csrf = resp.headers.get("X-CSRF-Token", "") or resp.headers.get("x-csrf-token", "")
 
     mac = ":".join(MAC[i:i + 2] for i in range(0, 12, 2))
-    body = json.dumps({"cmd": "wake-device", "mac": mac}).encode()
-    headers = {"Content-Type": "application/json", "Cookie": cookie}
+    headers = {"Cookie": cookie}
     if csrf:
         headers["X-Csrf-Token"] = csrf
-    req = urllib.request.Request(
-        f"{UNIFI_URL}/proxy/network/api/s/{UNIFI_SITE}/cmd/stamgr", data=body, headers=headers)
-    with urllib.request.urlopen(req, timeout=15, context=INSECURE) as resp:
+    with unifi_call("wake-device", f"{UNIFI_URL}/proxy/network/api/s/{UNIFI_SITE}/cmd/stamgr", {"cmd": "wake-device", "mac": mac}, headers) as resp:
         if resp.status != 200:
             raise RuntimeError(f"wake-device answered HTTP {resp.status}")
 
