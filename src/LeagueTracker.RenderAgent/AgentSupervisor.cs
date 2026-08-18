@@ -137,6 +137,38 @@ public sealed class AgentSupervisor(AgentConfig config, IReadOnlyList<TrackerCli
         File.WriteAllText(RenderAgent.StopSentinelPath, "restart from tracker");
     }
 
+    private bool _previousBuildCleaned;
+
+    /// The apply script keeps the replaced build beside the new one as *.prev
+    /// (a whole second copy: exe, ffmpeg, runtime). Once this build has talked
+    /// to a tracker it has proven itself, and the copy - plus any staging
+    /// leftovers in %TEMP% - is just space taken on someone's disk.
+    private void CleanPreviousBuild()
+    {
+        _previousBuildCleaned = true;
+        long freed = 0;
+        try
+        {
+            foreach (var prev in Directory.EnumerateFiles(AppContext.BaseDirectory, "*.prev"))
+            {
+                try { var len = new FileInfo(prev).Length; File.Delete(prev); freed += len; }
+                catch { /* still locked by something - next start */ }
+            }
+            var staging = Path.Combine(Path.GetTempPath(), "leaguetracker-agent");
+            if (Directory.Exists(staging))
+            {
+                foreach (var file in Directory.EnumerateFiles(staging))
+                {
+                    if (file.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase)) continue; // a script may still be running
+                    try { var len = new FileInfo(file).Length; File.Delete(file); freed += len; } catch { }
+                }
+            }
+            if (Directory.Exists(UpdateDir)) Directory.Delete(UpdateDir, recursive: true);
+        }
+        catch (Exception ex) { Log.Warn($"Previous-build cleanup: {ex.Message}"); }
+        if (freed > 0) Log.Info($"Previous build cleaned up: {freed / 1024 / 1024} MB freed");
+    }
+
     private async Task<string?> HeartbeatAsync(CancellationToken ct)
     {
         var (state, detail) = AgentStatus.Current;
@@ -157,12 +189,15 @@ public sealed class AgentSupervisor(AgentConfig config, IReadOnlyList<TrackerCli
         // Every tracker gets the beat; the first version hint and the first
         // queued command win.
         string? latest = null;
+        var heard = false;
         foreach (var tracker in trackers)
         {
             if (await tracker.HeartbeatAsync(beat, ct) is not { } reply) continue;
+            heard = true;
             latest ??= reply.Latest;
             if (reply.Command is { Length: > 0 } && reply.CommandToken is { Length: > 0 }) await HandleCommandAsync(tracker, reply.Command, reply.CommandToken, ct);
         }
+        if (heard && !_previousBuildCleaned) CleanPreviousBuild();
         return latest;
     }
 

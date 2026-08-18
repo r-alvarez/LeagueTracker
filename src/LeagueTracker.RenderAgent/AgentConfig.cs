@@ -89,6 +89,17 @@ public sealed class AgentConfig
     /// the small sidecars; on = a debugging machine that wants the files.
     public bool KeepRecordingsAfterPublish { get; set; }
 
+    /// Ceiling on what the recordings folder may hold in mp4s (GB). Above it
+    /// the delivery pass evicts the oldest games - published ones first, then,
+    /// loudly, unpublished ones - so a slow upload backlog can never fill a
+    /// friend's disk. 0 = no ceiling.
+    public double MaxRecordingsGb { get; set; } = 20;
+
+    /// Free space to leave on the recordings drive (GB): the eviction above
+    /// also runs while free space is under this, and a new game is not
+    /// recorded at all when less than half of it is free.
+    public double MinFreeGb { get; set; } = 10;
+
     /// Optional cap on the recorded picture height, aspect kept (3440x1440
     /// -> 2580x1080); the WGC engine scales on the GPU. 0 = native, and
     /// native is the default: people buy big screens to see them. A knob for

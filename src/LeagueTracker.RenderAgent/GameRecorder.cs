@@ -237,7 +237,20 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             using (lcu) session = await lcu.GetGameSessionAsync(ct);
         }
 
-        if (!ShouldRecord(session, out var skipReason))
+        var record = ShouldRecord(session, out var skipReason);
+        if (record && config.MinFreeGb > 0)
+        {
+            // Better no recording than one that dies mid-game with the disk
+            // full: make room first, and skip if that was not enough.
+            if (FreeGb(RecordingsDir) < config.MinFreeGb / 2) EnforceDiskBudget();
+            if (FreeGb(RecordingsDir) is var free && free < config.MinFreeGb / 2)
+            {
+                record = false;
+                skipReason = $"only {free:0.0} GB free on the recordings drive (needs {config.MinFreeGb / 2:0.0} GB)";
+                AgentStatus.LastError = $"not recording: {skipReason}";
+            }
+        }
+        if (!record)
         {
             Log.Info($"Not recording this game: {skipReason}");
             // StopRequested too: a deploy must not wait for the game to end.
@@ -762,6 +775,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             {
                 _delivering = true;
                 await SweepUnuploadedAsync(ct);
+                EnforceDiskBudget();
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (Exception ex) { Log.Warn($"Delivery pass failed: {ex.Message}"); }
@@ -813,6 +827,71 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         {
             Log.Warn($"Could not remove {baseName}.mp4: {ex.Message} (next pass retries)");
         }
+    }
+
+    /// Whether a game is already somewhere other than this disk: published
+    /// to YouTube and linked on the tracker, or (no YouTube) fully uploaded.
+    private bool IsElsewhere(string baseName)
+    {
+        string M(string ext) => Path.Combine(MetaDir, baseName + ext);
+        return _youtube.Enabled
+            ? File.Exists(M(".youtube.txt")) && File.Exists(M(".linked"))
+            : File.Exists(M(".uploaded"));
+    }
+
+    private static double FreeGb(string dir)
+    {
+        try { return new DriveInfo(Path.GetPathRoot(Path.GetFullPath(dir))!).AvailableFreeSpace / 1024d / 1024 / 1024; }
+        catch { return double.PositiveInfinity; }
+    }
+
+    /// The disk is a friend's: recordings never grow past MaxRecordingsGb or
+    /// eat into the last MinFreeGb. Oldest first, games that are safely
+    /// elsewhere before games that are not - and dropping one of those is
+    /// said out loud on the Data page, not just in the log.
+    private void EnforceDiskBudget()
+    {
+        if (config.MaxRecordingsGb <= 0 && config.MinFreeGb <= 0) return;
+        if (!Directory.Exists(RecordingsDir)) return;
+        var files = new DirectoryInfo(RecordingsDir).GetFiles("*.mp4")
+            .Where(f => !f.Name.EndsWith(".part.mp4", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(f => f.LastWriteTimeUtc).ToList();
+        var totalGb = files.Sum(f => f.Length) / 1024d / 1024 / 1024;
+        bool Over() => (config.MaxRecordingsGb > 0 && totalGb > config.MaxRecordingsGb)
+                    || (config.MinFreeGb > 0 && FreeGb(RecordingsDir) < config.MinFreeGb);
+        if (!Over()) return;
+
+        // A file written in the last few minutes may still be finalizing on
+        // the recorder loop; the delivery loop (this one) owns the uploads.
+        var settled = DateTime.UtcNow.AddMinutes(-10);
+        var dropped = 0;
+        foreach (var pass in new[] { true, false })   // elsewhere first, then not
+        {
+            foreach (var f in files.ToList())
+            {
+                if (!Over()) break;
+                var baseName = Path.GetFileNameWithoutExtension(f.Name);
+                if (f.LastWriteTimeUtc > settled || IsElsewhere(baseName) != pass) continue;
+                try
+                {
+                    var mb = f.Length / 1024 / 1024;
+                    f.Delete();
+                    TryDelete(Path.ChangeExtension(f.FullName, ".pcm"));
+                    TryDelete(Path.Combine(MetaDir, baseName + ".ytsession.json"));
+                    File.WriteAllText(Path.Combine(MetaDir, baseName + (pass ? ".pruned" : ".dropped")), DateTime.UtcNow.ToString("O"));
+                    files.Remove(f);
+                    totalGb -= mb / 1024d;
+                    if (pass) Log.Info($"Recording {baseName}.mp4 ({mb} MB) removed to stay within the disk budget - it is safely elsewhere");
+                    else
+                    {
+                        dropped++;
+                        Log.Warn($"Recording {baseName}.mp4 ({mb} MB) DROPPED UNPUBLISHED to stay within the disk budget ({config.MaxRecordingsGb:0} GB / {config.MinFreeGb:0} GB free) - uploads are not keeping up");
+                    }
+                }
+                catch (Exception ex) { Log.Warn($"Could not remove {f.Name}: {ex.Message}"); }
+            }
+        }
+        if (dropped > 0) AgentStatus.LastError = $"disk budget: {dropped} unpublished recording(s) dropped - uploads are not keeping up with games (raise MaxRecordingsGb or check YouTube/tracker uploads)";
     }
 
     private async Task SweepUnuploadedAsync(CancellationToken ct)
