@@ -95,7 +95,7 @@ By curl (replace `$A=http://localhost:5399/api/a/euw/ImRA-87166`):
 | Read (anon once PublicReads, else any signed-in principal) | status, live, matches, matches/facets, matches/{id}, series, lens, challenges/percentiles, fundamentals, review, reel, reviews, stats, stoploss, lp/*, analytics/summary |
 | MediaRead (owner, or public if MediaPublic, or an agent that could have produced it) | matches/{id}/clips, clips/{i}, vod, vod/status, vod/thumb, fullgame, fullgame/status |
 | Owner (owner or admin) | sync/history, import, analytics/reprocess, ranks/backfill, jobs/status, storage, export/*, deletes of clip/vod/fullgame, fullgame request/keep, render retry/dismiss, PUT settings |
-| AgentRecorder (recorder on its owner's account, or the owner) | vods/*, matches/{id}/vod/link |
+| AgentRecorder (any agent of the owner, or the owner) | vods/*, matches/{id}/vod/link |
 | AgentRender (agents only: renderer anywhere, recorder on own) | render/next, render/{id}/full, render/{id}/clips/{i}, complete, fail, release-stale |
 | RenderRead (those agents, or the owner) | render/queue, matches/{id}/replay |
 

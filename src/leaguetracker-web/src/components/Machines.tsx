@@ -59,9 +59,17 @@ export default function Machines() {
   const copy = async (text: string) => {
     try { await navigator.clipboard.writeText(text); setCopied(true) } catch { /* selectable text stays */ }
   }
+  const [assignRole, setAssignRole] = useState<Record<string, string>>({})
+  // Blank box = keep the current owner (the endpoint reads blank as "unown").
   const doAssign = async (k: AgentKey) => {
     setError(null)
-    try { await api.adminAssignAgent(k.id, assign[k.id]?.trim() || null, null); load() } catch (e) { setError(String(e)) }
+    const owner = assign[k.id]?.trim() || k.ownerEmail || null
+    const role = assignRole[k.id] && assignRole[k.id] !== k.role ? assignRole[k.id] : null
+    try { await api.adminAssignAgent(k.id, owner, role); load() } catch (e) { setError(String(e)) }
+  }
+  const doUnown = async (k: AgentKey) => {
+    setError(null)
+    try { await api.adminAssignAgent(k.id, null, null); load() } catch (e) { setError(String(e)) }
   }
 
   const keys = mine?.keys ?? []
@@ -241,7 +249,12 @@ export default function Machines() {
                           <span className="sm-text">
                             <input className="text" placeholder={k.ownerEmail ?? 'owner email'} value={assign[k.id] ?? ''} style={{ width: 220 }}
                               onChange={e => setAssign({ ...assign, [k.id]: e.target.value })} />{' '}
-                            <button className="action sm-action" onClick={() => doAssign(k)}>Assign owner</button>
+                            <select value={assignRole[k.id] ?? k.role} aria-label="Machine role" onChange={e => setAssignRole({ ...assignRole, [k.id]: e.target.value })}>
+                              <option value="recorder">recorder – records and renders its owner's accounts</option>
+                              <option value="renderer">renderer – renders replays for everyone</option>
+                            </select>{' '}
+                            <button className="action sm-action" onClick={() => doAssign(k)}>Save owner &amp; role</button>
+                            {k.ownerEmail && <>{' '}<button className="action sm-action" onClick={() => doUnown(k)} title="Make this machine unowned again">Unown</button></>}
                           </span>
                         </td>
                       </tr>

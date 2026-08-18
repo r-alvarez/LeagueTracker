@@ -19,7 +19,9 @@ public enum Access
     Admin,
     // Any approved agent key (server-level agent routes).
     Agent,
-    // Uploads for an account: a recorder whose owner owns it (or the owner).
+    // Uploads for an account: an agent whose owner owns it (or the owner).
+    // Role does not enter into it - a machine that renders for everyone still
+    // records its own owner's games.
     AgentRecorder,
     // Render work for an account: a renderer anywhere, or a recorder on its
     // owner's accounts. Agents only - leases and uploads are machine work.
@@ -74,7 +76,7 @@ public sealed class AccessHandler(IOptions<AuthOptions> auth) : AuthorizationHan
             Access.Admin => caller.IsAdmin,
             Access.Owner => account is not null && (caller.IsAdmin || (caller.IsUser && caller.Owns(account))),
             Access.Agent => caller.IsAgent,
-            Access.AgentRecorder => account is not null && (caller.IsAgent ? caller.AgentRole is AgentRole.Recorder && caller.Owns(account) : caller.IsUser && caller.Owns(account)),
+            Access.AgentRecorder => account is not null && caller.Owns(account) && (caller.IsAgent || caller.IsUser),
             Access.AgentRender => account is not null && caller.IsAgent && (caller.AgentRole is AgentRole.Renderer || caller.Owns(account)),
             Access.RenderRead => account is not null && (caller.IsAgent ? caller.AgentRole is AgentRole.Renderer || caller.Owns(account) : caller.IsUser && caller.Owns(account)),
             Access.MediaRead => account is not null && (account.MediaPublic
