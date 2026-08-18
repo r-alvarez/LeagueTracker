@@ -78,4 +78,21 @@ public class RankMathTests
         }
         Assert.Null(RankMath.QueueFamily("bogus"));
     }
+
+    [Fact]
+    public void Queue_families_do_not_overlap()
+    {
+        // Each filter button means one thing: a Swiftplay game is not also a
+        // Normal game, or the Normal count reads as draft games that never happened.
+        var families = new[] { "solo", "flex", "normal", "swiftplay", "aram", "arena", "urf" };
+        Dictionary<int, string> claimed = [];
+        foreach (var family in families)
+        {
+            foreach (var id in RankMath.QueueFamily(family)!)
+            {
+                Assert.False(claimed.TryGetValue(id, out var other), $"queue {id} is in both {other} and {family}");
+                claimed[id] = family;
+            }
+        }
+    }
 }

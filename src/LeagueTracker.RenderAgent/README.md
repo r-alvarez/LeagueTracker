@@ -115,10 +115,16 @@ false` (or `LT_HDR_TONEMAP=0`) forces the stock behaviour - a support knob.
 With `YouTubeUpload` on, every finished recording is uploaded to the
 authorized YouTube channel and the resulting link is registered with the
 tracker that owns the match - the storage-free review mode with zero manual
-steps. Uploads are resumable (one interrupted by a new game, a deploy or a
-dead connection continues from the last acknowledged byte) and pause the
-moment a game process appears; the recorder's idle sweeps pick them back up.
-The video title is the recording's file name minus its separators
+steps. Delivery (tracker sidecars/VOD, YouTube, link, retention) runs on its
+own loop, so the recorder is watching for the next game the moment one ends,
+and uploads **do not stop for a game**: while one runs they are paced to
+`UploadInGameMbps` (0 = half the line's measured idle upstream, never under
+3 Mbps), full speed otherwise, so game 1 is on YouTube by the time game 2
+ends without lagging it. Uploads are resumable (a deploy or a dead connection
+continues from the last acknowledged byte). Once a video is processed by
+YouTube and linked on the tracker the local mp4 is deleted and the sidecars
+kept, unless `KeepRecordingsAfterPublish` (local file or tracker profile) says
+keep. The video title is the recording's file name minus its separators
 ("Road to Platinum 03 Aug 2026 Game 2").
 
 One-time setup:
@@ -130,14 +136,28 @@ One-time setup:
 2. Put the client id/secret in `appsettings.json` (`YouTubeClientId` /
    `YouTubeClientSecret`) and set `"YouTubeUpload": true`.
 3. Run `LeagueTracker.RenderAgent.exe --youtube-auth` once and approve in the
-   browser **with the channel's Google account**. The refresh token lands in
-   `youtube-token.json` next to the exe; `agent.log` names the authorized
-   channel so a wrong-account consent is caught immediately.
+   browser **with the channel's Google account** - pick the channel itself on
+   the chooser (brand channels are listed under the account). The refresh
+   token lands in `youtube-token.json` next to the exe; `agent.log` names the
+   authorized channel so a wrong-account consent is caught immediately.
+   `deploy/youtube-auth.ps1` wraps this for a tracker-held token: it runs
+   the flow from a scratch copy, takes the client secret masked, and prints
+   the token once for the Portainer stack environment.
 
 Caveats: the API prices an upload at 1600 of the default 10,000 daily quota
-units (~6 uploads/day - the excess just queues to the next day), and Google
-forces uploads from unaudited API projects to **private** regardless of
+units per Google project (~6 uploads/day - the excess just queues to the
+next day, and the agent's row on the Data page says so), and Google forces
+uploads from unaudited API projects to **private** regardless of
 `YouTubeVisibility` until the project passes their audit/exception process.
+A busy player's agent can be given its own project via the tracker's
+per-agent profile (`Agent__Profiles__<agent>__YouTube*`).
+
+### Diagnostics from the tracker
+
+The Data page's Agent access row has **Log**: the agent ships the last
+512 KB of `agent.log` on its next heartbeat and the file appears on the row
+(newest five kept per agent under `<data root>/agent-logs/`). No file to find
+on the player's PC.
 
 ## Test/debug environment flags
 

@@ -1509,16 +1509,6 @@ div.seg { --edge-cover: #0d111a; background-color: #0d111a; }
 
 /* Data page: agents, clip rendering, storage. Prose intro then structured
    rows/tiles - the sentence-with-dots layout read as one grey run of text. */
-.agent-list { display: grid; gap: 10px; }
-.agent-row { padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-inset); display: grid; gap: 6px; }
-.agent-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.agent-head strong { font-size: 14px; }
-.agent-state { font-size: 13px; }
-.agent-state-name { font-weight: 600; text-transform: capitalize; }
-.agent-meta { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 22px; font-size: 12px; }
-.agent-meta div { display: flex; gap: 6px; }
-.agent-meta dt { color: var(--muted); }
-.agent-meta dd { margin: 0; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .warn-text { color: var(--warn); }
 .agent-error {
   margin-top: 2px; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.45;
@@ -1573,3 +1563,19 @@ table.data.render-failed-table td.reason { color: var(--ink-2); font-size: 12.5p
 
 .claim-box { display: flex; gap: 14px; align-items: flex-start; }
 .claim-icon { border-radius: 10px; border: 2px solid var(--accent); flex: 0 0 auto; }
+
+/* Agent access table: compact action buttons, and pending rows read as
+   "needs you" without a second badge. */
+table.agent-access .sm-action { font-size: 12px; padding: 3px 9px; }
+table.agent-access td.actions { text-align: right; }
+/* The "now" cell carries free text (recording names get long); clip it and
+   keep the full line on hover so the table stays one screen wide. */
+table.agent-access td.now { max-width: 260px; }
+table.agent-access .agent-now { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+table.agent-access tr.pending td { background: color-mix(in srgb, var(--warn) 6%, transparent); }
+table.agent-access tr.agent-error-row td { padding-top: 0; white-space: normal; }
+/* Recorded but not yet on YouTube: the sidecar arrived, the video is in
+   transit - read as a state, not an error. */
+.vod-pending { text-align: center; padding: 24px; line-height: 1.5; }
+.vod-pending strong { color: var(--ink); }
+table.agent-access tr.agent-error-row:hover td { background: transparent; }

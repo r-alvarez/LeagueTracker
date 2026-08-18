@@ -24,6 +24,21 @@ x-lt-agent-env: &lt-agent-env
   Agent__Profile__YouTubeClientId: ${YT_CLIENT_ID:-}
   Agent__Profile__YouTubeClientSecret: ${YT_CLIENT_SECRET:-}
   Agent__Profile__YouTubeRefreshToken: ${YT_REFRESH_TOKEN:-}
+  # Recordings leave the player's PC once safely on YouTube (processed +
+  # linked here) - customers don't keep gigabytes they never look at. Ruben's
+  # own agent keeps them for debugging: the per-agent override wins over the
+  # shared value, and this is decided from here so a self-updating agent on a
+  # machine nobody is sitting at never deletes anything by surprise.
+  Agent__Profile__KeepRecordingsAfterPublish: "false"
+  Agent__Profiles__RUBEN__KeepRecordingsAfterPublish: "true"
+  # Ben's agent uploads through its own Google Cloud project (own 10k-unit
+  # daily quota - videos.insert costs 1,600, so one project is ~6 uploads a
+  # day for everyone together) but still to the same channel: the refresh
+  # token was minted for that channel with project B's client. Blank = falls
+  # back to the shared values above. Keyed by the agent's enrolled name.
+  Agent__Profiles__DESKTOP-7NMQL3C__YouTubeClientId: ${YT_BEN_CLIENT_ID:-}
+  Agent__Profiles__DESKTOP-7NMQL3C__YouTubeClientSecret: ${YT_BEN_CLIENT_SECRET:-}
+  Agent__Profiles__DESKTOP-7NMQL3C__YouTubeRefreshToken: ${YT_BEN_REFRESH_TOKEN:-}
   Agent__Profile__RecordQueues: ranked-solo,normal
   # Friends publish to YouTube and send only the small review sidecar; the
   # full multi-GB video is NOT pushed to the NAS (YouTube hosts it). Without
@@ -114,13 +129,14 @@ services:
       - traefik.http.routers.leaguetracker.service=leaguetracker
 
   # Wakes the render PC while render work waits, so the gaming machine can
-  # sleep instead of idling 24/7. The PC (10.10.10.x) and the NAS (10.10.40.x)
-  # are on different subnets and routers drop directed broadcasts, so the
-  # primary path asks the UniFi gateway to emit the magic packet inside the
-  # PC's own VLAN. UNIFI_USER/UNIFI_PASS are set as Portainer stack env vars
-  # (a local view-capable UniFi admin), NEVER committed here. Host networking
-  # keeps the secondary raw broadcast possible and makes the tracker
-  # hostnames resolve via split-horizon DNS - no Cloudflare Access token.
+  # sleep instead of idling 24/7. The PC and the NAS are on different subnets
+  # and routers drop directed broadcasts, so the primary path asks the UniFi
+  # gateway to emit the magic packet inside the PC's own VLAN. Everything that
+  # describes the network - PC_MAC, WOL_BROADCAST, UNIFI_URL and the UniFi
+  # login (a local view-capable admin) - is a Portainer stack env var, NEVER
+  # committed here: this repo is public. Host networking keeps the secondary
+  # raw broadcast possible and makes the tracker hostnames resolve via
+  # split-horizon DNS - no Cloudflare Access token.
   waker:
     build:
       context: ./waker
@@ -131,11 +147,14 @@ services:
     network_mode: host
     environment:
       - TZ=Europe/London
-      - TRACKER_URLS=https://league.rjav-tech.co.uk,https://league-alt.rjav-tech.co.uk,https://league-ben.rjav-tech.co.uk
-      - PC_MAC=D8-5E-D3-A2-58-4F
-      - WOL_BROADCAST=10.10.10.255
+      # One site, every account: the waker discovers the accounts from the
+      # tracker and reads each queue on its canonical path. The legacy
+      # per-player hostnames are no longer needed here.
+      - TRACKER_URLS=https://league.rjav-tech.co.uk
+      - PC_MAC=${PC_MAC:-}
+      - WOL_BROADCAST=${WOL_BROADCAST:-255.255.255.255}
       - POLL_SECONDS=60
-      - UNIFI_URL=${UNIFI_URL:-https://10.10.40.1}
+      - UNIFI_URL=${UNIFI_URL:-}
       - UNIFI_USER=${UNIFI_USER:-}
       - UNIFI_PASS=${UNIFI_PASS:-}
     restart: unless-stopped

@@ -34,7 +34,7 @@ public sealed class WgcRecorder : IDisposable
     /// little moves on screen); the frame counter advances either way.
     public int CurrentFrameNumber => _recorder.CurrentFrameNumber;
 
-    private WgcRecorder((int X, int Y, int Width, int Height)? rect, int framerate, int quality)
+    private WgcRecorder((int X, int Y, int Width, int Height)? rect, int framerate, int quality, (int Width, int Height)? outputSize)
     {
         var source = DisplayRecordingSource.MainMonitor;
         source.RecorderApi = RecorderApi.WindowsGraphicsCapture;
@@ -47,6 +47,10 @@ public sealed class WgcRecorder : IDisposable
             {
                 RecorderMode = RecorderMode.Video,
                 SourceRect = rect is { } r ? new ScreenRect(r.X, r.Y, r.Width, r.Height) : null,
+                // RecordMaxHeight: the engine scales on the GPU before encoding,
+                // so an ultrawide 1440p desktop can record as 2580x1080.
+                OutputFrameSize = outputSize is { } o ? new ScreenSize(o.Width, o.Height) : null,
+                Stretch = StretchMode.Uniform,
             },
             VideoEncoderOptions = new VideoEncoderOptions
             {
@@ -82,12 +86,12 @@ public sealed class WgcRecorder : IDisposable
 
     /// Null when the engine won't construct at all (missing OS support) -
     /// the caller falls back to the ffmpeg capture path.
-    public static WgcRecorder? TryStart(string outputPath, (int X, int Y, int Width, int Height)? rect, int framerate, int quality)
+    public static WgcRecorder? TryStart(string outputPath, (int X, int Y, int Width, int Height)? rect, int framerate, int quality, (int Width, int Height)? outputSize = null)
     {
         WgcRecorder? recorder = null;
         try
         {
-            recorder = new WgcRecorder(rect, framerate, quality);
+            recorder = new WgcRecorder(rect, framerate, quality, outputSize);
             recorder._recorder.Record(outputPath);
             return recorder;
         }

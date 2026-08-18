@@ -13,7 +13,7 @@ namespace LeagueTracker.Api.Auth;
 public sealed class AgentKeyAuthenticationHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder, AgentKeyStore keys)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
-    public const string Scheme = "AgentKey";
+    public const string SchemeName = "AgentKey";
     public const string HeaderName = "X-Agent-Key";
     public const string ItemKey = "agent-key-record";
 
@@ -34,8 +34,8 @@ public sealed class AgentKeyAuthenticationHandler(IOptionsMonitor<Authentication
             new(TrackerClaims.AgentRole, record.Role.ToString().ToLowerInvariant()),
         ];
         if (record.OwnerUserId is { Length: > 0 } owner) claims.Add(new(TrackerClaims.AgentOwner, owner));
-        var identity = new ClaimsIdentity(claims, Scheme, TrackerClaims.AgentName, ClaimTypes.Role);
-        return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme)));
+        var identity = new ClaimsIdentity(claims, SchemeName, TrackerClaims.AgentName, ClaimTypes.Role);
+        return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
     }
 
     protected override Task HandleChallengeAsync(AuthenticationProperties properties)

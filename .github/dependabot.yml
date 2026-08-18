@@ -18,6 +18,7 @@ updates:
       - /src/LeagueTracker.Api
       - /src/LeagueTracker.RenderAgent
       - /tests/LeagueTracker.Api.Tests
+      - /tests/LeagueTracker.RenderAgent.Tests
     schedule:
       interval: weekly
       day: monday

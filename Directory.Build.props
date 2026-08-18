@@ -1,0 +1,7 @@
+<Project>
+  <!-- Every project in the repo: a warning is a build failure. Fix it, or
+       suppress it at the site with the reason - never let it accumulate. -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

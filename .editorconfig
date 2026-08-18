@@ -1,0 +1,18 @@
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+# House style: compact object/anonymous initializers stay on one line where
+# they were written that way - the formatter must not explode them.
+csharp_new_line_before_members_in_object_initializers = false
+csharp_new_line_before_members_in_anonymous_types = false
+
+[*.{json,yml,yaml,csproj,props,targets,slnx}]
+indent_style = space
+indent_size = 2

@@ -21,6 +21,10 @@ public sealed class MatchPollerService(
     /// minute or two to publish - then give up and fall back to the normal cadence.
     private static readonly TimeSpan FastCaptureWindow = TimeSpan.FromMinutes(6);
     private static readonly TimeSpan FastCaptureDelay = TimeSpan.FromSeconds(15);
+    /// While a game is live the banner is the product: re-read spectator every
+    /// 30s so the start time lands (it reads 0 for the first minutes), and the
+    /// end is noticed within half a minute rather than a whole poll interval.
+    private static readonly TimeSpan LiveGameDelay = TimeSpan.FromSeconds(30);
 
     private readonly RiotOptions _options = options.Value;
     // Per-account pass state: first pass and the retention sweep clock.
@@ -67,7 +71,10 @@ public sealed class MatchPollerService(
             }
 
             var anyFast = accounts.All.Any(a => liveStates.For(a).FastCapturePending);
-            var delay = anyFast ? FastCaptureDelay : TimeSpan.FromSeconds(Math.Max(30, _options.PollSeconds));
+            var anyLive = accounts.All.Any(a => liveStates.For(a).Current is not null);
+            var delay = anyFast ? FastCaptureDelay
+                : anyLive ? LiveGameDelay
+                : TimeSpan.FromSeconds(Math.Max(30, _options.PollSeconds));
             await Task.Delay(delay, ct);
         }
     }

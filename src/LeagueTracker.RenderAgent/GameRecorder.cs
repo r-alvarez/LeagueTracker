@@ -39,9 +39,15 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
     private readonly IReadOnlyList<TrackerClient> _trackers = trackers;
 
-    private DateTime _lastSweep;
+    // Delivery (tracker sidecars/VOD, YouTube publish, link, retention) runs
+    // on its own loop: the recorder hands a finished game over and is back
+    // to watching for the next one at once; uploads pace themselves around a
+    // running game instead of stopping for it.
+    private readonly SemaphoreSlim _deliverySignal = new(0);
+    private volatile bool _delivering;
 
-    private readonly YouTubeUploader _youtube = new(config);
+    private readonly YouTubeUploader _youtube = new(config, UploadThrottle.Shared ??= new(config, () => GameProcessRunning,
+        Path.Combine(config.RecordingsDir is { Length: > 0 } d ? d : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "LeagueTracker"), "metadata", "upload-rate.json")));
 
     private readonly HttpClient _liveClient = new(new HttpClientHandler
     {
@@ -150,10 +156,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                      : $"ddagrab + NVENC cq {config.RecordQuality})"));
         _youtube.ValidateAtStartup();
         AgentStatus.YouTubeReady = _youtube.Enabled;
-        _lastSweep = DateTime.UtcNow;
-        try { await SweepUnuploadedAsync(ct); }
-        catch (OperationCanceledException) { return; }
-        catch (Exception ex) { Log.Warn($"VOD upload sweep failed: {ex.Message}"); }
+        if (UploadThrottle.Shared?.IdleMbps is { } idle) Log.Info($"Upload line remembered at {idle:0.0} Mbps idle - in-game uploads pace to {(config.UploadInGameMbps > 0 ? config.UploadInGameMbps : Math.Max(3, idle * 0.5)):0.0} Mbps");
+        _ = Task.Run(() => DeliveryLoopAsync(ct), ct);
 
         while (!ct.IsCancellationRequested)
         {
@@ -183,11 +187,12 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                     finally
                     {
                         // Whatever the game left the status at ("recording",
-                        // "finalizing", "uploading"), the pass is over. Without
-                        // this a recorder that never publishes to YouTube sat
-                        // at "finalizing" for good - and self-update and the
-                        // restart command both wait for idle.
-                        AgentStatus.Set(RenderAgent.Paused ? "paused" : "idle");
+                        // "finalizing"), the pass is over - unless the delivery
+                        // loop is mid-upload, in which case the status is its.
+                        // Without this a recorder that never publishes to
+                        // YouTube sat at "finalizing" for good - and self-update
+                        // and the restart command both wait for idle.
+                        if (!_delivering) AgentStatus.Set(RenderAgent.Paused ? "paused" : "idle");
                     }
                     if (gaveUp)
                     {
@@ -199,14 +204,6 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                         while (!RenderAgent.StopRequested && await PhaseAsync(ct) is "InProgress") await Task.Delay(TimeSpan.FromSeconds(15), ct);
                     }
                     continue;
-                }
-                // Idle moments double as upload retry windows: a VOD recorded
-                // before its match was imported (the poller lags the game by
-                // minutes) gets delivered on one of these passes.
-                if (!NearGamePhases.Contains(phase) && DateTime.UtcNow - _lastSweep > TimeSpan.FromMinutes(10))
-                {
-                    _lastSweep = DateTime.UtcNow;
-                    await SweepUnuploadedAsync(ct);
                 }
                 await Task.Delay(TimeSpan.FromSeconds(NearGamePhases.Contains(phase) ? 3 : 15), ct);
             }
@@ -327,7 +324,9 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             var segBase = $"{state.BaseName}.seg{segNo:00}";
             var partPath = Path.Combine(PartsDir, $"{segBase}.part.mp4");
             var eventsPath = Path.Combine(MetaDir, $"{segBase}.events.csv.gz");
-            Log.Info($"Recording {state.BaseName} segment {segNo} ({state.MatchId ?? "id unknown"}): {g.Rect.Width}x{g.Rect.Height}");
+            var recordedSize = OutputSizeFor(g.Rect);
+            Log.Info($"Recording {state.BaseName} segment {segNo} ({state.MatchId ?? "id unknown"}): {g.Rect.Width}x{g.Rect.Height}"
+                + (recordedSize.Scaled ? $" -> {recordedSize.Width}x{recordedSize.Height} (RecordMaxHeight {config.RecordMaxHeight})" : ""));
             AgentStatus.Set("recording", state.BaseName);
 
             // Backend order: wgc tries Windows Graphics Capture and falls
@@ -378,8 +377,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 StartedUtc = result.StartedUtc,
                 WallSec = result.Duration.TotalSeconds,
                 VideoSec = result.VideoSec,
-                Width = g.Rect.Width & ~1,
-                Height = g.Rect.Height & ~1,
+                Width = result.RecordedSize?.Width ?? g.Rect.Width & ~1,
+                Height = result.RecordedSize?.Height ?? g.Rect.Height & ~1,
                 HasAudio = result.HasAudio,
                 Encoder = result.Encoder,
                 DisplayHdr = hdrDisplay,
@@ -419,14 +418,10 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             }
             var deliverable = livePlayerKnown && state.MatchId is not null && !RenderAgent.StopRequested
                 && QueueCategories.GetValueOrDefault(state.QueueId ?? -1, "other") is not "custom";
-            if (deliverable && (config.UploadVods || config.UploadVodSidecars))
-            {
-                await TryUploadVodAsync(state.MatchId!, state.BaseName, ct);
-            }
-            if (deliverable && _youtube.Enabled)
-            {
-                await TryPublishToYouTubeAsync(state.MatchId!, state.BaseName, ct);
-            }
+            // The delivery loop takes it from here (tracker sidecars/VOD,
+            // YouTube, link, retention) - this loop goes straight back to
+            // watching for the next game.
+            if (deliverable) _deliverySignal.Release();
         }
         else
         {
@@ -669,22 +664,29 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             // The title is the file name minus its separators - "Road to
             // Platinum 03 Aug 2026 Game 2", the exact style the channel's
             // hand-made uploads already use.
-            AgentStatus.Set("uploading", baseName);
+            if (AgentStatus.Current.State is not "recording") AgentStatus.Set("uploading", baseName);
             var result = await _youtube.UploadAsync(mp4, baseName.Replace(" - ", " "), $"Match {matchId}",
-                M(".ytsession.json"), holdOff: () => GameProcessRunning, ct);
-            AgentStatus.Set(RenderAgent.Paused ? "paused" : "idle");
+                M(".ytsession.json"), holdOff: () => RenderAgent.StopRequested, ct);
+            if (AgentStatus.Current.State is "uploading") AgentStatus.Set(RenderAgent.Paused ? "paused" : "idle");
             AgentStatus.YouTubeReady = _youtube.Enabled;
             switch (result.Outcome)
             {
                 case UploadOutcome.Uploaded:
                     File.WriteAllText(M(".youtube.txt"), result.Url);
                     Log.Info($"Published to YouTube: {baseName} -> {result.Url}");
+                    if (AgentStatus.LastError is { } cleared && cleared.StartsWith(QuotaNotice, StringComparison.Ordinal)) AgentStatus.LastError = null;
                     break;
                 case UploadOutcome.Paused:
-                    Log.Info($"YouTube upload paused ({result.Error}): {baseName} - resumes at the next idle sweep");
+                    Log.Info($"YouTube upload paused ({result.Error}): {baseName} - resumes on the next delivery pass");
                     return false;
                 case UploadOutcome.Postponed:
                     Log.Warn($"YouTube upload postponed ({result.Error}): {baseName}");
+                    // Quota is the one postponement the owner can act on (a
+                    // second Google project) - say so where they look.
+                    if (result.Error is { } why && why.Contains("quota", StringComparison.OrdinalIgnoreCase))
+                    {
+                        AgentStatus.LastError = $"{QuotaNotice}: {baseName} waits (YouTube resets the daily quota at midnight Pacific, 08:00 UK)";
+                    }
                     return false;
                 case UploadOutcome.Failed:
                     File.WriteAllText(M(".ytfailed.txt"), result.Error);
@@ -696,6 +698,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         await TryPostVodLinkAsync(matchId, baseName, ct);
         return true;
     }
+
+    private const string QuotaNotice = "YouTube upload quota reached";
 
     /// The link goes to whichever tracker owns the match, the same routing
     /// rule as the VOD itself; a .linked stamp stops re-posting. No taker
@@ -745,6 +749,72 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// Recordings with deliveries still owed (tracker down, match not yet
     /// imported, YouTube quota spent, agent killed): retried at startup and
     /// on idle passes, oldest first.
+    /// The delivery loop: a catch-up pass at start (yesterday's game the PC
+    /// went off during, a quota that has reset), then a pass whenever a game
+    /// finalizes and every ten minutes regardless (a tracker came back, the
+    /// poller imported the match). Uploads run during games, throttled.
+    private async Task DeliveryLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            if (RenderAgent.StopRequested) return;
+            try
+            {
+                _delivering = true;
+                await SweepUnuploadedAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+            catch (Exception ex) { Log.Warn($"Delivery pass failed: {ex.Message}"); }
+            finally
+            {
+                _delivering = false;
+                if (AgentStatus.Current.State is "uploading" or "finalizing") AgentStatus.Set(RenderAgent.Paused ? "paused" : "idle");
+            }
+            try { await _deliverySignal.WaitAsync(TimeSpan.FromMinutes(10), ct); }
+            catch (OperationCanceledException) { return; }
+        }
+    }
+
+    /// Once a game is safely elsewhere - on YouTube (uploaded, processed by
+    /// YouTube, linked on the tracker) or, without YouTube, fully on the
+    /// tracker - the local mp4 is redundant and goes; the small sidecars
+    /// stay. Off on machines that keep files for debugging.
+    private async Task PruneIfSafeAsync(string baseName, CancellationToken ct)
+    {
+        if (config.KeepRecordingsAfterPublish) return;
+        string M(string ext) => Path.Combine(MetaDir, baseName + ext);
+        var mp4 = Path.Combine(RecordingsDir, baseName + ".mp4");
+        if (!File.Exists(mp4) || File.Exists(M(".pruned"))) return;
+
+        bool safe;
+        if (_youtube.Enabled)
+        {
+            if (!File.Exists(M(".youtube.txt")) || !File.Exists(M(".linked"))) return;
+            var url = File.ReadAllText(M(".youtube.txt")).Trim();
+            if (YouTubeUploader.VideoIdOf(url) is not { } id) return;
+            safe = await _youtube.IsProcessedAsync(id, ct) is true;
+        }
+        else
+        {
+            safe = config.UploadVods && File.Exists(M(".uploaded"));
+        }
+        if (!safe) return;
+
+        var sizeMb = new FileInfo(mp4).Length / 1024 / 1024;
+        try
+        {
+            File.Delete(mp4);
+            TryDelete(Path.ChangeExtension(mp4, ".pcm"));
+            TryDelete(M(".ytsession.json"));
+            File.WriteAllText(M(".pruned"), DateTime.UtcNow.ToString("O"));
+            Log.Info($"Recording {baseName}.mp4 ({sizeMb} MB) removed - safely on {(_youtube.Enabled ? "YouTube" : "the tracker")}; sidecars kept");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Could not remove {baseName}.mp4: {ex.Message} (next pass retries)");
+        }
+    }
+
     private async Task SweepUnuploadedAsync(CancellationToken ct)
     {
         if (!config.UploadVods && !config.UploadVodSidecars && !_youtube.Enabled) return;
@@ -760,7 +830,11 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 || sidecar.EndsWith(".ytsession.json", StringComparison.OrdinalIgnoreCase)) continue;
             var baseName = Path.GetFileNameWithoutExtension(sidecar);
             var delivered = File.Exists(Path.Combine(MetaDir, baseName + ".uploaded"));
-            if (delivered && !_youtube.Enabled) continue; // nothing left owed for this game
+            if (delivered && !_youtube.Enabled)
+            {
+                await PruneIfSafeAsync(baseName, ct); // nothing left owed for this game but the file itself
+                continue;
+            }
             string? matchId;
             try
             {
@@ -813,10 +887,23 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 await TryUploadVodAsync(matchId, baseName, ct);
             }
             if (youtubeGo) youtubeGo = await TryPublishToYouTubeAsync(matchId, baseName, ct);
+            await PruneIfSafeAsync(baseName, ct);
         }
     }
 
     private sealed record GameWindowInfo(Process Process, (int X, int Y, int Width, int Height) Rect);
+
+    /// The recorded picture size for a window: capped at RecordMaxHeight with
+    /// the aspect kept, even dimensions (encoders insist). Only the WGC engine
+    /// scales; the ddagrab path records native regardless and says so once.
+    private (int Width, int Height, bool Scaled) OutputSizeFor((int X, int Y, int Width, int Height) rect)
+    {
+        var width = rect.Width & ~1;
+        var height = rect.Height & ~1;
+        if (config.RecordMaxHeight <= 0 || height <= config.RecordMaxHeight) return (width, height, false);
+        var scale = (double)config.RecordMaxHeight / height;
+        return ((int)Math.Round(width * scale) & ~1, config.RecordMaxHeight & ~1, true);
+    }
 
     /// Riot queue ids -> the config categories of RecordQueues. Kept to the
     /// queues Riot actually runs; retired ids are harmless to keep.
@@ -861,7 +948,12 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     private sealed record CaptureResult(
         bool FfmpegFailedEarly, string StderrTail, DateTime StartedUtc, TimeSpan Duration,
         double VideoSec, long Frames, bool HasAudio, string Encoder,
-        List<(double VideoSec, double GameSec)> ClockMap, string? ActivePlayer);
+        List<(double VideoSec, double GameSec)> ClockMap, string? ActivePlayer)
+    {
+        /// The picture size actually written - the WGC engine may have scaled
+        /// to RecordMaxHeight, ddagrab always records the window as is.
+        public (int Width, int Height)? RecordedSize { get; init; }
+    }
 
     /// The client starts the game on its own schedule; the window exists from
     /// the loading screen on. When a replay render happens to overlap a live
@@ -1119,7 +1211,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var rect = (Math.Max(0, g.Rect.X), Math.Max(0, g.Rect.Y), g.Rect.Width & ~1, g.Rect.Height & ~1);
         WgcRecorder.ConfigureHdrToneMap(config.HdrToneMap);
         var startedUtc = DateTime.UtcNow;
-        using var recorder = WgcRecorder.TryStart(partPath, rect, fps, quality);
+        var output = OutputSizeFor(g.Rect);
+        using var recorder = WgcRecorder.TryStart(partPath, rect, fps, quality, output.Scaled ? (output.Width, output.Height) : null);
         if (recorder is null)
         {
             return new CaptureResult(true, "WGC recorder would not construct", startedUtc, TimeSpan.Zero, 0, 0, false, "h264_mf_wgc", [], null);
@@ -1203,7 +1296,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         // until then. Frames aren't observable here (-1): the junk check
         // falls back to duration + file size.
         return new CaptureResult(failedEarly, error ?? "", startedUtc, duration,
-            duration.TotalSeconds, -1, audio is not null, "h264_mf_wgc", clockMap, activePlayer);
+            duration.TotalSeconds, -1, audio is not null, "h264_mf_wgc", clockMap, activePlayer) { RecordedSize = (output.Width, output.Height) };
     }
 
     /// Turns a finished game's segments into the one file that game IS:
@@ -1851,6 +1944,9 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             + double.Parse(m.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
     }
 
+    /// Finalize/remux/thumbnail runs (never the live capture, which starts its
+    /// ffmpeg itself): below-normal priority, so a multi-GB remux right after
+    /// a game yields to the player queueing into the next one.
     private async Task RunFfmpegAsync(string args, CancellationToken ct)
     {
         using var proc = Process.Start(new ProcessStartInfo(ffmpeg, args)
@@ -1859,6 +1955,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             RedirectStandardError = true,
             CreateNoWindow = true,
         }) ?? throw new InvalidOperationException("could not start ffmpeg");
+        try { proc.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { /* already gone or not permitted - fine */ }
         var stderr = await proc.StandardError.ReadToEndAsync(ct);
         await proc.WaitForExitAsync(ct);
         if (proc.ExitCode != 0) throw new InvalidOperationException($"ffmpeg exited {proc.ExitCode}: {Tail(stderr)}");

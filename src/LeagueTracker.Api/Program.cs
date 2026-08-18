@@ -107,7 +107,7 @@ builder.Services.AddRateLimiter(o =>
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
     o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    o.KnownNetworks.Clear();
+    o.KnownIPNetworks.Clear();
     o.KnownProxies.Clear();
 });
 
@@ -330,7 +330,20 @@ app.MapGet("/api/agent/accounts", (AccountRegistry registry, Caller caller, Agen
 // no path prefix of the agent slice ever names a human route again.
 app.MapManagementEndpoints();
 
-app.MapGet("/api/agent/profile", (AgentRegistry agents) => Results.Ok(agents.Profile)).RequireAuthorization(Policies.Agent);
+// The key that authenticated names the agent, which selects the per-agent
+// overrides (Agent__Profiles__<name>__...).
+app.MapGet("/api/agent/profile", (Caller caller, AgentRegistry agents) => Results.Ok(agents.ProfileFor(caller.Agent!.Name))).RequireAuthorization(Policies.Agent);
+
+// The agent's side of "sendlog": the tail of agent.log, filed under the key
+// that authenticated - only an approved agent writes here, only as itself.
+app.MapPost("/api/agent/log", async (HttpContext http, Caller caller, AgentRegistry agents, CancellationToken ct) =>
+{
+    using var reader = new StreamReader(http.Request.Body, System.Text.Encoding.UTF8);
+    var text = await reader.ReadToEndAsync(ct);
+    if (text.Length > 2_000_000) text = text[^2_000_000..];
+    var file = agents.StoreLog(caller.Agent!.Id, text);
+    return Results.Ok(new { file });
+}).RequireAuthorization(Policies.Agent);
 
 // The heartbeat's identity is the key that authenticated it; the name in
 // the body is display text at most.
@@ -449,7 +462,7 @@ read?.MapGet("/live", (AccountContext acct, LiveGameState live) =>
         ? Results.Ok(new
         {
             g.MatchId, g.QueueId, Queue = RankMath.QueueName(g.QueueId),
-            g.StartedUtc, g.DetectedUtc, g.MyChampionId, g.MyTeamId,
+            g.StartedUtc, g.ClockStartUtc, g.DetectedUtc, g.MyChampionId, g.MyTeamId,
             AvgAllyRank = !acct.Current.HideLp && g.AvgAllyRankValue is { } ally ? RankMath.ToLabel(ally) : null,
             AvgEnemyRank = !acct.Current.HideLp && g.AvgEnemyRankValue is { } enemy ? RankMath.ToLabel(enemy) : null,
             RankGapLp = !acct.Current.HideLp && g is { AvgAllyRankValue: { } a, AvgEnemyRankValue: { } e } ? (int?)Math.Round(e - a) : null,
