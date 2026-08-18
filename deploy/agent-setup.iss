@@ -47,6 +47,7 @@ Source: "{#SourceDir}\LeagueTracker.ReplayLauncher.exe"; DestDir: "{app}"; Flags
 Source: "{#SourceDir}\ScreenRecorderLib.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ffmpeg.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceDir}\appsettings.template.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 ; Marks "installed by Setup": the agent's own --install then leaves the
 ; Start Menu / Apps entries to Inno instead of making a second pair.
 Source: "{#SourceDir}\appsettings.template.json"; DestDir: "{app}"; DestName: "setup.installed"; Flags: ignoreversion

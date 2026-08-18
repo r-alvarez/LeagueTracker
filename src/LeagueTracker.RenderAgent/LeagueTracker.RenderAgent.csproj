@@ -27,6 +27,9 @@
 
   <ItemGroup>
     <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Ships next to the exe: the zip bundles GPL ffmpeg and a modified MIT
+         library, and their notices travel with them. -->
+    <None Update="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
     <!-- The site's favicon, rasterized: exe icon and the tray icon's base. -->
     <EmbeddedResource Include="Assets\logo.png" LogicalName="logo.png" />
   </ItemGroup>

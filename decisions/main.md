@@ -1534,3 +1534,40 @@ pins a heartbeat error naming that exact situation instead of the old
 review player, clips and YouTube path are SDR. Unverified until Ben's next
 game: the tone-mapped output itself (no HDR display within reach); the
 failure modes all degrade to today's behaviour, not to a lost recording.
+
+## 2026-08-18 — Release pipeline: gated on ci, one build of the engine, notices in the box
+
+**The agent release now follows a green `ci` instead of racing it.** Until
+today `agent-release.yml` fired on push to main in parallel with `ci.yml`, so
+a commit that failed the API tests or the agent build still shipped an agent.
+It is now `workflow_run` on `ci` completing successfully for main; a `gate`
+job checks out the commit ci tested and releases only if the agent paths
+(agent, launcher, publish script, installer script, ScreenRecorderLib patch,
+the workflow itself) changed since the newest `agent-*` tag - a diff against
+the last release, not the push event's path filter, so multi-commit pushes
+and manual re-runs decide the same way. `workflow_dispatch` re-releases the
+latest green main.
+
+**ScreenRecorderLib is built once, in ci, on windows-2022.** A
+`screenrecorderlib` job builds the patched DLL (cache keyed on the folder's
+hash), uploads it as an artifact, and the release downloads that artifact for
+the same commit - the windows-2022 pin is confined to the one job that needs
+it, the release runs on windows-latest, and a patch that stops applying fails
+the push that broke it. `publish-agent.ps1 -RequirePatchedRecorder` throws
+rather than warns when the DLL is absent, and the release step refuses a zip
+whose ScreenRecorderLib.dll is not byte-identical to ci's build; its hash is
+in the release notes.
+
+**`THIRD-PARTY-NOTICES.md` ships in the zip and installer.** GPL ffmpeg with
+a source location and offer, ScreenRecorderLib MIT with the modification
+notice and patch location, .NET runtime, Inno Setup - the distribution
+homework from the commercial-track entry, done while it was cheap.
+`SECURITY.md` points at private vulnerability reporting (the repo setting
+itself needs an admin toggle - the API token here can't).
+
+**Deliberately not done, awaiting Ruben's call:** a ruleset on main (required
+ci checks, no force-push, admin bypass); Portainer deploying the attested
+GHCR image by digest instead of rebuilding from source on the NAS; `dotnet
+format --verify-no-changes` + warnings-as-errors as a ci gate; a repository
+LICENSE (the code is currently unlicensed = all rights reserved, which is
+what a commercial track wants until decided otherwise).

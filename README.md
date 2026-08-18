@@ -91,19 +91,26 @@ source tree).
 ## CI / CD
 
 - **`ci.yml`** - every push and PR: API build + xUnit tests (`tests/`), web
-  lint + build, agent build on Windows. On main it also publishes the API
-  image to `ghcr.io/r-alvarez/leaguetracker` (`sha-<commit>`, `main`,
-  `latest`) with a build-provenance attestation and a Trivy scan into the
-  Security tab. Nothing in it deploys.
+  lint + build, agent build on Windows, and the agent's ScreenRecorderLib
+  (upstream + HDR tone-map patch, `deploy/screenrecorderlib`) built on
+  windows-2022, cached on its inputs' hash and uploaded as an artifact. On
+  main it also publishes the API image to `ghcr.io/r-alvarez/leaguetracker`
+  (`sha-<commit>`, `main`, `latest`) with a build-provenance attestation and
+  a Trivy scan into the Security tab. Nothing in it deploys.
 - **Deploy** is GitOps: Portainer polls the repo and rebuilds `main` from
   `deploy/truenas/compose.yml`; the GHCR image is the rollback path (see the
   comment on the `leaguetracker` service).
-- **`agent-release.yml`** - agent code on main -> GitHub Release
-  `agent-<version>` (zip + Setup.exe + SHA256SUMS + attestation), which the
-  trackers mirror and every agent self-updates from. Inputs are pinned:
-  actions by commit, ffmpeg by version + SHA256, Inno Setup by version.
+- **`agent-release.yml`** - runs when `ci` is green on main, builds the exact
+  commit ci tested, and releases only if agent files changed since the last
+  `agent-*` tag: GitHub Release `agent-<version>` (zip + Setup.exe +
+  SHA256SUMS + attestation), which the trackers mirror and every agent
+  self-updates from. The zip must carry the ScreenRecorderLib.dll ci built for
+  that commit (hash-checked) and `THIRD-PARTY-NOTICES.md`. Inputs are pinned:
+  actions by commit, ffmpeg by version + SHA256, Inno Setup by version,
+  ScreenRecorderLib by upstream commit. `workflow_dispatch` re-releases the
+  latest green main.
 - **`codeql.yml`** weekly + on main; **Dependabot** bumps actions, NuGet, npm
-  and base images weekly in grouped PRs.
+  and base images weekly in grouped PRs. `SECURITY.md` says how to report.
 
 ## Storage model
 
