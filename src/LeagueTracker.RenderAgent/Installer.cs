@@ -39,24 +39,35 @@ public static class Installer
     /// running agent, touches nothing else.
     public static int Setup(AgentConfig config)
     {
-        Application.EnableVisualStyles();
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        using var setup = new SetupForm(config);
-        if (setup.ShowDialog() != DialogResult.OK) return 1;
+        if (!ShowSetup(config)) return 1;
         if (OtherInstance(ExePath) is not null) AgentSupervisor.RestartRunningAgent();
         return 0;
+    }
+
+    /// The setup window on its own STA thread: Program.cs is an async Main
+    /// (MTA), and the shell dialogs the form opens (Browse… is a
+    /// FolderBrowserDialog) refuse to run outside a single-threaded apartment.
+    private static bool ShowSetup(AgentConfig config)
+    {
+        var ok = false;
+        var ui = new Thread(() =>
+        {
+            Application.EnableVisualStyles();
+            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+            using var setup = new SetupForm(config);
+            ok = setup.ShowDialog() == DialogResult.OK;
+        }) { Name = "setup", IsBackground = false };
+        ui.SetApartmentState(ApartmentState.STA);
+        ui.Start();
+        ui.Join();
+        return ok;
     }
 
     public static int Install(AgentConfig config)
     {
         // The setup window first: --install is what a friend double-clicks,
         // and it must be able to start from a bare zip.
-        Application.EnableVisualStyles();
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        using (var setup = new SetupForm(config))
-        {
-            if (setup.ShowDialog() != DialogResult.OK) return 1;
-        }
+        if (!ShowSetup(config)) return 1;
         config = AgentConfig.Load();
 
         var problems = new List<string>();

@@ -845,7 +845,10 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             if (f.Name.EndsWith(".part.mp4", StringComparison.OrdinalIgnoreCase) || f.LastWriteTimeUtc > settled) continue;
             var baseName = Path.GetFileNameWithoutExtension(f.Name);
             string M(string ext) => Path.Combine(MetaDir, baseName + ext);
-            if (File.Exists(M(".json")) || File.Exists(M(".orphan"))) continue;
+            if (File.Exists(M(".json"))) continue;
+            // An .orphan verdict is a day's rest, not forever: the tracker may
+            // import the game later, or a newer build may read the file better.
+            if (File.Exists(M(".orphan")) && File.GetLastWriteTimeUtc(M(".orphan")) > DateTime.UtcNow.AddHours(-24)) continue;
             // The telemetry file is opened at segment start and written all
             // game long: the truest window. The mp4 itself only if the segment
             // was renamed into place (a remux is a new file, created at the end).
@@ -857,10 +860,21 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             }
             if (end - start < TimeSpan.FromMinutes(3) || end - start > TimeSpan.FromHours(3))
             {
-                // Copied/moved files carry no usable window; nothing to match on.
-                File.WriteAllText(M(".orphan"), $"no usable time window ({start:O}..{end:O})");
-                Log.Warn($"Recording {f.Name} has no sidecar and no usable time window - left alone (delete it by hand if it is not wanted)");
-                continue;
+                // A file moved to another drive (or copied) was "created" at
+                // the move and keeps only its last write - the end of the game.
+                // The video's own length gives the start back.
+                double? sec = null;
+                try { sec = ParseDurationSec(await ProbeAsync(f.FullName, ct)); } catch { /* unreadable - handled below */ }
+                if (sec is > 120 and < 3 * 3600)
+                {
+                    start = end.AddSeconds(-sec.Value);
+                }
+                else
+                {
+                    File.WriteAllText(M(".orphan"), $"no usable time window ({start:O}..{end:O}, duration {sec?.ToString("0") ?? "?"}s)");
+                    Log.Warn($"Recording {f.Name} has no sidecar and no usable time window - left alone (delete it by hand if it is not wanted)");
+                    continue;
+                }
             }
             TrackerClient.MatchAt? found = null;
             TrackerClient? owner = null;
