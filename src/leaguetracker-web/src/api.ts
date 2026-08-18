@@ -77,6 +77,7 @@ export const api = {
   },
   dismissAgentError: async (id: string) => { await apiFetch(`/api/me/agents/${id}/dismiss-error`, { method: 'POST' }) },
   restartAgent: async (id: string) => { await apiFetch(`/api/me/agents/${id}/restart`, { method: 'POST' }) },
+  requestAgentLog: async (id: string) => { await apiFetch(`/api/me/agents/${id}/sendlog`, { method: 'POST' }) },
   // Claiming a Riot account (profile-icon proof)
   myClaims: () => get<ClaimInfo[]>('/api/me/claims'),
   startClaim: async (accountId: string): Promise<ClaimInfo> => {
@@ -92,7 +93,7 @@ export const api = {
     return body
   },
   // Admin
-  adminAgents: () => get<{ keys: AgentKey[]; live: unknown[] }>('/api/admin/agents'),
+  adminAgents: () => get<{ latestVersion: string | null; keys: AgentKey[] }>('/api/admin/agents'),
   adminUsers: () => get<AdminUser[]>('/api/admin/users'),
   adminSetUserAdmin: async (id: string, admin: boolean) => {
     const r = await apiFetch(`/api/admin/users/${id}/admin?admin=${admin}`, { method: 'POST' })

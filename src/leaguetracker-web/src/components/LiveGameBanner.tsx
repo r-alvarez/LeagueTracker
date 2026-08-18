@@ -4,7 +4,16 @@ import type { LiveGame } from '../types'
 import { useChampionIcons, useChampionNames } from '../champions'
 import { RankChip } from './Stats'
 
-const POLL_MS = 30_000
+// The server re-reads spectator every 30s while a game is live; polling at
+// half that keeps the banner within ~15s of what the server knows.
+const POLL_MS = 15_000
+
+// The in-game clock: seconds since the server-calibrated zero, or null while
+// spectator has not published a start time yet (loading screen, first moments).
+const gameClockSec = (game: LiveGame, nowMs: number): number | null =>
+  game.clockStartUtc ? Math.max(0, Math.floor((nowMs - new Date(game.clockStartUtc).getTime()) / 1000)) : null
+
+const formatClock = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
 
 function ChampStrip({ ids, highlight }: { ids: number[]; highlight?: number }) {
   const icons = useChampionIcons()
@@ -36,15 +45,20 @@ export default function LiveGameBanner() {
     const poll = () => api.live().then(setGame).catch(() => setGame(null))
     poll()
     const id = setInterval(poll, POLL_MS)
-    // Extra ticker so the elapsed minutes advance between polls.
-    const tick = setInterval(() => setTick(t => t + 1), 60_000)
-    return () => { clearInterval(id); clearInterval(tick) }
+    return () => clearInterval(id)
   }, [])
+
+  // A live clock, not a stale minute count: re-render every second while in game.
+  const inGame = game !== null
+  useEffect(() => {
+    if (!inGame) return
+    const tick = setInterval(() => setTick(t => t + 1), 1000)
+    return () => clearInterval(tick)
+  }, [inGame])
 
   if (!game) return null
 
-  const since = game.startedUtc ?? game.detectedUtc
-  const elapsedMin = Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 60_000))
+  const clockSec = gameClockSec(game, Date.now())
   const myChampion = names(game.myChampionId)
   const allies = game.participants.filter(p => p.teamId === game.myTeamId).map(p => p.championId)
   const enemies = game.participants.filter(p => p.teamId !== game.myTeamId).map(p => p.championId)
@@ -67,7 +81,10 @@ export default function LiveGameBanner() {
       </span>
       <span className="mut">
         {game.queue}{myChampion ? ` · ${myChampion}` : ''}
-        {game.startedUtc ? ` · ${elapsedMin} min` : ' · loading / early game'}
+        {' · '}
+        {clockSec === null
+          ? 'loading / early game'
+          : <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatClock(clockSec)}</span>}
       </span>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
         <ChampStrip ids={allies} highlight={game.myChampionId} />

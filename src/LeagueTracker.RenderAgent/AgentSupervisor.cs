@@ -84,10 +84,22 @@ public sealed class AgentSupervisor(AgentConfig config, IReadOnlyList<TrackerCli
     /// receives the same still-pending command on its first heartbeat) does
     /// not act on it again. Only "restart" today - it re-reads the profile
     /// and self-updates on the way back up.
-    private void HandleCommand(string command, string token)
+    private async Task HandleCommandAsync(TrackerClient tracker, string command, string token, CancellationToken ct)
     {
         try { if (File.Exists(HandledCommandPath) && File.ReadAllText(HandledCommandPath).Trim() == token) return; }
         catch { /* unreadable - treat as unhandled */ }
+
+        if (command is "sendlog")
+        {
+            // Diagnostics for the owner: the last half-megabyte of the log,
+            // right now, whatever the agent is doing - it is read-only and
+            // small, so no idle gate. Marked handled first so a failed upload
+            // is not retried every minute against a tracker that just asked.
+            try { File.WriteAllText(HandledCommandPath, token); } catch { /* best-effort */ }
+            var sent = await tracker.UploadLogAsync(Log.Tail(512 * 1024), ct);
+            Log.Info(sent ? $"Log sent to {tracker.Name} at the owner's request" : $"Log requested by {tracker.Name} but the upload failed");
+            return;
+        }
 
         if (command is not "restart") return;
         // Only when nothing is in flight - the same gate as a self-update.
@@ -149,7 +161,7 @@ public sealed class AgentSupervisor(AgentConfig config, IReadOnlyList<TrackerCli
         {
             if (await tracker.HeartbeatAsync(beat, ct) is not { } reply) continue;
             latest ??= reply.Latest;
-            if (reply.Command is { Length: > 0 } && reply.CommandToken is { Length: > 0 }) HandleCommand(reply.Command, reply.CommandToken);
+            if (reply.Command is { Length: > 0 } && reply.CommandToken is { Length: > 0 }) await HandleCommandAsync(tracker, reply.Command, reply.CommandToken, ct);
         }
         return latest;
     }

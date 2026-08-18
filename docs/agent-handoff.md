@@ -47,18 +47,22 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
    tracker then serves them from `GET /api/agent/profile`; agents pull them at
    start and hourly. Rotate the token here, never on a friend's machine.
    - Quota: 10,000 units/day **per Google Cloud project** = ~6 uploads/day
-     across everyone sharing that project. If three players fill it, either
-     request a quota increase or give each tracker its own OAuth client
-     (own project → own quota) via per-service `Agent__Profile__YouTube*`
-     overrides - all still authorized against the same channel.
+     across everyone sharing that project (`videos.insert` costs 1,600). Two
+     ways out, in order: give a busy player's agent its own project via
+     per-agent overrides - `Agent__Profiles__<agent name>__YouTubeClientId /
+     ClientSecret / RefreshToken` on the tracker, blank = shared values; the
+     refresh token is minted for the *same channel* with the new client
+     (`--youtube-auth` with `LT_YOUTUBE_CLIENT_ID/SECRET` set) - and, for a
+     product, Google's YouTube API quota-extension audit.
 2. **Release folder.** `mkdir /mnt/MediaPool/apps/leaguetracker/agent-releases`
    (`/data/agent-releases` in the container; the tracker also mirrors GitHub releases into it).
 3. **Publish the agent** from the dev machine:
    `deploy\publish-agent.ps1 -ReleaseDir <NAS>\apps\leaguetracker\agent-releases`
    - version = `yyyy.M.d.HHmm`, zip bundles ffmpeg; agents update themselves
      when idle (no game, no upload) within the hour or on the next heartbeat.
-4. **Waker:** `PC_MAC` / `WOL_BROADCAST` in the compose now belong to the
-   render box, not the gaming PC - update when the renderer moves.
+4. **Waker:** `PC_MAC` / `WOL_BROADCAST` / `UNIFI_URL` are Portainer stack
+   env vars (with `UNIFI_USER`/`UNIFI_PASS`), never in the compose - they
+   describe the render box's network; update them when the renderer moves.
 5. **Cloudflare Access.** Zero Trust → Access → Applications → Add →
    Self-hosted: domain `league.rjav-tech.co.uk`, **path `api`**, one policy
    with action **Bypass**, include Everyone (replaces the older `api/agent`
@@ -79,6 +83,7 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
    `Accounts__List__N__Owner`). Users are created from those emails at boot
    and join on first login, so ownership is in place before anyone signs in.
    Friends are created or invited from the Auth0 dashboard.
+
 
 ## B. Per new player (owner) - "the upgrade to multi-account"
 
@@ -149,6 +154,16 @@ nobody uses it. `--install` as above. Renders run whenever no game process
 is up on that box; the gaming PCs are never used for rendering again.
 
 ## Operational notes
+
+- **Uploads run during games, paced.** Delivery is its own loop in the
+  agent; a running game caps the upload at half the line's measured idle
+  upstream (`UploadInGameMbps` to pin it). Game 1 should be on YouTube by
+  the end of game 2; if a player says otherwise, ask for their **Log** from
+  the Agent access row (the "sendlog" command ships it within a minute).
+- **Recordings are deleted once safe** (YouTube processed + linked), per
+  the tracker profile: shared `KeepRecordingsAfterPublish=false`, `RUBEN`
+  overridden to `true`. A new agent that should keep files gets its own
+  `Agent__Profiles__<name>__KeepRecordingsAfterPublish: "true"` line.
 
 - **Pause** stops new recordings/renders/reviews; an upload in flight
   finishes (it's invisible and stopping it only loses work).

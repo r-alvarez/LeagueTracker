@@ -1076,7 +1076,7 @@ idle-sleep timer. Until then the waker idles harmlessly alongside an always-on
 PC.
 
 **First live sleep test failed - the broadcast never left the NAS's subnet.**
-The PC lives on 10.10.10.x, the NAS on 10.10.40.x; a directed broadcast to
+The PC and the NAS live on different subnets; a directed broadcast to
 another subnet is dropped by the UniFi gateway like by everything else. The
 primary wake path is now the UniFi controller itself: the waker logs into the
 console (`/api/auth/login`, then `cmd/stamgr` `wake-device`) and the gateway
@@ -1571,3 +1571,142 @@ GHCR image by digest instead of rebuilding from source on the NAS; `dotnet
 format --verify-no-changes` + warnings-as-errors as a ci gate; a repository
 LICENSE (the code is currently unlicensed = all rights reserved, which is
 what a commercial track wants until decided otherwise).
+
+## 2026-08-18 — The network leaves the compose file
+
+**`PC_MAC`, `WOL_BROADCAST` and `UNIFI_URL` are Portainer stack env vars.**
+Ruben's realisation on seeing the repo through a stranger's eyes: the public
+compose carried the render PC's MAC, both LAN subnets and the UniFi console
+address. None of it is a credential, but together it is a map of the house
+network, and the UniFi login already lived in the stack environment - the
+mechanism was there, the values just hadn't followed. The waker now refuses to
+start with a clear message when `PC_MAC` is unset instead of crashing on a
+KeyError; the tracker is untouched either way. Deployment order: values into
+the stack environment first, then merge, so the waker never restarts without
+them. History still holds the old values (0 forks, 0 watchers since July, so
+"possibly seen"), which is why this is a mitigation and the repo's visibility
+remains the open decision - not rushed, Ruben is away from his equipment.
+
+## 2026-08-18 — Warnings are errors; the format gate waits for the auth branch
+
+**`Directory.Build.props`: `TreatWarningsAsErrors` for every project.** The
+API had exactly two warnings, both real: `ExecuteSqlRaw` with an interpolated
+string in the schema upgrader (now the same `DbCommand` path as the PRAGMA
+beside it - the identifiers come from the file's own Upgrades table, DDL can't
+be parameterised anyway) and the obsolete `ForwardedHeadersOptions.
+KnownNetworks` (now `KnownIPNetworks`). Agent, launcher and tests were already
+clean. From here a warning fails ci, which is what turns Dependabot's weekly
+bumps into a signal instead of noise.
+
+**`.editorconfig` encodes the house style; the `dotnet format` gate does not
+land yet.** Measured with `dotnet format --verify-no-changes`: the real
+findings are 3 files, +19/-5 lines - but the formatter also wants to
+re-indent the 846-line body of `MapAccountApi` in Program.cs, which sits at
+column 0. Correct, whitespace-only, and squarely on top of what
+`auth/identity-model` rewrites; landing it now would turn that merge into
+whitespace conflicts on every hunk. Without the .editorconfig the formatter
+also wanted to explode every compact anonymous initializer (1,700 lines of
+churn) - `csharp_new_line_before_members_in_*` are off for that reason. Plan:
+after the auth branch merges, one commit = `dotnet format LeagueTracker.slnx`
++ a `dotnet format --verify-no-changes` step in ci's api job. Two-minute job,
+recorded here so it isn't forgotten.
+
+## 2026-08-18 — Live banner runs a real clock; Swiftplay is a filter; ARAM's zero is real
+
+Branch `worktree-live-banner-queue-filters`, from four claims about the live
+banner and the match filters. Each was checked against Ben's real data before
+anything changed, on a scratch instance (own data dir, the app reading the key
+file itself, port 5398).
+
+**"ARAM games aren't reported" - refuted, no code change.** Riot's match list
+for TheCosmicPeach#TTV is 559 games back to 2026-05-06: 467 Solo/Duo, 75
+Swiftplay, 17 Normal Draft, zero ARAM (a full all-queue backfill). Ingest is
+queue-agnostic: the poller lists ids without a `type` filter, `BuildMatchAsync`
+copes with an ARAM-shaped payload (probe: a real raw game rewritten to queue
+450 / map 12 / no positions builds without throwing), and the filter maps
+`aram` to 450/720. There is nothing to show; the day he plays one it appears.
+Featured modes are the same story - they were labelled "Queue N", now they
+carry names (One for All, Nexus Blitz, Ultimate Spellbook, Swarm, Brawl, ARAM
+Mayhem) and show under All. Recording is the agent's `RecordQueues`
+allow-list, untouched - "report, don't record" was already the split.
+
+**"No Swiftplay filter" - correct.** `RankMath.QueueFamily` accepted
+`swiftplay` since 6d8e698 but Matches.tsx never grew the button. Added; and
+the families are now disjoint - Swiftplay left `normal`. Alternative kept in
+mind: nested families (Normal ⊃ Swiftplay, the way the client's queue picker
+nests them). Rejected: two buttons counting the same 75 games under different
+names is what "draft/normal games aren't reported correctly" most plausibly
+was - Normal returned draft + Swiftplay mixed, with no way to see the 17
+draft games alone. A test pins the families disjoint. Trade-off: the URL
+`queue=normal` now returns fewer rows than before for anyone who bookmarked
+it; nobody has.
+
+**"The banner should show the game as it happens" - the minute count did
+advance (a 60s ticker), but everything around it was coarse.** The server
+re-read spectator only on the poller's cadence (120s in prod), so the banner
+appeared, resolved "loading / early game", and disappeared up to two minutes
+late; the client polled every 30s on top. Now: the poller passes every 30s
+while any account is live (`LiveGameDelay`; 15s during fast-capture still
+wins), the client polls every 15s, and the banner renders a mm:ss clock that
+re-renders every second. Cost: 2 Riot calls per 30s per account while
+someone is in game - trivial against 100/2min.
+
+**Clock anchor, measured rather than assumed.** spectator-v5 `gameStartTime`
+against match-v5 `gameStartTimestamp` (the in-game clock's zero: `gameDuration`
+= max timePlayed = end − start to the second) for the same games:
+EUW1_7954191662, EUW1_7954214074, EUW1_7954231883 - the spectator start is
+30.1s *earlier* every time, to the tenth of a second. So `ClockStartUtc =
+StartedUtc + 30s` on the snapshot; the banner counts from there. `gameLength`
+was rejected as a source: negative (−96) a minute into a game, ~150s behind
+`now − gameStartTime` later on, and Riot's own docs say spectator time is
+"not accurate and inconsistent". A snapshot test pins the +30s so a future
+"why not just use gameStartTime" has to argue with the numbers. Riot's docs
+say `gameStartTime` is 0 for the first minutes; on the games measured it was
+already set within a minute of the start - the "loading / early game" label
+stays for when it isn't.
+
+## 2026-08-18 — The agent as a good citizen: delivery loop, paced uploads, retention, diagnostics
+
+**Ben's report and Ruben's expectation defined the target.** "The game is slow
+while it uploads" against "game 1 on YouTube by the time game 2 ends, without
+Ben doing anything". The recorder did the opposite of that on purpose:
+uploads paused whenever a game process existed (protecting the game, never
+finishing between back-to-back games), and delivery ran inline on the
+recording loop, so the recorder was not even watching for the next game while
+a multi-GB upload ran - a bug nobody had hit because nobody queued that fast.
+Ascent's "right away" is mostly small files (1080p30 @ 5 Mbps).
+
+**Delivery is its own loop.** Catch-up pass at start, a pass when a game
+finalizes, one every ten minutes regardless. The recorder hands off and is
+back to watching immediately. `UploadThrottle` paces every upload body
+(YouTube resumable chunks, tracker chunks) in 64 KB slices: while a game runs,
+`UploadInGameMbps` or by default half the line's idle upstream as measured
+from our own unthrottled uploads (EWMA, persisted, floor 3 Mbps); otherwise
+full speed. A game starting mid-chunk is honoured within a slice. Finalize's
+ffmpeg runs below-normal. `RecordMaxHeight` exists (WGC scales on the GPU)
+but defaults to native - Ruben: people buy big screens to see them; it is a
+per-agent knob for a struggling machine, not a policy.
+
+**Retention, decided from the tracker.** Once YouTube reports the video
+processed and the link is on the tracker (or, without YouTube, the tracker
+holds the video), the local mp4 goes and the sidecars stay. The keep/delete
+choice comes from the tracker profile - shared `false`, `RUBEN` `true` -
+because agents self-update on machines nobody is sitting at, and a default
+that deletes must never be the first thing a new build does on Ruben's own PC
+before he has been home to set a local override. Old already-published games
+are pruned on the first pass too; that is the point.
+
+**Diagnostics.** The heartbeat command channel carries `sendlog`: the agent
+ships its log tail at once, the tracker keeps the newest five per agent, the
+Agent access row offers Log + a link. Ben's vanished game 3 (17 Aug) is why:
+the only witness was a file on his PC. A quota postponement is pinned on the
+heartbeat as an actionable message. Per-agent YouTube credentials (own
+Google project, same channel) went to main early as a cherry-pick so
+tonight's uploads split the quota; `deploy/youtube-auth.ps1` mints a token
+without the secret leaving the owner's console (learned live: force
+`select_account` or Google binds the token to the account's default channel,
+and wait for the windowed exe).
+
+**Not verified on real hardware yet.** The pacing, the loop and retention
+compile and reason correctly; Ben's machine is the first real test when the
+branch ships, with the Log button as the safety net.

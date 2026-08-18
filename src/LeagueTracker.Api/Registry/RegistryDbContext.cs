@@ -97,7 +97,12 @@ public sealed class RegistryDatabase
                 var present = false;
                 while (reader.Read()) present |= string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase);
                 if (present) continue;
-                db.Database.ExecuteSqlRaw($"ALTER TABLE {table} ADD COLUMN {column} {definition}");
+                // Same raw command path as the PRAGMA: identifiers come from the
+                // Upgrades table above, never from input, and DDL cannot be
+                // parameterised anyway.
+                using var alter = connection.CreateCommand();
+                alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
+                alter.ExecuteNonQuery();
                 log.LogInformation("registry.db: added column {Table}.{Column}", table, column);
             }
         }

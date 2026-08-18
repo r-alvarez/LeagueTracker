@@ -137,13 +137,16 @@ function Row({ m, reviews }: { m: MatchSummary; reviews: ReviewVerdicts }) {
   )
 }
 
-// "Ranked" = solo+flex (the old default); the rest are queue families.
+// "Ranked" = solo+flex (the old default); the rest are the API's queue
+// families (RankMath.QueueFamily), which are disjoint - every button is one
+// kind of game, and Swiftplay is not filed under Normal.
 const QUEUES = [
   { key: 'ranked', label: 'Ranked' },
   { key: '', label: 'All' },
   { key: 'solo', label: 'Solo' },
   { key: 'flex', label: 'Flex' },
   { key: 'normal', label: 'Normal' },
+  { key: 'swiftplay', label: 'Swiftplay' },
   { key: 'aram', label: 'ARAM' },
 ] as const
 

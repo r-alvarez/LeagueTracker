@@ -35,9 +35,9 @@ public static class AuthSetup
         auth.AddPolicyScheme(SmartScheme, "cookie or agent key", o =>
             o.ForwardDefaultSelector = http =>
                 http.Request.Headers.ContainsKey(AgentKeyAuthenticationHandler.HeaderName)
-                    ? AgentKeyAuthenticationHandler.Scheme
+                    ? AgentKeyAuthenticationHandler.SchemeName
                     : CookieAuthenticationDefaults.AuthenticationScheme);
-        auth.AddScheme<AuthenticationSchemeOptions, AgentKeyAuthenticationHandler>(AgentKeyAuthenticationHandler.Scheme, null);
+        auth.AddScheme<AuthenticationSchemeOptions, AgentKeyAuthenticationHandler>(AgentKeyAuthenticationHandler.SchemeName, null);
         auth.AddCookie(o =>
         {
             o.Cookie.Name = CookieName;

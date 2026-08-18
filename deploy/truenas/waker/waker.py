@@ -5,7 +5,7 @@ waiting. The render agent is pull-based, so a sleeping PC cannot discover
 its own work - this loop is what summons it.
 
 Two delivery paths, because the NAS and the PC sit on different subnets
-(NAS 10.10.40.x, PC 10.10.10.x) and routers drop directed broadcasts:
+and routers drop directed broadcasts:
 
 - UniFi controller API (primary, needs UNIFI_USER/UNIFI_PASS): asks the
   gateway to send the magic packet, which originates INSIDE the PC's VLAN
@@ -24,10 +24,11 @@ import os
 import socket
 import ssl
 import time
+import urllib.error
 import urllib.request
 
 TRACKERS = [u.strip().rstrip("/") for u in os.environ.get("TRACKER_URLS", "").split(",") if u.strip()]
-MAC = os.environ["PC_MAC"].replace(":", "").replace("-", "").lower()
+MAC = os.environ.get("PC_MAC", "").replace(":", "").replace("-", "").lower()
 BROADCAST = os.environ.get("WOL_BROADCAST", "255.255.255.255")
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
 
@@ -49,17 +50,22 @@ def log(msg: str) -> None:
     print(time.strftime("%H:%M:%S"), msg, flush=True)
 
 
-def pending_jobs(base_url: str) -> list[str]:
-    # One anonymous bit per tracker: how many render jobs wait, across every
-    # account. The per-account queue is owner/agent-only since the tracker
-    # authorizes its own API.
-    req = urllib.request.Request(f"{base_url}/api/render/pending", headers={"Accept": "application/json"})
+def get_json(url: str):
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         body = resp.read()
     # A Cloudflare Access sign-in page (HTML, not JSON) lands here too and
     # raises - meaning DNS resolved the tracker via the internet instead of
     # the LAN's split-horizon view. The caller logs it; fix the NAS DNS.
-    count = int(json.loads(body).get("pending", 0))
+    return json.loads(body)
+
+
+def pending_jobs(base_url: str) -> list[str]:
+    # One anonymous number per tracker: how many render jobs wait across every
+    # account (/api/render/pending). The per-account queues are owner/agent-
+    # only now that the tracker authorizes its own API, and the waker has no
+    # identity - it needs one bit, not the rows.
+    count = int(get_json(f"{base_url}/api/render/pending").get("pending", 0))
     return ["job"] * count
 
 
@@ -70,24 +76,29 @@ def send_broadcast() -> None:
         s.sendto(packet, (BROADCAST, 9))
 
 
+def unifi_call(step: str, url: str, body: dict, headers: dict):
+    # Name the step and quote the console's reply: a bare "HTTP Error 404"
+    # cannot say whether the login or the wake command failed, nor why.
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json", **headers})
+    try:
+        return urllib.request.urlopen(req, timeout=15, context=INSECURE)
+    except urllib.error.HTTPError as ex:
+        reply = ex.read(300).decode("utf-8", "replace").strip()
+        raise RuntimeError(f"{step} ({url}) answered HTTP {ex.code}: {reply or ex.reason}") from None
+
+
 def send_unifi_wake() -> None:
     """Log in to the UniFi console and ask it to wake the PC. Raises on any
     failure so the caller can log the outage once instead of every poll."""
-    body = json.dumps({"username": UNIFI_USER, "password": UNIFI_PASS}).encode()
-    req = urllib.request.Request(
-        f"{UNIFI_URL}/api/auth/login", data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=15, context=INSECURE) as resp:
+    with unifi_call("login", f"{UNIFI_URL}/api/auth/login", {"username": UNIFI_USER, "password": UNIFI_PASS}, {}) as resp:
         cookie = resp.headers.get("Set-Cookie", "").split(";")[0]
         csrf = resp.headers.get("X-CSRF-Token", "") or resp.headers.get("x-csrf-token", "")
 
     mac = ":".join(MAC[i:i + 2] for i in range(0, 12, 2))
-    body = json.dumps({"cmd": "wake-device", "mac": mac}).encode()
-    headers = {"Content-Type": "application/json", "Cookie": cookie}
+    headers = {"Cookie": cookie}
     if csrf:
         headers["X-Csrf-Token"] = csrf
-    req = urllib.request.Request(
-        f"{UNIFI_URL}/proxy/network/api/s/{UNIFI_SITE}/cmd/stamgr", data=body, headers=headers)
-    with urllib.request.urlopen(req, timeout=15, context=INSECURE) as resp:
+    with unifi_call("wake-device", f"{UNIFI_URL}/proxy/network/api/s/{UNIFI_SITE}/cmd/stamgr", {"cmd": "wake-device", "mac": mac}, headers) as resp:
         if resp.status != 200:
             raise RuntimeError(f"wake-device answered HTTP {resp.status}")
 
@@ -95,8 +106,10 @@ def send_unifi_wake() -> None:
 def main() -> None:
     if not TRACKERS:
         raise SystemExit("TRACKER_URLS is empty - nothing to watch")
+    if len(MAC) != 12:
+        raise SystemExit("PC_MAC is not set (or not a MAC address) - set it in the Portainer stack environment")
     unifi_on = bool(UNIFI_URL and UNIFI_USER and UNIFI_PASS)
-    log(f"watching {len(TRACKERS)} tracker(s), waking {MAC} every {POLL_SECONDS}s while work waits "
+    log(f"watching {len(TRACKERS)} tracker(s) (every account on each), waking {MAC} every {POLL_SECONDS}s while work waits "
         f"(UniFi API: {'on via ' + UNIFI_URL if unifi_on else 'OFF - set UNIFI_URL/USER/PASS; broadcast alone does not cross subnets'})")
 
     was_waking = False

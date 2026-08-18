@@ -29,7 +29,7 @@ public sealed record UploadResult(UploadOutcome Outcome, string? Url = null, str
 /// resumable protocol with the session URI persisted per game, so an upload
 /// interrupted by a new game, a deploy or a dead connection continues from
 /// the last acknowledged byte instead of re-sending gigabytes.
-public sealed class YouTubeUploader(AgentConfig config)
+public sealed class YouTubeUploader(AgentConfig config, UploadThrottle throttle)
 {
     /// upload alone suffices for videos.insert; readonly is only so the auth
     /// flow's channels.list can NAME the channel it just bound (upload-only
@@ -98,8 +98,8 @@ public sealed class YouTubeUploader(AgentConfig config)
 
     /// One recording -> one YouTube video. sessionPath persists the resumable
     /// session across pauses and restarts. holdOff is polled between chunks -
-    /// true means a game needs the bandwidth (and the loop this runs on) more
-    /// than the upload does.
+    /// true means stop now and resume later (agent shutting down); a game
+    /// running is NOT a reason to stop - the throttle paces around it.
     public async Task<UploadResult> UploadAsync(string mp4Path, string title, string description,
         string sessionPath, Func<bool> holdOff, CancellationToken ct)
     {
@@ -144,14 +144,14 @@ public sealed class YouTubeUploader(AgentConfig config)
         while (true)
         {
             if (RenderAgent.StopRequested) return new(UploadOutcome.Paused, Error: "agent stop requested");
-            if (holdOff()) return new(UploadOutcome.Paused, Error: "a game is starting");
+            if (holdOff()) return new(UploadOutcome.Paused, Error: "asked to stop");
             ct.ThrowIfCancellationRequested();
 
             var read = await file.ReadAsync(buffer.AsMemory(0, (int)Math.Min(ChunkBytes, size - offset)), ct);
             if (read == 0) return new(UploadOutcome.Failed, Error: $"file ended at {offset} of {size} bytes");
             using var req = new HttpRequestMessage(HttpMethod.Put, sessionUri)
             {
-                Content = new ByteArrayContent(buffer, 0, read),
+                Content = new ThrottledContent(buffer, read, throttle),
             };
             req.Content.Headers.ContentRange = new ContentRangeHeaderValue(offset, offset + read - 1, size);
             using var resp = await _http.SendAsync(req, ct);
@@ -257,6 +257,35 @@ public sealed class YouTubeUploader(AgentConfig config)
         return new(UploadOutcome.Failed, Error: $"{(int)status} {Snippet(body)}");
     }
 
+    /// True once YouTube has finished processing the video - the point after
+    /// which the local file is redundant. Null = could not tell (no token,
+    /// network); the caller keeps the file and asks again later.
+    public async Task<bool?> IsProcessedAsync(string videoId, CancellationToken ct)
+    {
+        try
+        {
+            var token = await AccessTokenAsync(ct);
+            if (token is null) return null;
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                $"https://www.googleapis.com/youtube/v3/videos?part=status&id={Uri.EscapeDataString(videoId)}");
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var resp = await _http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return null;
+            var items = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct)).RootElement.GetProperty("items");
+            if (items.GetArrayLength() == 0) return null; // deleted on YouTube? not our call to make - keep the file
+            var uploadStatus = items[0].GetProperty("status").GetProperty("uploadStatus").GetString();
+            return uploadStatus is "processed";
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    /// The video id inside a youtu.be / watch link, or null.
+    public static string? VideoIdOf(string url) =>
+        System.Text.RegularExpressions.Regex.Match(url, @"(?:youtu\.be/|[?&]v=)([A-Za-z0-9_-]{6,})") is { Success: true } m ? m.Groups[1].Value : null;
+
     private async Task<string?> AccessTokenAsync(CancellationToken ct)
     {
         if (_accessToken is not null && DateTime.UtcNow < _accessTokenExpiresUtc - TimeSpan.FromMinutes(2))
@@ -340,11 +369,15 @@ public sealed class YouTubeUploader(AgentConfig config)
                       $"?client_id={Uri.EscapeDataString(config.YouTubeClientId)}" +
                       $"&redirect_uri={Uri.EscapeDataString(redirect)}" +
                       $"&response_type=code&scope={Uri.EscapeDataString(Scope)}" +
-                      "&access_type=offline&prompt=consent" +
+                      // select_account: with a live Google session the flow otherwise
+                      // binds the token to the account's default channel and never
+                      // offers the brand channel (learned live: "SUDNEMESIS" instead
+                      // of the Ruben Alvarez channel, 18 Aug 2026).
+                      "&access_type=offline&prompt=select_account%20consent" +
                       $"&code_challenge={Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)))}" +
                       $"&code_challenge_method=S256&state={expectedState}";
 
-        Log.Info("Opening the Google consent page - pick the channel's account and allow YouTube upload access");
+        Log.Info("Opening the Google consent page - pick the account AND the channel the videos should land on (brand channels are listed under the account), then allow YouTube upload access");
         Process.Start(new ProcessStartInfo(authUrl) { UseShellExecute = true });
 
         string? code;

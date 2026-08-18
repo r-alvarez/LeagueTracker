@@ -56,13 +56,16 @@ public static class RankMath
     /// The match-list filter's queue families, by the value the URL carries.
     /// One table next to QueueName so a queue the UI can name is a queue the
     /// filter can reach (Swiftplay sat unreachable for weeks otherwise).
+    /// Families are disjoint: Swiftplay has its own button, so "normal" is the
+    /// full-length Rift normals only - a Swiftplay row under Normal read as a
+    /// draft game filed wrong.
     public static int[]? QueueFamily(string family) => family.ToLowerInvariant() switch
     {
         "solo" => [420],
         "flex" => [440],
-        "normal" => [400, 430, 480, 490],
+        "normal" => [400, 430, 490],
         "swiftplay" => [480],
-        "aram" => [450, 720],
+        "aram" => [450, 720, 2400],
         "arena" => [1700, 1710],
         "urf" => [900, 1900],
         _ => null,
@@ -72,7 +75,9 @@ public static class RankMath
     {
         400 => "Normal Draft", 420 => "Ranked Solo/Duo", 430 => "Normal Blind", 440 => "Ranked Flex",
         450 => "ARAM", 480 => "Swiftplay", 490 => "Quickplay", 700 => "Clash", 720 => "ARAM Clash",
-        900 => "ARURF", 1700 => "Arena", 1710 => "Arena", 1900 => "URF",
+        900 => "ARURF", 1020 => "One for All", 1300 => "Nexus Blitz", 1400 => "Ultimate Spellbook",
+        1700 => "Arena", 1710 => "Arena", 1810 or 1820 or 1830 or 1840 => "Swarm", 1900 => "URF",
+        2300 => "Brawl", 2400 => "ARAM Mayhem",
         _ => $"Queue {queueId}",
     };
 }

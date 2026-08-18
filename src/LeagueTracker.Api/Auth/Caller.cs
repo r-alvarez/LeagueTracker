@@ -11,7 +11,7 @@ public sealed class Caller(IHttpContextAccessor http, AgentKeyStore keys)
     private ClaimsPrincipal? Principal => http.HttpContext?.User;
 
     public bool IsUser => UserId is not null;
-    public string? UserId => Principal?.Identity?.AuthenticationType is not AgentKeyAuthenticationHandler.Scheme
+    public string? UserId => Principal?.Identity?.AuthenticationType is not AgentKeyAuthenticationHandler.SchemeName
         ? Principal?.FindFirstValue(TrackerClaims.UserId)
         : null;
     public string? Email => IsUser ? Principal?.FindFirstValue(TrackerClaims.Email) : null;
@@ -20,7 +20,7 @@ public sealed class Caller(IHttpContextAccessor http, AgentKeyStore keys)
 
     public bool IsAgent => Agent is not null;
     public AgentKeyRecord? Agent =>
-        Principal?.Identity?.AuthenticationType is AgentKeyAuthenticationHandler.Scheme
+        Principal?.Identity?.AuthenticationType is AgentKeyAuthenticationHandler.SchemeName
         && Principal.FindFirstValue(TrackerClaims.AgentId) is { } id
             ? keys.ById(id)
             : null;

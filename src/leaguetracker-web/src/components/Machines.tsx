@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import { auth } from '../auth'
-import type { AgentInfo, AgentKey, MyAgents } from '../types'
+import type { AgentKey, MyAgents } from '../types'
 
 interface Release { version: string; file: string; sizeBytes: number; installer: string | null; installerSizeBytes: number }
 
 /// The owner's machines: the agent build to install, a join code that
-/// makes a new machine theirs at enrolment, the machines waiting for the
-/// Approve click, and the ones running (heartbeats). Admins see everyone's
-/// and can hand a machine to its owner.
+/// makes a new machine theirs at enrolment, and one table of every machine
+/// they may see - theirs, plus the renderer that serves everyone - each row
+/// joined with the heartbeat of the agent behind the key (version against
+/// the newest build, what it is doing, whether it still reports, its last
+/// error, the log it shipped). Admins see everyone's and can hand a machine
+/// to its owner.
 export default function Machines() {
   const [release, setRelease] = useState<Release | null>(null)
   const [mine, setMine] = useState<MyAgents | null>(null)
@@ -18,6 +21,9 @@ export default function Machines() {
   const [copied, setCopied] = useState(false)
   const [assign, setAssign] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
+  // Rows whose log was just requested: the file lands on the next heartbeat,
+  // so the button reads "asked" until the list shows a newer file.
+  const [logAsked, setLogAsked] = useState<Record<string, number>>({})
 
   const load = useCallback(() => {
     api.myAgents().then(setMine).catch(() => setMine(null))
@@ -33,6 +39,10 @@ export default function Machines() {
     setBusy(id)
     try { await api.agentAction(id, verb); load() } finally { setBusy(null) }
   }
+  const askLog = async (id: string) => {
+    setBusy(id)
+    try { await api.requestAgentLog(id); setLogAsked(a => ({ ...a, [id]: Date.now() })) } finally { setBusy(null) }
+  }
 
   const mint = async () => {
     setError(null)
@@ -46,29 +56,43 @@ export default function Machines() {
       load()
     } catch (e) { setError(String(e)) }
   }
-
   const copy = async (text: string) => {
     try { await navigator.clipboard.writeText(text); setCopied(true) } catch { /* selectable text stays */ }
   }
-
-  const when = (s: string | null) => (s ? new Date(s).toLocaleString() : '—')
-  const keys = mine?.keys ?? []
-  const pending = keys.filter(k => k.status === 'pending')
-  const known = keys.filter(k => k.status !== 'pending')
-  const liveById = new Map<string, AgentInfo>((mine?.live ?? []).map(a => [a.id, a]))
   const doAssign = async (k: AgentKey) => {
     setError(null)
     try { await api.adminAssignAgent(k.id, assign[k.id]?.trim() || null, null); load() } catch (e) { setError(String(e)) }
   }
 
+  const keys = mine?.keys ?? []
+  const pending = keys.filter(k => k.status === 'pending').length
+  const latest = mine?.latestVersion ?? null
+  const when = (s: string | null) => (s ? new Date(s).toLocaleString() : '—')
+  // Day + time is what the eye needs in the table; the full stamp sits on hover.
+  const whenShort = (s: string | null) => (s
+    ? new Date(s).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : '—')
+  const seen = (k: AgentKey) => k.live?.seenUtc ?? k.lastSeenUtc
+  // One badge carries both facts: can the key talk to us, and is the agent
+  // behind it alive. Approved + no heartbeat is the plain word.
+  const statusOf = (k: AgentKey): { cls: string; text: string; title: string } => {
+    if (k.status !== 'approved') return { cls: k.status === 'pending' ? 'remake' : 'loss', text: k.status === 'pending' ? 'waiting' : k.status, title: k.status === 'pending' ? 'Waiting for approval' : 'Key revoked - the machine is cut off' }
+    const live = k.live
+    if (!live) return { cls: 'remake', text: 'approved', title: 'Approved; the agent has not reported yet' }
+    if (!live.online) return { cls: 'loss', text: 'offline', title: 'Approved; the agent has stopped reporting' }
+    return live.paused ? { cls: 'remake', text: 'paused', title: 'Approved; paused from its tray icon' } : { cls: 'win', text: 'online', title: 'Approved and reporting' }
+  }
+  const canAct = (k: AgentKey) => auth.isAdmin || k.mine
+
   return (
     <>
       <div className="card">
-        <h2>Machines</h2>
+        <h2>Machines {pending > 0 && <span className="badge loss">{pending} waiting</span>}</h2>
         <p className="mut" style={{ marginTop: 0 }}>
           The agent runs on your gaming PC: it records your games and publishes them to YouTube. Install it (no admin
           rights needed), then in its setup window paste the join code below - the machine appears here as{' '}
           <em>waiting</em>, you press Approve once, and it stays yours until you revoke it. It updates itself from here.
+          {latest && <> Newest published build: <strong>{latest}</strong>.</>}
         </p>
         <p style={{ margin: '0 0 10px' }}>
           {release ? (
@@ -120,88 +144,126 @@ export default function Machines() {
           )}
           {error && <p className="warn-text sm-text">{error}</p>}
         </div>
-      </div>
 
-      {pending.length > 0 && (
-        <div className="card">
-          <h2>Waiting for approval <span className="badge loss">{pending.length}</span></h2>
-          {pending.map(k => (
-            <p key={k.id} style={{ margin: '6px 0' }}>
-              <span className="badge remake">waiting</span>{' '}
-              <strong>{k.name}</strong>{' '}
-              <span className="mut sm-text">
-                {k.machine} · {k.role} · from {k.lastIp ?? '?'} · asked {when(k.createdUtc)}
-                {!k.bound && ' · no join code - not tied to anyone'}{k.ownerEmail && ` · ${k.ownerEmail}`}
-              </span>{' '}
-              <button className="action primary" disabled={busy === k.id || (!k.bound && !auth.isAdmin)} onClick={() => act(k.id, 'approve')}>Approve</button>{' '}
-              <button className="action" disabled={busy === k.id} onClick={() => act(k.id, 'delete')}>Reject</button>
-              {auth.isAdmin && !k.bound && (
-                <span style={{ marginLeft: 8 }}>
-                  <input className="text" placeholder="owner email" value={assign[k.id] ?? ''} onChange={e => setAssign({ ...assign, [k.id]: e.target.value })} style={{ width: 200 }} />{' '}
-                  <button className="action" onClick={() => doAssign(k)}>Assign</button>
-                </span>
-              )}
-            </p>
-          ))}
-        </div>
-      )}
-
-      {known.length > 0 && (
-        <div className="card">
-          <h2>Your machines</h2>
-          <div className="agent-list">
-            {known.map(k => {
-              const a = liveById.get(k.id)
-              return (
-                <div key={k.id} className="agent-row">
-                  <div className="agent-head">
-                    <span className={`badge ${k.status === 'revoked' ? 'loss' : a?.online ? (a.paused ? 'remake' : 'win') : 'loss'}`}>
-                      {k.status === 'revoked' ? 'revoked' : a?.online ? (a.paused ? 'paused' : 'online') : 'offline'}
-                    </span>
-                    <strong>{k.name}</strong>
-                    <span className="mut sm-text">
-                      {k.role}{a ? ` · v${a.version}` : ''}{k.machine ? ` · ${k.machine}` : ''}{k.ownerEmail ? ` · ${k.ownerEmail}` : (!k.bound ? ' · unassigned' : '')}
-                    </span>
-                    {k.status === 'approved' && a && (
-                      <button className="action sm-action" title="Ask this agent to restart on its next heartbeat (when it is idle) - it re-reads settings and updates itself"
-                        onClick={() => act(k.id, 'restart')}>Restart</button>
-                    )}
-                    {k.status === 'approved'
-                      ? <button className="action sm-action" disabled={busy === k.id} onClick={() => act(k.id, 'revoke')}>Revoke</button>
-                      : <>
-                          <button className="action sm-action" disabled={busy === k.id} onClick={() => act(k.id, 'approve')}>Re-approve</button>
+        {keys.length > 0 && (
+          <div className="table-scroll" style={{ marginTop: 14 }}>
+            <table className="data agent-access">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Machine</th>
+                  <th>{auth.isAdmin ? 'Owner' : 'User'}</th>
+                  <th>Version</th>
+                  <th>Now</th>
+                  <th>Last seen</th>
+                  <th>From</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {keys.map(k => {
+                  const live = k.live
+                  const outdated = !!(live && latest && live.version !== latest && live.version !== '0.0.0.0')
+                  const status = statusOf(k)
+                  return (
+                    <Fragment key={k.id}>
+                    <tr className={k.status === 'pending' ? 'pending' : undefined}>
+                      <td><span className={`badge ${status.cls}`} title={status.title}>{status.text}</span></td>
+                      <td>
+                        <strong>{k.name}</strong>
+                        {k.machine && k.machine !== k.name && <span className="mut sm-text"> · {k.machine}</span>}
+                        <span className="mut sm-text"> · {k.role}</span>
+                        {!k.bound && <span className="warn-text sm-text"> · not tied to anyone</span>}
+                        {k.logs.length > 0 && (
+                          <div className="sm-text">
+                            <a href={`/api/me/agents/${k.id}/logs/${k.logs[0].file}`} target="_blank" rel="noreferrer"
+                              title={`agent.log tail shipped ${when(k.logs[0].whenUtc)} (${Math.round(k.logs[0].sizeBytes / 1024)} KB)${k.logs.length > 1 ? ` · ${k.logs.length - 1} older` : ''}`}>
+                              log · {whenShort(k.logs[0].whenUtc)}
+                            </a>
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        {auth.isAdmin
+                          ? (k.ownerEmail ?? <span className="mut">—</span>)
+                          : (live?.user ?? <span className="mut">—</span>)}
+                        {auth.isAdmin && live?.user && <div className="mut sm-text">{live.user}</div>}
+                      </td>
+                      <td>
+                        {live
+                          ? <span title={outdated ? `Newest is ${latest}; the agent updates itself when idle` : 'On the newest build'}>
+                              {live.version}{outdated && <span className="warn-text"> · update due</span>}
+                            </span>
+                          : <span className="mut">—</span>}
+                      </td>
+                      <td className="now">
+                        {live
+                          ? <>
+                              <span className="agent-now" title={`${live.state}${live.detail ? ` — ${live.detail}` : ''}`}>
+                                {live.online ? live.state : 'last: ' + live.state}{live.detail ? ` — ${live.detail}` : ''}
+                              </span>
+                              {!live.youTubeReady && <span className="warn-text sm-text"> · YouTube not authorized</span>}
+                              {live.lastRecordingUtc && <div className="mut sm-text" title={when(live.lastRecordingUtc)}>last recording {whenShort(live.lastRecordingUtc)}</div>}
+                            </>
+                          : k.status === 'pending'
+                            ? <span className="mut sm-text">asked {whenShort(k.createdUtc)}</span>
+                            : <span className="mut sm-text">no heartbeat</span>}
+                      </td>
+                      <td title={when(seen(k))}>{whenShort(seen(k))}</td>
+                      <td>{canAct(k) ? (k.lastIp ?? <span className="mut">—</span>) : <span className="mut">—</span>}</td>
+                      <td className="actions">
+                        {canAct(k) && k.status === 'pending' && <>
+                          <button className="action primary sm-action" disabled={busy === k.id || (!k.bound && !auth.isAdmin)} title={!k.bound && !auth.isAdmin ? 'Enrolled without a join code - an admin has to assign it first' : undefined}
+                            onClick={() => act(k.id, 'approve')}>Approve</button>{' '}
+                          <button className="action sm-action" disabled={busy === k.id} onClick={() => act(k.id, 'delete')}>Reject</button>
+                        </>}
+                        {canAct(k) && k.status === 'approved' && <>
+                          {live && <>
+                            <button className="action sm-action" title="Ask this agent to restart on its next heartbeat (when it is idle) - it re-reads settings and updates itself"
+                              disabled={busy === k.id} onClick={() => act(k.id, 'restart')}>Restart</button>{' '}
+                            <button className="action sm-action" title="Ask this agent to send the tail of its agent.log - it arrives on the next heartbeat (about a minute)"
+                              disabled={busy === k.id || !!logAsked[k.id]} onClick={() => askLog(k.id)}>
+                              {logAsked[k.id] && !(k.logs[0] && new Date(k.logs[0].whenUtc).getTime() > logAsked[k.id]) ? 'Log asked…' : 'Log'}
+                            </button>{' '}
+                          </>}
+                          <button className="action sm-action" disabled={busy === k.id} onClick={() => act(k.id, 'revoke')}>Revoke</button>
+                        </>}
+                        {canAct(k) && k.status === 'revoked' && <>
+                          <button className="action sm-action" disabled={busy === k.id} onClick={() => act(k.id, 'approve')}>Re-approve</button>{' '}
                           <button className="action sm-action" disabled={busy === k.id} onClick={() => act(k.id, 'delete')}>Delete</button>
                         </>}
-                  </div>
-                  {a && (
-                    <div className="agent-state">
-                      <span className="agent-state-name">{a.state}</span>
-                      {a.detail && <span className="mut"> — {a.detail}</span>}
-                    </div>
-                  )}
-                  <dl className="agent-meta">
-                    <div><dt>Seen</dt><dd>{when(a?.seenUtc ?? k.lastSeenUtc)}</dd></div>
-                    {a?.lastRecordingUtc && <div><dt>Last recording</dt><dd>{new Date(a.lastRecordingUtc).toLocaleString()}</dd></div>}
-                    {a && !a.youTubeReady && <div><dt>YouTube</dt><dd className="warn-text">not authorized</dd></div>}
-                  </dl>
-                  {a?.lastError && (
-                    <div className="agent-error">
-                      <span className="agent-error-label">Last error</span>{a.lastError}
-                      <button className="dismiss-x" title="Dismiss (comes back only if a new error appears)" onClick={() => act(k.id, 'dismiss-error')}>✕</button>
-                    </div>
-                  )}
-                  {auth.isAdmin && (
-                    <p className="sm-text" style={{ margin: '6px 0 0' }}>
-                      <input className="text" placeholder={k.ownerEmail ?? 'owner email'} value={assign[k.id] ?? ''} onChange={e => setAssign({ ...assign, [k.id]: e.target.value })} style={{ width: 220 }} />{' '}
-                      <button className="action sm-action" onClick={() => doAssign(k)}>Assign owner</button>
-                    </p>
-                  )}
-                </div>
-              )
-            })}
+                        {!canAct(k) && <span className="mut sm-text">shared</span>}
+                      </td>
+                    </tr>
+                    {auth.isAdmin && (
+                      <tr className="agent-error-row">
+                        <td colSpan={8}>
+                          <span className="sm-text">
+                            <input className="text" placeholder={k.ownerEmail ?? 'owner email'} value={assign[k.id] ?? ''} style={{ width: 220 }}
+                              onChange={e => setAssign({ ...assign, [k.id]: e.target.value })} />{' '}
+                            <button className="action sm-action" onClick={() => doAssign(k)}>Assign owner</button>
+                          </span>
+                        </td>
+                      </tr>
+                    )}
+                    {live?.lastError && canAct(k) && (
+                      <tr className="agent-error-row">
+                        <td colSpan={8}>
+                          <div className="agent-error">
+                            <span className="agent-error-label">Last error</span>{live.lastError}
+                            <button className="dismiss-x" title="Dismiss (comes back only if a new error appears)" onClick={() => act(k.id, 'dismiss-error')}>✕</button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </>
   )
 }

@@ -28,14 +28,19 @@ public static class ManagementEndpoints
 
         // --- My machines ----------------------------------------------------------
 
+        // Every key this person may see - theirs, plus the renderers that serve
+        // everyone; all of them for an admin - each joined with the heartbeat
+        // of the agent running under it and the logs it shipped, plus the
+        // newest published build, so one table says who is on what.
         me.MapGet("/agents", (Caller caller, AgentKeyStore keys, AgentRegistry agents, UserStore users) =>
         {
-            // An admin sees every machine and whose it is; an owner sees theirs.
             var emails = caller.IsAdmin ? users.All().ToDictionary(u => u.Id, u => u.Email) : [];
+            var visible = caller.IsAdmin ? keys.All : keys.All.Where(k => k.OwnerUserId == caller.UserId || k.Role is AgentRole.Renderer).ToList();
             return Results.Ok(new
             {
-                Keys = (caller.IsAdmin ? keys.All : keys.OwnedBy(caller.UserId!)).Select(k => KeyView(k, k.OwnerUserId is { } o && emails.TryGetValue(o, out var e) ? e : null)),
-                Live = agents.SnapshotFor(caller.UserId, caller.IsAdmin),
+                LatestVersion = agents.Latest()?.Version,
+                Keys = visible.Select(k => KeyView(k, k.OwnerUserId is { } o && emails.TryGetValue(o, out var e) ? e : null,
+                    agents.Find(k.Id, caller.UserId, caller.IsAdmin), agents.Logs(k.Id), k.OwnerUserId == caller.UserId)),
                 JoinCodes = keys.OpenJoinCodes(caller.UserId!).Select(c => new { c.Code, Role = c.Role.ToString().ToLowerInvariant(), c.ExpiresUtc }),
             });
         });
@@ -63,6 +68,16 @@ public static class ManagementEndpoints
             Own(caller, keys, id) is { } key ? (agents.Queue(key.Id, "restart") ? Results.Ok() : Results.NotFound()) : Results.NotFound());
         me.MapPost("/agents/{id}/dismiss-error", (string id, Caller caller, AgentKeyStore keys, AgentRegistry agents) =>
             Own(caller, keys, id) is { } key ? (agents.DismissError(key.Id) ? Results.Ok() : Results.NotFound()) : Results.NotFound());
+        // Ask an agent for its log: it ships the tail of agent.log on its next
+        // heartbeat (no idle gate - reading a file disturbs nothing).
+        me.MapPost("/agents/{id}/sendlog", (string id, Caller caller, AgentKeyStore keys, AgentRegistry agents) =>
+            Own(caller, keys, id) is { } key ? (agents.Queue(key.Id, "sendlog") ? Results.Ok() : Results.NotFound()) : Results.NotFound());
+        me.MapGet("/agents/{id}/logs", (string id, Caller caller, AgentKeyStore keys, AgentRegistry agents) =>
+            Own(caller, keys, id) is { } key ? Results.Ok(agents.Logs(key.Id)) : Results.NotFound());
+        me.MapGet("/agents/{id}/logs/{file}", (string id, string file, Caller caller, AgentKeyStore keys, AgentRegistry agents) =>
+            Own(caller, keys, id) is { } key && agents.LogPath(key.Id, file) is { } path
+                ? Results.File(path, "text/plain; charset=utf-8")
+                : Results.NotFound());
 
         // --- Claiming a Riot account --------------------------------------------------
 
@@ -95,8 +110,8 @@ public static class ManagementEndpoints
             var byId = users.All().ToDictionary(u => u.Id, u => u.Email);
             return Results.Ok(new
             {
-                Keys = keys.All.Select(k => KeyView(k, k.OwnerUserId is { } o && byId.TryGetValue(o, out var e) ? e : null)),
-                Live = agents.SnapshotFor(null, admin: true),
+                LatestVersion = agents.Latest()?.Version,
+                Keys = keys.All.Select(k => KeyView(k, k.OwnerUserId is { } o && byId.TryGetValue(o, out var e) ? e : null, agents.Find(k.Id, null, admin: true), agents.Logs(k.Id), false)),
             });
         });
 
@@ -131,13 +146,16 @@ public static class ManagementEndpoints
             users.SetAdmin(id, admin) ? Results.Ok() : Results.NotFound());
     }
 
+    // A renderer is visible to everyone (it serves everyone) but only its
+    // owner or an admin may act on it.
     private static AgentKeyRecord? Own(Caller caller, AgentKeyStore keys, string id) =>
         keys.ById(id) is { } key && (caller.IsAdmin || key.OwnerUserId == caller.UserId) ? key : null;
 
-    private static object KeyView(AgentKeyRecord r, string? ownerEmail = null) => new
+    private static object KeyView(AgentKeyRecord r, string? ownerEmail = null, AgentLive? live = null, List<AgentLogInfo>? logs = null, bool mine = false) => new
     {
         r.Id, r.Name, r.Machine, Status = r.Status.ToString().ToLowerInvariant(), Role = r.Role.ToString().ToLowerInvariant(),
-        r.OwnerUserId, OwnerEmail = ownerEmail, Bound = r.IsBound, r.CreatedUtc, r.DecidedUtc, r.LastSeenUtc, r.LastIp, r.Note,
+        r.OwnerUserId, OwnerEmail = ownerEmail, Bound = r.IsBound, Mine = mine, r.CreatedUtc, r.DecidedUtc, r.LastSeenUtc, r.LastIp, r.Note,
+        Live = live, Logs = logs ?? [],
     };
 
     public sealed record AssignRequest(string? OwnerEmail, string? Role);

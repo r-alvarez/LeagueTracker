@@ -78,6 +78,23 @@ public sealed class AgentConfig
     /// UploadVods is on (full uploads already include the sidecars).
     public bool UploadVodSidecars { get; set; } = true;
 
+    /// Upload speed cap (Mbps) while a game is running. 0 = automatic: half
+    /// of the line's measured idle upstream, never under 3 Mbps. Uploads
+    /// never pause for a game - the customer expects game 1 on YouTube by the
+    /// end of game 2 - they just leave the game its headroom.
+    public double UploadInGameMbps { get; set; }
+
+    /// Keep the local mp4 after it is safely on YouTube (uploaded, processed,
+    /// linked on the tracker). Off = the idle sweep deletes it and keeps only
+    /// the small sidecars; on = a debugging machine that wants the files.
+    public bool KeepRecordingsAfterPublish { get; set; }
+
+    /// Optional cap on the recorded picture height, aspect kept (3440x1440
+    /// -> 2580x1080); the WGC engine scales on the GPU. 0 = native, and
+    /// native is the default: people buy big screens to see them. A knob for
+    /// one struggling machine (per-agent profile), not a policy.
+    public int RecordMaxHeight { get; set; }
+
     /// Record the game's audio track (and ONLY the game's - captured from
     /// the game process via Windows process loopback, so Discord/music
     /// never enter the VOD). Needs Windows 10 2004+; falls back to
@@ -197,6 +214,9 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_RECORD_QUEUES") is { Length: > 0 } queues) config.RecordQueues = queues;
         if (Environment.GetEnvironmentVariable("LT_RECORD_AUDIO") is { Length: > 0 } audio) config.RecordAudio = audio is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_CAPTURE_BACKEND") is { Length: > 0 } backend) config.CaptureBackend = backend;
+        if (Environment.GetEnvironmentVariable("LT_UPLOAD_INGAME_MBPS") is { Length: > 0 } mbps && double.TryParse(mbps, System.Globalization.CultureInfo.InvariantCulture, out var mbpsValue)) config.UploadInGameMbps = mbpsValue;
+        if (Environment.GetEnvironmentVariable("LT_KEEP_RECORDINGS") is { Length: > 0 } keep) config.KeepRecordingsAfterPublish = keep is not ("0" or "false");
+        if (Environment.GetEnvironmentVariable("LT_RECORD_MAX_HEIGHT") is { Length: > 0 } maxHeight && int.TryParse(maxHeight, out var maxHeightValue)) config.RecordMaxHeight = maxHeightValue;
         if (Environment.GetEnvironmentVariable("LT_HDR_TONEMAP") is { Length: > 0 } toneMap) config.HdrToneMap = toneMap is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_YOUTUBE_UPLOAD") is { Length: > 0 } yt) config.YouTubeUpload = yt is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_YOUTUBE_CLIENT_ID") is { Length: > 0 } ytId) config.YouTubeClientId = ytId;
@@ -224,6 +244,7 @@ public sealed class AgentConfig
             {
                 converted = property.PropertyType == typeof(bool) ? value is "1" or "true" or "True"
                     : property.PropertyType == typeof(int) ? int.Parse(value)
+                    : property.PropertyType == typeof(double) ? double.Parse(value, System.Globalization.CultureInfo.InvariantCulture)
                     : value;
             }
             catch (FormatException)
@@ -279,6 +300,31 @@ public static class Log
     static Log()
     {
         try { if (new FileInfo(LogPath) is { Exists: true, Length: > 5_000_000 }) File.Delete(LogPath); } catch { /* keep logging best-effort */ }
+    }
+
+    /// The newest maxBytes of the log, for shipping to the tracker on
+    /// request - the owner's way to see a customer's machine without asking
+    /// them to find and send a file.
+    public static string Tail(int maxBytes)
+    {
+        lock (Gate)
+        {
+            try
+            {
+                if (!File.Exists(LogPath)) return "";
+                using var stream = new FileStream(LogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                var start = Math.Max(0, stream.Length - maxBytes);
+                stream.Seek(start, SeekOrigin.Begin);
+                using var reader = new StreamReader(stream);
+                var text = reader.ReadToEnd();
+                // Cutting into a line is worse than losing it: start at the next full line.
+                return start == 0 ? text : text[(text.IndexOf((char)10) + 1)..];
+            }
+            catch (Exception ex)
+            {
+                return $"(could not read {LogPath}: {ex.Message})";
+            }
+        }
     }
 
     public static void Info(string message) => Write($"[{DateTime.Now:HH:mm:ss}] {message}");

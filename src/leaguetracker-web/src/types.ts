@@ -57,14 +57,18 @@ export interface AgentInfo {
   online: boolean
 }
 
+export interface AgentLog { file: string; whenUtc: string; sizeBytes: number }
 export interface AgentKey {
   id: string; name: string; machine: string; status: 'pending' | 'approved' | 'revoked'; role: 'recorder' | 'renderer'
-  ownerUserId: string | null; ownerEmail?: string | null; bound: boolean
+  ownerUserId: string | null; ownerEmail?: string | null; bound: boolean; mine: boolean
   createdUtc: string; decidedUtc: string | null; lastSeenUtc: string | null; lastIp: string | null; note: string | null
+  /// The heartbeat of the agent running under this key, if it has reported.
+  live: AgentInfo | null
+  logs: AgentLog[]
 }
 export interface ClaimInfo { id: string; accountId: string; riotId: string; iconId: number; expiresUtc: string; attemptsLeft: number; state: 'pending' | 'verified' | 'expired' | 'failed' }
 export interface JoinCodeInfo { code: string; role: 'recorder' | 'renderer'; expiresUtc: string }
-export interface MyAgents { keys: AgentKey[]; live: AgentInfo[]; joinCodes: JoinCodeInfo[] }
+export interface MyAgents { latestVersion: string | null; keys: AgentKey[]; joinCodes: JoinCodeInfo[] }
 export interface AdminUser {
   id: string; email: string; displayName: string; isAdmin: boolean; createdUtc: string; lastSeenUtc: string | null
   logins: string[]; accounts: string[]; agents: number
@@ -684,6 +688,8 @@ export interface LiveGame {
   queueId: number
   queue: string
   startedUtc: string | null
+  /** Where the in-game clock reads 0:00 (spectator's start, calibrated server-side). */
+  clockStartUtc: string | null
   detectedUtc: string
   myChampionId: number
   myTeamId: number

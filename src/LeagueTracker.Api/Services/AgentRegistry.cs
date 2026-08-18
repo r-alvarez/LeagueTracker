@@ -14,6 +14,25 @@ public sealed class AgentOptions
 {
     public Dictionary<string, string> Profile { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// Per-agent overrides layered on Profile, keyed by the agent's enrolled
+    /// name: Agent__Profiles__<name>__YouTubeClientId=... gives one machine
+    /// its own YouTube OAuth client (own Google project = own daily quota)
+    /// while everything else stays shared. Blank values do not override.
+    public Dictionary<string, Dictionary<string, string>> Profiles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// The shared profile with the named agent's overrides on top (blank
+    /// overrides ignored: an unset stack env var must not blank a value).
+    public IReadOnlyDictionary<string, string> ProfileFor(string? agentName)
+    {
+        if (agentName is not { Length: > 0 } || !Profiles.TryGetValue(agentName, out var overrides)) return Profile;
+        var merged = new Dictionary<string, string>(Profile, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in overrides)
+        {
+            if (value is { Length: > 0 }) merged[key] = value;
+        }
+        return merged;
+    }
+
     /// Folder holding LeagueTracker.RenderAgent-<version>.zip builds. Blank =
     /// <Accounts:DataRoot or the default account's DataDir>/agent-releases -
     /// process-wide, not per account.
@@ -29,6 +48,16 @@ public sealed record AgentHeartbeat(
     string Agent, string Version, string Role, bool Paused, string State, string? Detail,
     DateTime? LastRecordingUtc, bool YouTubeReady, string? LastError, string? Machine, string? User);
 
+public sealed record AgentLogInfo(string File, DateTime WhenUtc, long SizeBytes);
+
+/// One agent as the Data page sees it: its last heartbeat plus whether it
+/// is still reporting. Id is the key record's - the identity the server
+/// vouches for; Agent is the name from the record, not the heartbeat.
+public sealed record AgentLive(
+    string Id, string Agent, string Version, string Role, bool Paused, string State, string? Detail,
+    DateTime? LastRecordingUtc, bool YouTubeReady, string? LastError, string? Machine, string? User,
+    string? Owner, bool Mine, DateTime SeenUtc, bool Online);
+
 /// Installer is the Setup.exe published beside the zip (null when a
 /// release predates it or it was not mirrored) - for new machines; the zip
 /// is what installed agents update from.
@@ -42,24 +71,78 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
     // Keyed by the agent's key record id - the identity the server vouches
     // for - never by the name the heartbeat carries.
     private readonly Dictionary<string, (AgentKeyRecord Key, AgentHeartbeat Beat, DateTime SeenUtc)> _agents = new(StringComparer.OrdinalIgnoreCase);
-    // The last error the owner has acknowledged, per agent - hidden until a
+    // The last error the owner has acknowledged, per key - hidden until a
     // different one arrives (in memory: a dismissed transient never matters
     // after a restart).
     private readonly Dictionary<string, string> _dismissedError = new(StringComparer.OrdinalIgnoreCase);
-    // A one-shot command queued for an agent (name -> (token, command)),
-    // delivered on the heartbeat. The token lets the agent run it once.
+    // A one-shot command queued for a key (id -> (token, command)), delivered
+    // on the heartbeat. The token lets the agent run it once.
     private readonly Dictionary<string, (string Token, string Command)> _command = new(StringComparer.OrdinalIgnoreCase);
     private (string Path, DateTime ModifiedUtc, string Sha)? _shaCache;
 
     public IReadOnlyDictionary<string, string> Profile => options.Value.Profile;
 
-    public string ReleaseDir => options.Value.ReleaseDir is { Length: > 0 } dir ? dir
-        : accounts.Value.DataRoot is { Length: > 0 } root ? Path.Combine(Path.IsPathRooted(root) ? root : Path.Combine(env.ContentRootPath, root), "agent-releases")
-        : Path.Combine(registry.Default.DataDir, "agent-releases");
+    public IReadOnlyDictionary<string, string> ProfileFor(string? agentName) => options.Value.ProfileFor(agentName);
+
+    public string ReleaseDir => options.Value.ReleaseDir is { Length: > 0 } dir ? dir : Path.Combine(DataRootDir, "agent-releases");
+
+    /// Where process-wide agent things live: the accounts' data root, or the
+    /// default account's folder on a single-account tracker.
+    private string DataRootDir => accounts.Value.DataRoot is { Length: > 0 } root
+        ? (Path.IsPathRooted(root) ? root : Path.Combine(env.ContentRootPath, root))
+        : registry.Default.DataDir;
 
     public void Record(AgentKeyRecord key, AgentHeartbeat beat)
     {
         lock (_gate) _agents[key.Id] = (key, beat, DateTime.UtcNow);
+    }
+
+    /// Where agents' shipped logs live: <data root>/agent-logs/<key id>/
+    /// <utc stamp>.log, newest few kept. The key id, not the name: two
+    /// owners' machines may share a name.
+    public string LogDir => Path.Combine(DataRootDir, "agent-logs");
+
+    private const int LogsKeptPerAgent = 5;
+
+    /// Stores a log the agent shipped on the owner's "sendlog" command.
+    /// Returns the stored file name.
+    public string StoreLog(string agent, string text)
+    {
+        var dir = Path.Combine(LogDir, SafeName(agent));
+        Directory.CreateDirectory(dir);
+        var file = $"{DateTime.UtcNow:yyyyMMdd-HHmmss}.log";
+        File.WriteAllText(Path.Combine(dir, file), text);
+        foreach (var old in Directory.EnumerateFiles(dir, "*.log").OrderByDescending(f => f).Skip(LogsKeptPerAgent))
+        {
+            try { File.Delete(old); } catch { /* next store retries */ }
+        }
+        return file;
+    }
+
+    public List<AgentLogInfo> Logs(string agent)
+    {
+        var dir = Path.Combine(LogDir, SafeName(agent));
+        if (!Directory.Exists(dir)) return [];
+        return [.. Directory.EnumerateFiles(dir, "*.log")
+            .Select(f => new FileInfo(f))
+            .OrderByDescending(f => f.Name)
+            .Select(f => new AgentLogInfo(f.Name, f.LastWriteTimeUtc, f.Length))];
+    }
+
+    public string? LogPath(string agent, string file)
+    {
+        // The name is ours (a stamp + .log); anything else is not a log we stored.
+        if (!System.Text.RegularExpressions.Regex.IsMatch(file, @"^\d{8}-\d{6}\.log$")) return null;
+        var path = Path.Combine(LogDir, SafeName(agent), file);
+        return File.Exists(path) ? path : null;
+    }
+
+    /// Agent names are machine names by default and can hold anything a
+    /// user typed; the folder name keeps only what every file system takes.
+    private static string SafeName(string agent)
+    {
+        var chars = agent.Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_').ToArray();
+        return chars.Length is 0 ? "_" : new string(chars);
     }
 
     /// Hide the agent's current last error until a different one comes in.
@@ -93,33 +176,39 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
     }
 
     // Everything (admin's view, and the agent-to-agent listing).
-    public List<object> Snapshot() => SnapshotFor(null, admin: true);
+    public List<AgentLive> Snapshot() => SnapshotFor(null, admin: true);
 
     // The machines an owner may see: theirs, plus every renderer (a renderer
     // serves everyone, so everyone gets to know it exists); an admin sees
     // all. Windows user names never leave the owner's own view.
-    public List<object> SnapshotFor(string? ownerUserId, bool admin)
+    public List<AgentLive> SnapshotFor(string? ownerUserId, bool admin)
     {
         lock (_gate)
         {
             return [.. _agents.Values
                 .Where(a => admin || a.Key.Role is Registry.AgentRole.Renderer || (ownerUserId is not null && a.Key.OwnerUserId == ownerUserId))
                 .OrderBy(a => a.Key.Name)
-                .Select(a => (object)new
-                {
-                    a.Key.Id, Agent = a.Key.Name, a.Beat.Version, a.Beat.Role, a.Beat.Paused, a.Beat.State, a.Beat.Detail,
-                    a.Beat.LastRecordingUtc, a.Beat.YouTubeReady,
-                    LastError = _dismissedError.TryGetValue(a.Key.Id, out var d) && d == a.Beat.LastError ? null : a.Beat.LastError,
-                    a.Beat.Machine,
-                    User = admin || a.Key.OwnerUserId == ownerUserId ? a.Beat.User : null,
-                    Owner = a.Key.OwnerUserId,
-                    Mine = ownerUserId is not null && a.Key.OwnerUserId == ownerUserId,
-                    SeenUtc = a.SeenUtc,
-                    // Two missed polls = gone. The agent polls every 60s.
-                    Online = DateTime.UtcNow - a.SeenUtc < TimeSpan.FromMinutes(3),
-                })];
+                .Select(a => Live(a, ownerUserId, admin))];
         }
     }
+
+    /// The heartbeat picture for one enrolled key, as its owner (or an admin) sees it.
+    public AgentLive? Find(string keyId, string? viewerUserId, bool admin)
+    {
+        lock (_gate) return _agents.TryGetValue(keyId, out var a) ? Live(a, viewerUserId, admin) : null;
+    }
+
+    private AgentLive Live((AgentKeyRecord Key, AgentHeartbeat Beat, DateTime SeenUtc) a, string? viewerUserId, bool admin) => new(
+        a.Key.Id, a.Key.Name, a.Beat.Version, a.Beat.Role, a.Beat.Paused, a.Beat.State, a.Beat.Detail,
+        a.Beat.LastRecordingUtc, a.Beat.YouTubeReady,
+        _dismissedError.TryGetValue(a.Key.Id, out var d) && d == a.Beat.LastError ? null : a.Beat.LastError,
+        a.Beat.Machine,
+        admin || (viewerUserId is not null && a.Key.OwnerUserId == viewerUserId) ? a.Beat.User : null,
+        a.Key.OwnerUserId,
+        viewerUserId is not null && a.Key.OwnerUserId == viewerUserId,
+        a.SeenUtc,
+        // Two missed polls = gone. The agent polls every 60s.
+        Online: DateTime.UtcNow - a.SeenUtc < TimeSpan.FromMinutes(3));
 
     /// The newest build in ReleaseDir by version, or null when nothing is
     /// published. Files are named LeagueTracker.RenderAgent-<version>.zip
