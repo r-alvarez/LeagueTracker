@@ -80,7 +80,10 @@ public sealed class UploadThrottle
                 if (ahead > TimeSpan.FromMilliseconds(5)) await Task.Delay(ahead, ct);
             }
         }
-        if (!throttledAtAll && sent >= 4 * 1024 * 1024 && clock.Elapsed > TimeSpan.FromMilliseconds(500))
+        // Only sizeable, unthrottled transfers say anything about the line;
+        // the time floor keeps a gigabit line's 16 MB chunk (~130 ms) in and
+        // socket-buffer noise out.
+        if (!throttledAtAll && sent >= 4 * 1024 * 1024 && clock.Elapsed >= TimeSpan.FromMilliseconds(50))
         {
             Observe(sent / clock.Elapsed.TotalSeconds);
         }
