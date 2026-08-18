@@ -93,6 +93,30 @@ public static class AuthSetup
                     ctx.Properties!.IsPersistent = true;
                     return Task.CompletedTask;
                 };
+                // Provider errors and our own refusals arrive here; without a
+                // handler they surface as an unhandled exception (HTTP 500).
+                o.Events.OnRemoteFailure = ctx =>
+                {
+                    var failure = ctx.Failure;
+                    var (status, message) = failure switch
+                    {
+                        UnverifiedEmailException u => (StatusCodes.Status403Forbidden,
+                            $"Your identity provider has not verified {u.Email} yet. Open the verification email it sent you (or ask the tracker's admin to mark it verified), then sign in again."),
+                        _ => (StatusCodes.Status400BadRequest, "Sign-in did not complete. Go back and try again; if it keeps happening, tell the tracker's admin."),
+                    };
+                    ctx.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("LeagueTracker.Auth")
+                        .LogWarning(failure, "OIDC sign-in failed: {Reason}", failure?.Message);
+                    ctx.Response.StatusCode = status;
+                    ctx.Response.ContentType = "text/html; charset=utf-8";
+                    ctx.HandleResponse();
+                    return ctx.Response.WriteAsync(
+                        "<!doctype html><meta charset=utf-8><title>Sign-in failed - LeagueTracker</title>" +
+                        "<body style=\"font:16px system-ui;background:#0b0f19;color:#e5e7eb;display:grid;place-items:center;min-height:100vh;margin:0\">" +
+                        "<div style=\"max-width:32rem;padding:2rem;background:#111827;border:1px solid #1f2937;border-radius:12px\">" +
+                        "<h1 style=\"font-size:1.1rem;margin:0 0 .75rem\">Sign-in failed</h1><p style=\"margin:0 0 1.25rem;line-height:1.5\">" +
+                        System.Net.WebUtility.HtmlEncode(message) +
+                        "</p><a href=\"/\" style=\"color:#93c5fd\">Back to the tracker</a></div>");
+                };
                 o.Events.OnTokenValidated = ctx =>
                 {
                     var users = ctx.HttpContext.RequestServices.GetRequiredService<UserStore>();

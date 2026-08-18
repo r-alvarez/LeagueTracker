@@ -71,6 +71,12 @@ public sealed class UserStore(RegistryDatabase registry, ILogger<UserStore> log)
         if (user is null)
         {
             var key = Normalize(email) ?? $"{subject}@{new Uri(issuer).Host}";
+            // The address belongs to a row we may not join (the provider has
+            // not verified it): say so instead of tripping the unique index -
+            // an admin-created Auth0 user is unverified until they click the
+            // mail or the admin flips the flag.
+            if (!emailVerified && db.Users.Any(u => u.Email == key))
+                throw new UnverifiedEmailException(key);
             user = new User
             {
                 Id = Ids.New(),
@@ -110,4 +116,10 @@ public sealed class UserStore(RegistryDatabase registry, ILogger<UserStore> log)
         var trimmed = email?.Trim().ToLowerInvariant();
         return trimmed is { Length: > 3 } && trimmed.Contains('@') ? trimmed : null;
     }
+}
+
+/// <summary>The provider vouched for a login whose email matches an existing user but is not verified there.</summary>
+public sealed class UnverifiedEmailException(string email) : Exception($"The email {email} is registered here but your identity provider has not verified it yet")
+{
+    public string Email { get; } = email;
 }
