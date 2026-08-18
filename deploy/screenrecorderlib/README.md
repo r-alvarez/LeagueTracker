@@ -21,8 +21,11 @@ Auto HDR complaint open ([#313](https://github.com/sskodje/ScreenRecorderLib/iss
 - keep every SDR desktop, and everything downstream of the frame, unchanged.
 
 Kill switch: the environment variable `SCREENRECORDERLIB_HDR_TONEMAP=0` in the
-host process forces the stock 8-bit behaviour (the agent sets it from
-`HdrToneMap: false`).
+host process forces the stock 8-bit behaviour. The agent sets it from
+`HdrToneMap: false` (appsettings / `LT_HDR_TONEMAP=0`), and the tracker can
+push that to every agent that hasn't set it locally with
+`Agent__Profile__HdrToneMap=false` on the container - the remote off switch
+if a build misbehaves on someone's PC.
 
 `build.ps1` clones the pinned commit, applies the patch and builds the x64
 Release C++/CLI DLL into `out/`; `publish-agent.ps1` ships that over the NuGet
