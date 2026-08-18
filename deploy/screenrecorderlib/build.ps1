@@ -30,12 +30,21 @@ $cleanup = -not $WorkDir
 if (-not $WorkDir) { $WorkDir = Join-Path ([IO.Path]::GetTempPath()) ("srl-" + [Guid]::NewGuid().ToString("n")) }
 $src = Join-Path $WorkDir "ScreenRecorderLib"
 
-$msbuild = (Get-Command msbuild -ErrorAction SilentlyContinue).Source
-if (-not $msbuild) {
-    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-    if (Test-Path $vswhere) { $msbuild = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1 }
+# The library needs the C++ tools with ATL (CComPtr everywhere) and its
+# vcxproj asks for the v143 (VS 2022) toolset - not every installed VS has
+# both: GitHub's runner carries a VS 2026 without ATL next to a VS 2022 with
+# it, and "the newest MSBuild" picked 2026 (atlbase.h missing). Prefer a VS
+# 2022 with ATL, then any VS with ATL, then whatever MSBuild is on PATH.
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$msbuild = $null
+if (Test-Path $vswhere) {
+    $needs = @("Microsoft.Component.MSBuild", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "Microsoft.VisualStudio.Component.VC.ATL")
+    $msbuild = & $vswhere -products * -version "[17.0,18.0)" -requires @needs -sort -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
+    if (-not $msbuild) { $msbuild = & $vswhere -products * -requires @needs -sort -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1 }
 }
-if (-not $msbuild) { throw "MSBuild not found - install Visual Studio Build Tools with C++/CLI support, or run this in the release workflow" }
+if (-not $msbuild) { $msbuild = (Get-Command msbuild -ErrorAction SilentlyContinue).Source }
+if (-not $msbuild) { throw "MSBuild with the C++ tools and ATL not found - install Visual Studio with the C++ workload (ATL, C++/CLI), or run this in the release workflow" }
+Write-Host "  MSBuild: $msbuild"
 
 Write-Host "Building ScreenRecorderLib $tag + hdr-tonemap.patch"
 New-Item -ItemType Directory -Force $WorkDir | Out-Null
