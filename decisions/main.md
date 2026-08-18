@@ -1586,3 +1586,27 @@ the stack environment first, then merge, so the waker never restarts without
 them. History still holds the old values (0 forks, 0 watchers since July, so
 "possibly seen"), which is why this is a mitigation and the repo's visibility
 remains the open decision - not rushed, Ruben is away from his equipment.
+
+## 2026-08-18 — Warnings are errors; the format gate waits for the auth branch
+
+**`Directory.Build.props`: `TreatWarningsAsErrors` for every project.** The
+API had exactly two warnings, both real: `ExecuteSqlRaw` with an interpolated
+string in the schema upgrader (now the same `DbCommand` path as the PRAGMA
+beside it - the identifiers come from the file's own Upgrades table, DDL can't
+be parameterised anyway) and the obsolete `ForwardedHeadersOptions.
+KnownNetworks` (now `KnownIPNetworks`). Agent, launcher and tests were already
+clean. From here a warning fails ci, which is what turns Dependabot's weekly
+bumps into a signal instead of noise.
+
+**`.editorconfig` encodes the house style; the `dotnet format` gate does not
+land yet.** Measured with `dotnet format --verify-no-changes`: the real
+findings are 3 files, +19/-5 lines - but the formatter also wants to
+re-indent the 846-line body of `MapAccountApi` in Program.cs, which sits at
+column 0. Correct, whitespace-only, and squarely on top of what
+`auth/identity-model` rewrites; landing it now would turn that merge into
+whitespace conflicts on every hunk. Without the .editorconfig the formatter
+also wanted to explode every compact anonymous initializer (1,700 lines of
+churn) - `csharp_new_line_before_members_in_*` are off for that reason. Plan:
+after the auth branch merges, one commit = `dotnet format LeagueTracker.slnx`
++ a `dotnet format --verify-no-changes` step in ci's api job. Two-minute job,
+recorded here so it isn't forgotten.

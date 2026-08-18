@@ -117,7 +117,12 @@ public sealed class AccountInitializer(AccountScopes scopes, ILogger<AccountInit
                     columnsByTable[table] = columns;
                 }
                 if (columns.Contains(column)) continue;
-                db.Database.ExecuteSqlRaw($"ALTER TABLE {table} ADD COLUMN {column} {definition}");
+                // Same raw command path as the PRAGMA above: the identifiers come
+                // from the Upgrades table in this file, never from input, and DDL
+                // cannot be parameterised anyway.
+                using var alter = connection.CreateCommand();
+                alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
+                alter.ExecuteNonQuery();
                 columns.Add(column);
                 log.LogInformation("Account {Slug}: added column {Table}.{Column}", account.Slug, table, column);
             }
