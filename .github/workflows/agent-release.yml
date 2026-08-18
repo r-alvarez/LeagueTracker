@@ -41,7 +41,12 @@ env:
 
 jobs:
   publish:
-    runs-on: windows-latest
+    # windows-2022, not -latest: ScreenRecorderLib is a v143 (VS 2022) C++/CLI
+    # project needing ATL, and the -latest image (VS 2026) ships v143 without
+    # ATL headers - upstream builds it on windows-2022, so do we. Building it
+    # with a newer toolset would also tie the DLL to a newer VC runtime than
+    # the players' PCs are known to have.
+    runs-on: windows-2022
     timeout-minutes: 40
     permissions:
       contents: write
@@ -73,8 +78,8 @@ jobs:
         run: choco install innosetup --version ${{ env.INNOSETUP_VERSION }} --no-progress -y
 
       # The WGC engine ships as our build of ScreenRecorderLib (upstream at a
-      # pinned commit + HDR tone-map patch, deploy/screenrecorderlib). C++/CLI,
-      # so it needs MSBuild with the VC.CLI component - on windows-latest.
+      # pinned commit + HDR tone-map patch, deploy/screenrecorderlib). C++/CLI
+      # with ATL, so it needs the full VS 2022 C++ workload of this image.
       - uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
 
       - name: Build ScreenRecorderLib (HDR tone-map)
