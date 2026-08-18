@@ -393,7 +393,10 @@ public sealed class TrackerClient
             {
                 var read = await file.ReadAsync(buffer.AsMemory(0, (int)Math.Min(ChunkBytes, file.Length - offset)), ct);
                 if (read == 0) break;
-                using var content = new ByteArrayContent(buffer, 0, read);
+                // Paced like the YouTube upload: a game may be running.
+                using HttpContent content = UploadThrottle.Shared is { } throttle
+                    ? new ThrottledContent(buffer, read, throttle)
+                    : new ByteArrayContent(buffer, 0, read);
                 content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
                 using var resp = await _http.PutAsync($"{Api}/vods/{matchId}/chunk?offset={offset}", content, ct);
                 if (resp.StatusCode == HttpStatusCode.NotFound) return false;
