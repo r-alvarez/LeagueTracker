@@ -50,19 +50,39 @@ def log(msg: str) -> None:
     print(time.strftime("%H:%M:%S"), msg, flush=True)
 
 
-def pending_jobs(base_url: str) -> list[str]:
-    req = urllib.request.Request(f"{base_url}/api/render/queue", headers={"Accept": "application/json"})
+def get_json(url: str):
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         body = resp.read()
     # A Cloudflare Access sign-in page (HTML, not JSON) lands here too and
     # raises - meaning DNS resolved the tracker via the internet instead of
     # the LAN's split-horizon view. The caller logs it; fix the NAS DNS.
-    rows = json.loads(body)
-    return [
-        str(row.get("matchId") or row.get("MatchId") or "?")
-        for row in rows
-        if str(row.get("status") or row.get("Status") or "").lower() in WAKE_STATUSES
+    return json.loads(body)
+
+
+def pending_jobs(base_url: str) -> list[str]:
+    # One tracker hosts every player's account; the render queue is
+    # per-account and resolves the account from the URL path, so ask the
+    # tracker which accounts it has and read each queue on its canonical
+    # path. /api/accounts is the site's own (key-less) list - the agent
+    # variant needs an enrolled key the waker doesn't have. Reading
+    # /api/render/queue on the bare host would only see the default account.
+    accounts = get_json(f"{base_url}/api/accounts")
+    paths = [
+        str(a.get("path") or a.get("Path") or "")
+        for a in (accounts.get("accounts") or accounts.get("Accounts") or [])
     ]
+    jobs: list[str] = []
+    for path in paths:
+        if not path:
+            continue
+        rows = get_json(f"{base_url}/api/a/{path}/render/queue")
+        jobs += [
+            str(row.get("matchId") or row.get("MatchId") or "?")
+            for row in rows
+            if str(row.get("status") or row.get("Status") or "").lower() in WAKE_STATUSES
+        ]
+    return jobs
 
 
 def send_broadcast() -> None:
@@ -100,7 +120,7 @@ def main() -> None:
     if len(MAC) != 12:
         raise SystemExit("PC_MAC is not set (or not a MAC address) - set it in the Portainer stack environment")
     unifi_on = bool(UNIFI_URL and UNIFI_USER and UNIFI_PASS)
-    log(f"watching {len(TRACKERS)} tracker(s), waking {MAC} every {POLL_SECONDS}s while work waits "
+    log(f"watching {len(TRACKERS)} tracker(s) (every account on each), waking {MAC} every {POLL_SECONDS}s while work waits "
         f"(UniFi API: {'on via ' + UNIFI_URL if unifi_on else 'OFF - set UNIFI_URL/USER/PASS; broadcast alone does not cross subnets'})")
 
     was_waking = False

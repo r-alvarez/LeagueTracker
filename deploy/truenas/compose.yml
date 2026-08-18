@@ -114,7 +114,10 @@ services:
     network_mode: host
     environment:
       - TZ=Europe/London
-      - TRACKER_URLS=https://league.rjav-tech.co.uk,https://league-alt.rjav-tech.co.uk,https://league-ben.rjav-tech.co.uk
+      # One site, every account: the waker discovers the accounts from the
+      # tracker and reads each queue on its canonical path. The legacy
+      # per-player hostnames are no longer needed here.
+      - TRACKER_URLS=https://league.rjav-tech.co.uk
       - PC_MAC=${PC_MAC:-}
       - WOL_BROADCAST=${WOL_BROADCAST:-255.255.255.255}
       - POLL_SECONDS=60
