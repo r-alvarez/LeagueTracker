@@ -1610,3 +1610,57 @@ churn) - `csharp_new_line_before_members_in_*` are off for that reason. Plan:
 after the auth branch merges, one commit = `dotnet format LeagueTracker.slnx`
 + a `dotnet format --verify-no-changes` step in ci's api job. Two-minute job,
 recorded here so it isn't forgotten.
+
+## 2026-08-18 — Live banner runs a real clock; Swiftplay is a filter; ARAM's zero is real
+
+Branch `worktree-live-banner-queue-filters`, from four claims about the live
+banner and the match filters. Each was checked against Ben's real data before
+anything changed, on a scratch instance (own data dir, the app reading the key
+file itself, port 5398).
+
+**"ARAM games aren't reported" - refuted, no code change.** Riot's match list
+for TheCosmicPeach#TTV is 559 games back to 2026-05-06: 467 Solo/Duo, 75
+Swiftplay, 17 Normal Draft, zero ARAM (a full all-queue backfill). Ingest is
+queue-agnostic: the poller lists ids without a `type` filter, `BuildMatchAsync`
+copes with an ARAM-shaped payload (probe: a real raw game rewritten to queue
+450 / map 12 / no positions builds without throwing), and the filter maps
+`aram` to 450/720. There is nothing to show; the day he plays one it appears.
+Featured modes are the same story - they were labelled "Queue N", now they
+carry names (One for All, Nexus Blitz, Ultimate Spellbook, Swarm, Brawl, ARAM
+Mayhem) and show under All. Recording is the agent's `RecordQueues`
+allow-list, untouched - "report, don't record" was already the split.
+
+**"No Swiftplay filter" - correct.** `RankMath.QueueFamily` accepted
+`swiftplay` since 6d8e698 but Matches.tsx never grew the button. Added; and
+the families are now disjoint - Swiftplay left `normal`. Alternative kept in
+mind: nested families (Normal ⊃ Swiftplay, the way the client's queue picker
+nests them). Rejected: two buttons counting the same 75 games under different
+names is what "draft/normal games aren't reported correctly" most plausibly
+was - Normal returned draft + Swiftplay mixed, with no way to see the 17
+draft games alone. A test pins the families disjoint. Trade-off: the URL
+`queue=normal` now returns fewer rows than before for anyone who bookmarked
+it; nobody has.
+
+**"The banner should show the game as it happens" - the minute count did
+advance (a 60s ticker), but everything around it was coarse.** The server
+re-read spectator only on the poller's cadence (120s in prod), so the banner
+appeared, resolved "loading / early game", and disappeared up to two minutes
+late; the client polled every 30s on top. Now: the poller passes every 30s
+while any account is live (`LiveGameDelay`; 15s during fast-capture still
+wins), the client polls every 15s, and the banner renders a mm:ss clock that
+re-renders every second. Cost: 2 Riot calls per 30s per account while
+someone is in game - trivial against 100/2min.
+
+**Clock anchor, measured rather than assumed.** spectator-v5 `gameStartTime`
+against match-v5 `gameStartTimestamp` (the in-game clock's zero: `gameDuration`
+= max timePlayed = end − start to the second) for the same games:
+EUW1_7954191662, EUW1_7954214074, EUW1_7954231883 - the spectator start is
+30.1s *earlier* every time, to the tenth of a second. So `ClockStartUtc =
+StartedUtc + 30s` on the snapshot; the banner counts from there. `gameLength`
+was rejected as a source: negative (−96) a minute into a game, ~150s behind
+`now − gameStartTime` later on, and Riot's own docs say spectator time is
+"not accurate and inconsistent". A snapshot test pins the +30s so a future
+"why not just use gameStartTime" has to argue with the numbers. Riot's docs
+say `gameStartTime` is 0 for the first minutes; on the games measured it was
+already set within a minute of the start - the "loading / early game" label
+stays for when it isn't.
