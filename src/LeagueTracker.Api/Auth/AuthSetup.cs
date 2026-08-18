@@ -70,6 +70,12 @@ public static class AuthSetup
                 o.ClientId = oidc.ClientId;
                 o.ClientSecret = oidc.ClientSecret;
                 o.ResponseType = OpenIdConnectResponseType.Code;
+                // The code comes back on a top-level GET, so the correlation and
+                // nonce cookies can be Lax: form_post needs SameSite=None+Secure,
+                // which browsers refuse on the plain-http localhost review instance.
+                o.ResponseMode = OpenIdConnectResponseMode.Query;
+                o.CorrelationCookie.SameSite = SameSiteMode.Lax;
+                o.NonceCookie.SameSite = SameSiteMode.Lax;
                 o.UsePkce = true;
                 o.SaveTokens = false;
                 o.CallbackPath = "/auth/callback";

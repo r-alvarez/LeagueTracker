@@ -6,9 +6,10 @@ namespace LeagueTracker.Api.Auth;
 
 // Who is asking, read once from the request's principal: a signed-in person
 // (our user id, admin or not), an approved agent (its key record), or nobody.
-public sealed class Caller(IHttpContextAccessor http, AgentKeyStore keys)
+public sealed class Caller(IHttpContextAccessor http, AgentKeyStore keys, UserStore users)
 {
     private ClaimsPrincipal? Principal => http.HttpContext?.User;
+    private bool? _admin;
 
     public bool IsUser => UserId is not null;
     public string? UserId => Principal?.Identity?.AuthenticationType is not AgentKeyAuthenticationHandler.SchemeName
@@ -16,7 +17,10 @@ public sealed class Caller(IHttpContextAccessor http, AgentKeyStore keys)
         : null;
     public string? Email => IsUser ? Principal?.FindFirstValue(TrackerClaims.Email) : null;
     public string? DisplayName => IsUser ? Principal?.FindFirstValue(TrackerClaims.Name) : null;
-    public bool IsAdmin => IsUser && Principal?.HasClaim(TrackerClaims.Admin, "true") is true;
+    // Read from the registry, not the cookie: promoting (or demoting) someone
+    // takes effect on their next request, not their next sign-in. One lookup
+    // per request, on a tiny SQLite.
+    public bool IsAdmin => IsUser && (_admin ??= users.ById(UserId)?.IsAdmin ?? false);
 
     public bool IsAgent => Agent is not null;
     public AgentKeyRecord? Agent =>
