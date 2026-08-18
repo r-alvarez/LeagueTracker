@@ -213,8 +213,14 @@ export default function VodReview({ matchId, vod, onChange, moments, deaths = []
               style={{ width: '100%', aspectRatio: '16 / 9', border: 0, borderRadius: 8, background: '#000' }}
             />
           ) : (
-            <div className="empty" style={{ aspectRatio: '16 / 9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              This game was recorded — paste its YouTube link to review it here with jump markers.
+            <div className="empty vod-pending" style={{ aspectRatio: '16 / 9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {vod.meta
+                ? <span>
+                    <strong>Recorded — the video is on its way.</strong><br />
+                    It uploads to YouTube from the player's PC (paced while a game runs) and appears here once YouTube has processed it;
+                    the markers and APM below are already in. Uploaded it yourself? Paste the link.
+                  </span>
+                : <span>This game was recorded — paste its YouTube link to review it here with jump markers.</span>}
             </div>
           )}
 

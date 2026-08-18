@@ -1552,4 +1552,8 @@ table.agent-access td.now { max-width: 260px; }
 table.agent-access .agent-now { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
 table.agent-access tr.pending td { background: color-mix(in srgb, var(--warn) 6%, transparent); }
 table.agent-access tr.agent-error-row td { padding-top: 0; white-space: normal; }
+/* Recorded but not yet on YouTube: the sidecar arrived, the video is in
+   transit - read as a state, not an error. */
+.vod-pending { text-align: center; padding: 24px; line-height: 1.5; }
+.vod-pending strong { color: var(--ink); }
 table.agent-access tr.agent-error-row:hover td { background: transparent; }

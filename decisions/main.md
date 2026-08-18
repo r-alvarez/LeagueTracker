@@ -1664,3 +1664,49 @@ was rejected as a source: negative (−96) a minute into a game, ~150s behind
 say `gameStartTime` is 0 for the first minutes; on the games measured it was
 already set within a minute of the start - the "loading / early game" label
 stays for when it isn't.
+
+## 2026-08-18 — The agent as a good citizen: delivery loop, paced uploads, retention, diagnostics
+
+**Ben's report and Ruben's expectation defined the target.** "The game is slow
+while it uploads" against "game 1 on YouTube by the time game 2 ends, without
+Ben doing anything". The recorder did the opposite of that on purpose:
+uploads paused whenever a game process existed (protecting the game, never
+finishing between back-to-back games), and delivery ran inline on the
+recording loop, so the recorder was not even watching for the next game while
+a multi-GB upload ran - a bug nobody had hit because nobody queued that fast.
+Ascent's "right away" is mostly small files (1080p30 @ 5 Mbps).
+
+**Delivery is its own loop.** Catch-up pass at start, a pass when a game
+finalizes, one every ten minutes regardless. The recorder hands off and is
+back to watching immediately. `UploadThrottle` paces every upload body
+(YouTube resumable chunks, tracker chunks) in 64 KB slices: while a game runs,
+`UploadInGameMbps` or by default half the line's idle upstream as measured
+from our own unthrottled uploads (EWMA, persisted, floor 3 Mbps); otherwise
+full speed. A game starting mid-chunk is honoured within a slice. Finalize's
+ffmpeg runs below-normal. `RecordMaxHeight` exists (WGC scales on the GPU)
+but defaults to native - Ruben: people buy big screens to see them; it is a
+per-agent knob for a struggling machine, not a policy.
+
+**Retention, decided from the tracker.** Once YouTube reports the video
+processed and the link is on the tracker (or, without YouTube, the tracker
+holds the video), the local mp4 goes and the sidecars stay. The keep/delete
+choice comes from the tracker profile - shared `false`, `RUBEN` `true` -
+because agents self-update on machines nobody is sitting at, and a default
+that deletes must never be the first thing a new build does on Ruben's own PC
+before he has been home to set a local override. Old already-published games
+are pruned on the first pass too; that is the point.
+
+**Diagnostics.** The heartbeat command channel carries `sendlog`: the agent
+ships its log tail at once, the tracker keeps the newest five per agent, the
+Agent access row offers Log + a link. Ben's vanished game 3 (17 Aug) is why:
+the only witness was a file on his PC. A quota postponement is pinned on the
+heartbeat as an actionable message. Per-agent YouTube credentials (own
+Google project, same channel) went to main early as a cherry-pick so
+tonight's uploads split the quota; `deploy/youtube-auth.ps1` mints a token
+without the secret leaving the owner's console (learned live: force
+`select_account` or Google binds the token to the account's default channel,
+and wait for the windowed exe).
+
+**Not verified on real hardware yet.** The pacing, the loop and retention
+compile and reason correctly; Ben's machine is the first real test when the
+branch ships, with the Log button as the safety net.

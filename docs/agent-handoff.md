@@ -124,6 +124,16 @@ is up on that box; the gaming PCs are never used for rendering again.
 
 ## Operational notes
 
+- **Uploads run during games, paced.** Delivery is its own loop in the
+  agent; a running game caps the upload at half the line's measured idle
+  upstream (`UploadInGameMbps` to pin it). Game 1 should be on YouTube by
+  the end of game 2; if a player says otherwise, ask for their **Log** from
+  the Agent access row (the "sendlog" command ships it within a minute).
+- **Recordings are deleted once safe** (YouTube processed + linked), per
+  the tracker profile: shared `KeepRecordingsAfterPublish=false`, `RUBEN`
+  overridden to `true`. A new agent that should keep files gets its own
+  `Agent__Profiles__<name>__KeepRecordingsAfterPublish: "true"` line.
+
 - **Pause** stops new recordings/renders/reviews; an upload in flight
   finishes (it's invisible and stopping it only loses work).
 - **Updates** never overwrite `appsettings.json` or `youtube-token.json`;
