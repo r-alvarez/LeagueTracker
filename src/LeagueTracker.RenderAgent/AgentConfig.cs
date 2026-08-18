@@ -89,11 +89,11 @@ public sealed class AgentConfig
     /// the small sidecars; on = a debugging machine that wants the files.
     public bool KeepRecordingsAfterPublish { get; set; }
 
-    /// Cap on the recorded picture height; wider-than-tall aspect is kept
-    /// (3440x1440 -> 2580x1080). 0 = native. 1080 halves an ultrawide's
-    /// encode load and upload size against native 1440p and is well above
-    /// what a review needs; the WGC engine scales on the GPU.
-    public int RecordMaxHeight { get; set; } = 1080;
+    /// Optional cap on the recorded picture height, aspect kept (3440x1440
+    /// -> 2580x1080); the WGC engine scales on the GPU. 0 = native, and
+    /// native is the default: people buy big screens to see them. A knob for
+    /// one struggling machine (per-agent profile), not a policy.
+    public int RecordMaxHeight { get; set; }
 
     /// Record the game's audio track (and ONLY the game's - captured from
     /// the game process via Windows process loopback, so Discord/music
