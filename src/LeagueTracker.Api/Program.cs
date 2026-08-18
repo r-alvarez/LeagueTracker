@@ -271,10 +271,22 @@ app.MapPost("/api/agents/dismiss-error", (string agent, AgentRegistry agents) =>
 app.MapPost("/api/agents/restart", (string agent, AgentRegistry agents) =>
     agents.Queue(agent, "restart") ? Results.Ok() : Results.NotFound());
 
-app.MapGet("/api/agents", (AgentKeyStore keys) => Results.Ok(keys.All.Select(r => new
+// Enrolled keys, each joined with the heartbeat of the agent running under
+// it (version, state, last error) and the newest published build, so the
+// access table can say who is on what.
+app.MapGet("/api/agents", (AgentKeyStore keys, AgentRegistry agents) =>
 {
-    r.Id, r.Name, r.Machine, Status = r.Status.ToString().ToLowerInvariant(), r.CreatedUtc, r.DecidedUtc, r.LastSeenUtc, r.LastIp, r.Note,
-})));
+    var latest = agents.Latest()?.Version;
+    return Results.Ok(new
+    {
+        latestVersion = latest,
+        agents = keys.All.Select(r => new
+        {
+            r.Id, r.Name, r.Machine, Status = r.Status.ToString().ToLowerInvariant(), r.CreatedUtc, r.DecidedUtc, r.LastSeenUtc, r.LastIp, r.Note,
+            Live = agents.Find(r.Name, r.Machine),
+        }),
+    });
+});
 app.MapPost("/api/agents/{id}/approve", (string id, AgentKeyStore keys) => keys.Decide(id, AgentKeyStatus.Approved) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/agents/{id}/revoke", (string id, AgentKeyStore keys) => keys.Decide(id, AgentKeyStatus.Revoked) ? Results.Ok() : Results.NotFound());
 app.MapDelete("/api/agents/{id}", (string id, AgentKeyStore keys) => keys.Delete(id) ? Results.NoContent() : Results.NotFound());

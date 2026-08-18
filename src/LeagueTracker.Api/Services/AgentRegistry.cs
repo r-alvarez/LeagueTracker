@@ -29,6 +29,13 @@ public sealed record AgentHeartbeat(
     string Agent, string Version, string Role, bool Paused, string State, string? Detail,
     DateTime? LastRecordingUtc, bool YouTubeReady, string? LastError, string? Machine, string? User);
 
+/// One agent as the Data page sees it: its last heartbeat plus whether it
+/// is still reporting.
+public sealed record AgentLive(
+    string Agent, string Version, string Role, bool Paused, string State, string? Detail,
+    DateTime? LastRecordingUtc, bool YouTubeReady, string? LastError, string? Machine, string? User,
+    DateTime SeenUtc, bool Online);
+
 /// Installer is the Setup.exe published beside the zip (null when a
 /// release predates it or it was not mirrored) - for new machines; the zip
 /// is what installed agents update from.
@@ -90,22 +97,31 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
         }
     }
 
-    public List<object> Snapshot()
+    public List<AgentLive> Snapshot()
+    {
+        lock (_gate) return [.. _agents.Values.OrderBy(a => a.Beat.Agent).Select(Live)];
+    }
+
+    /// The heartbeat picture for an enrolled key: the agent that reports
+    /// under the key's name, or failing that from the key's machine (an
+    /// agent renamed in its settings still runs on the same PC).
+    public AgentLive? Find(string name, string? machine)
     {
         lock (_gate)
         {
-            return [.. _agents.Values.OrderBy(a => a.Beat.Agent).Select(a => (object)new
-            {
-                a.Beat.Agent, a.Beat.Version, a.Beat.Role, a.Beat.Paused, a.Beat.State, a.Beat.Detail,
-                a.Beat.LastRecordingUtc, a.Beat.YouTubeReady,
-                LastError = _dismissedError.TryGetValue(a.Beat.Agent, out var d) && d == a.Beat.LastError ? null : a.Beat.LastError,
-                a.Beat.Machine, a.Beat.User,
-                SeenUtc = a.SeenUtc,
-                // Two missed polls = gone. The agent polls every 60s.
-                Online = DateTime.UtcNow - a.SeenUtc < TimeSpan.FromMinutes(3),
-            })];
+            if (_agents.TryGetValue(name, out var byName)) return Live(byName);
+            var byMachine = _agents.Values.FirstOrDefault(a => machine is { Length: > 0 } && string.Equals(a.Beat.Machine, machine, StringComparison.OrdinalIgnoreCase));
+            return byMachine.Beat is null ? null : Live(byMachine);
         }
     }
+
+    private AgentLive Live((AgentHeartbeat Beat, DateTime SeenUtc) a) => new(
+        a.Beat.Agent, a.Beat.Version, a.Beat.Role, a.Beat.Paused, a.Beat.State, a.Beat.Detail,
+        a.Beat.LastRecordingUtc, a.Beat.YouTubeReady,
+        _dismissedError.TryGetValue(a.Beat.Agent, out var d) && d == a.Beat.LastError ? null : a.Beat.LastError,
+        a.Beat.Machine, a.Beat.User, a.SeenUtc,
+        // Two missed polls = gone. The agent polls every 60s.
+        Online: DateTime.UtcNow - a.SeenUtc < TimeSpan.FromMinutes(3));
 
     /// The newest build in ReleaseDir by version, or null when nothing is
     /// published. Files are named LeagueTracker.RenderAgent-<version>.zip

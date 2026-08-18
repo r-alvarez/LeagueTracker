@@ -21,7 +21,6 @@ export default function DataPage() {
   // or sim-hang message repeats across many games, so one row per reason with
   // the games listed beats a comma-soup paragraph.
   const reloadRenderQueue = () => api.renderQueue().then(setRenderQueue).catch(() => setRenderQueue([]))
-  const reloadStatus = () => api.status().then(setStatus).catch(console.error)
 
   const failedGroups = (() => {
     const groups = new Map<string, RenderQueueRow[]>()
@@ -127,47 +126,6 @@ export default function DataPage() {
       <AgentJoin />
 
       <AgentApprovals />
-
-      {status && status.agents.length > 0 && (
-        <div className="card">
-          <h2>Agents</h2>
-          <p className="mut" style={{ marginTop: 0 }}>
-            The recorder/render agents that report to this tracker. Recorders capture the player's own games and publish them;
-            the renderer cuts replay clips for every tracker. Each one pauses from its tray icon.
-          </p>
-          <div className="agent-list">
-            {status.agents.map(a => (
-              <div key={a.agent} className="agent-row">
-                <div className="agent-head">
-                  <span className={`badge ${a.online ? (a.paused ? 'remake' : 'win') : 'loss'}`}>
-                    {a.online ? (a.paused ? 'paused' : 'online') : 'offline'}
-                  </span>
-                  <strong>{a.agent}</strong>
-                  <span className="mut sm-text">v{a.version} · {a.role}{a.user ? ` · ${a.user}` : ''}</span>
-                  <button className="action sm-action" title="Ask this agent to restart on its next heartbeat (when it is idle) - it re-reads settings and updates itself"
-                    onClick={async () => { await api.restartAgent(a.agent); }}>Restart</button>
-                </div>
-                <div className="agent-state">
-                  <span className="agent-state-name">{a.state}</span>
-                  {a.detail && <span className="mut"> — {a.detail}</span>}
-                </div>
-                <dl className="agent-meta">
-                  <div><dt>Seen</dt><dd>{new Date(a.seenUtc).toLocaleTimeString()}</dd></div>
-                  {a.lastRecordingUtc && <div><dt>Last recording</dt><dd>{new Date(a.lastRecordingUtc).toLocaleString()}</dd></div>}
-                  {!a.youTubeReady && <div><dt>YouTube</dt><dd className="warn-text">not authorized</dd></div>}
-                </dl>
-                {a.lastError && (
-                  <div className="agent-error">
-                    <span className="agent-error-label">Last error</span>{a.lastError}
-                    <button className="dismiss-x" title="Dismiss (comes back only if a new error appears)"
-                      onClick={async () => { await api.dismissAgentError(a.agent); reloadStatus() }}>✕</button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {renderQueue.length > 0 && (
         <div className="card">
