@@ -38,6 +38,14 @@ if (-not $AgentExe) {
 }
 $AgentExe = (Resolve-Path $AgentExe).Path
 
+# A previous run that never got its consent is still waiting (10 min) in its
+# scratch folder, holding the files - end it before making a new one.
+Get-Process LeagueTracker.RenderAgent -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -like (Join-Path ([IO.Path]::GetTempPath()) "lt-youtube-auth-*") } |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter "lt-youtube-auth-*" -ErrorAction SilentlyContinue |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
 # A scratch copy: --youtube-auth writes youtube-token.json next to the exe it
 # runs from, and the installed agent's folder must stay as it is.
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ("lt-youtube-auth-" + [Guid]::NewGuid().ToString("n"))
