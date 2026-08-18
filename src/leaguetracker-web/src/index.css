@@ -1546,6 +1546,10 @@ table.data.render-failed-table td.reason { color: var(--ink-2); font-size: 12.5p
    "needs you" without a second badge. */
 table.agent-access .sm-action { font-size: 12px; padding: 3px 9px; }
 table.agent-access td.actions { text-align: right; }
+/* The "now" cell carries free text (recording names get long); clip it and
+   keep the full line on hover so the table stays one screen wide. */
+table.agent-access td.now { max-width: 260px; }
+table.agent-access .agent-now { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
 table.agent-access tr.pending td { background: color-mix(in srgb, var(--warn) 6%, transparent); }
 table.agent-access tr.agent-error-row td { padding-top: 0; white-space: normal; }
 table.agent-access tr.agent-error-row:hover td { background: transparent; }

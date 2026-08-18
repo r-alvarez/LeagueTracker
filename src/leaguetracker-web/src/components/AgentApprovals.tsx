@@ -43,8 +43,21 @@ export default function AgentApprovals() {
   const pending = keys.filter(k => k.status === 'pending').length
   const latest = access.latestVersion
   const when = (s: string | null) => (s ? new Date(s).toLocaleString() : '—')
+  // Day + time is what the eye needs in the table; the full stamp sits on hover.
+  const whenShort = (s: string | null) => (s
+    ? new Date(s).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : '—')
   // Newest heartbeat or newest key activity, whichever the row has.
   const seen = (k: AgentKey) => k.live?.seenUtc ?? k.lastSeenUtc
+  // One badge carries both facts: can the key talk to us, and is the agent
+  // behind it alive. Approved + no heartbeat is the plain word.
+  const statusOf = (k: AgentKey): { cls: string; text: string; title: string } => {
+    if (k.status !== 'approved') return { cls: k.status === 'pending' ? 'remake' : 'loss', text: k.status, title: k.status === 'pending' ? 'Waiting for approval' : 'Key revoked - the machine is cut off' }
+    const live = k.live
+    if (!live) return { cls: 'remake', text: 'approved', title: 'Approved; the agent has not reported yet' }
+    if (!live.online) return { cls: 'loss', text: 'offline', title: 'Approved; the agent has stopped reporting' }
+    return live.paused ? { cls: 'remake', text: 'paused', title: 'Approved; paused from its tray icon' } : { cls: 'win', text: 'online', title: 'Approved and reporting' }
+  }
 
   return (
     <div className="card">
@@ -58,9 +71,8 @@ export default function AgentApprovals() {
         <table className="data agent-access">
           <thead>
             <tr>
-              <th>Access</th>
+              <th>Status</th>
               <th>Agent</th>
-              <th>PC</th>
               <th>User</th>
               <th>Version</th>
               <th>Now</th>
@@ -73,14 +85,16 @@ export default function AgentApprovals() {
             {keys.map(k => {
               const live = k.live
               const outdated = !!(live && latest && live.version !== latest && live.version !== '0.0.0.0')
+              const status = statusOf(k)
               return (
                 <Fragment key={k.id}>
                 <tr className={k.status === 'pending' ? 'pending' : undefined}>
+                  <td><span className={`badge ${status.cls}`} title={status.title}>{status.text}</span></td>
                   <td>
-                    <span className={`badge ${k.status === 'approved' ? 'win' : k.status === 'pending' ? 'remake' : 'loss'}`}>{k.status}</span>
+                    <strong>{k.name}</strong>
+                    {k.machine && k.machine !== k.name && <span className="mut sm-text"> · {k.machine}</span>}
+                    {live && live.role !== 'full' && <span className="mut sm-text"> · {live.role}</span>}
                   </td>
-                  <td><strong>{k.name}</strong>{live && live.role !== 'full' && <span className="mut sm-text"> · {live.role}</span>}</td>
-                  <td>{k.machine}</td>
                   <td>{live?.user ?? <span className="mut">—</span>}</td>
                   <td>
                     {live
@@ -89,21 +103,20 @@ export default function AgentApprovals() {
                         </span>
                       : <span className="mut">—</span>}
                   </td>
-                  <td>
+                  <td className="now">
                     {live
                       ? <>
-                          <span className={`badge ${live.online ? (live.paused ? 'remake' : 'win') : 'loss'}`}>
-                            {live.online ? (live.paused ? 'paused' : 'online') : 'offline'}
+                          <span className="agent-now" title={`${live.state}${live.detail ? ` — ${live.detail}` : ''}`}>
+                            {live.online ? live.state : 'last: ' + live.state}{live.detail ? ` — ${live.detail}` : ''}
                           </span>
-                          {live.online && <span className="mut sm-text"> {live.state}{live.detail ? ` — ${live.detail}` : ''}</span>}
                           {!live.youTubeReady && <span className="warn-text sm-text"> · YouTube not authorized</span>}
-                          {live.lastRecordingUtc && <div className="mut sm-text">last recording {when(live.lastRecordingUtc)}</div>}
+                          {live.lastRecordingUtc && <div className="mut sm-text" title={when(live.lastRecordingUtc)}>last recording {whenShort(live.lastRecordingUtc)}</div>}
                         </>
                       : k.status === 'pending'
-                        ? <span className="mut sm-text">asked {when(k.createdUtc)}</span>
+                        ? <span className="mut sm-text">asked {whenShort(k.createdUtc)}</span>
                         : <span className="mut sm-text">no heartbeat</span>}
                   </td>
-                  <td>{when(seen(k))}</td>
+                  <td title={when(seen(k))}>{whenShort(seen(k))}</td>
                   <td>{k.lastIp ?? <span className="mut">—</span>}</td>
                   <td className="actions">
                     {k.status === 'pending' && <>
@@ -125,7 +138,7 @@ export default function AgentApprovals() {
                 </tr>
                 {live?.lastError && (
                   <tr className="agent-error-row">
-                    <td colSpan={9}>
+                    <td colSpan={8}>
                       <div className="agent-error">
                         <span className="agent-error-label">Last error</span>{live.lastError}
                         <button className="dismiss-x" title="Dismiss (comes back only if a new error appears)"
