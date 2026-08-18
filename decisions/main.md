@@ -1517,9 +1517,13 @@ switch, since the library has no option surface for it.
 **Build.** No fork repo: the patch lives here, `build.ps1` clones the pinned
 commit, applies it and builds the x64 Release C++/CLI DLL, and
 `publish-agent.ps1` ships it over the NuGet copy (warns loudly if absent).
-The release workflow runs it on windows-latest (VC.CLI component present);
-it also builds end-to-end on the dev box's VS 2026, which is how the patch
-was checked - compile only, no capture, per the no-GPU-on-the-work-PC rule.
+The release workflow runs it on windows-2022 - windows-latest is now a VS
+2026 image whose v143 toolset has no ATL headers (two red runs before the
+job moved), and building with the 2026 toolset would tie the DLL to a newer
+VC runtime than the players' PCs are known to have. It also builds
+end-to-end on the dev box's VS 2026, which is how the patch was checked -
+compile only, no capture, per the no-GPU-on-the-work-PC rule. Shipped as
+agent 2026.818.654.20.
 Upstream bump = re-pin, re-apply, regenerate (README in the folder).
 
 **Left as is, deliberately.** ddagrab on an HDR desktop still records the
