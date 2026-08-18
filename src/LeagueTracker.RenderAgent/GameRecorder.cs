@@ -774,6 +774,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             try
             {
                 _delivering = true;
+                await AdoptOrphansAsync(ct);
                 await SweepUnuploadedAsync(ct);
                 EnforceDiskBudget();
             }
@@ -826,6 +827,72 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         catch (Exception ex)
         {
             Log.Warn($"Could not remove {baseName}.mp4: {ex.Message} (next pass retries)");
+        }
+    }
+
+    /// A finished mp4 with no sidecar is footage the sweep cannot see: no
+    /// match id, so never uploaded, never linked, never pruned - it just sits
+    /// there (a lost .inflight.json finalized as a stray part does this). The
+    /// file's creation and last-write times bracket the game it captured; the
+    /// owner's tracker knows which game that was. Exactly one candidate =
+    /// adopt it: a minimal sidecar, and the normal delivery takes over.
+    private async Task AdoptOrphansAsync(CancellationToken ct)
+    {
+        if (!Directory.Exists(RecordingsDir)) return;
+        var settled = DateTime.UtcNow.AddMinutes(-15);
+        foreach (var f in new DirectoryInfo(RecordingsDir).GetFiles("*.mp4"))
+        {
+            if (f.Name.EndsWith(".part.mp4", StringComparison.OrdinalIgnoreCase) || f.LastWriteTimeUtc > settled) continue;
+            var baseName = Path.GetFileNameWithoutExtension(f.Name);
+            string M(string ext) => Path.Combine(MetaDir, baseName + ext);
+            if (File.Exists(M(".json")) || File.Exists(M(".orphan"))) continue;
+            // The telemetry file is opened at segment start and written all
+            // game long: the truest window. The mp4 itself only if the segment
+            // was renamed into place (a remux is a new file, created at the end).
+            var start = f.CreationTimeUtc;
+            var end = f.LastWriteTimeUtc;
+            if (new FileInfo(M(".events.csv.gz")) is { Exists: true } ev && ev.LastWriteTimeUtc - ev.CreationTimeUtc > TimeSpan.FromMinutes(3))
+            {
+                start = ev.CreationTimeUtc; end = ev.LastWriteTimeUtc;
+            }
+            if (end - start < TimeSpan.FromMinutes(3) || end - start > TimeSpan.FromHours(3))
+            {
+                // Copied/moved files carry no usable window; nothing to match on.
+                File.WriteAllText(M(".orphan"), $"no usable time window ({start:O}..{end:O})");
+                Log.Warn($"Recording {f.Name} has no sidecar and no usable time window - left alone (delete it by hand if it is not wanted)");
+                continue;
+            }
+            TrackerClient.MatchAt? found = null;
+            TrackerClient? owner = null;
+            var conflict = false;
+            foreach (var tracker in _trackers)
+            {
+                if (await tracker.MatchesAtAsync(start, end, ct) is not { } matches) continue;
+                foreach (var m in matches)
+                {
+                    if (found is not null && found.Id != m.Id) conflict = true;
+                    found ??= m; owner ??= tracker;
+                }
+            }
+            if (found is null || conflict)
+            {
+                Log.Info($"Recording {f.Name} has no sidecar; {(conflict ? "more than one game" : "no game")} matches its window {start:HH:mm}-{end:HH:mm} UTC - will look again next pass");
+                continue;
+            }
+            var sidecar = JsonSerializer.Serialize(new
+            {
+                schemaVersion = 1,
+                videoFile = f.Name,
+                matchId = found.Id,
+                eventsFile = File.Exists(M(".events.csv.gz")) ? $"{baseName}.events.csv.gz" : null,
+                queueId = found.QueueId,
+                activePlayer = owner!.Account?.RiotId,
+                recordingStartUtc = start,
+                recordingEndUtc = end,
+                recovered = "adopted by time window - no telemetry clock map",
+            }, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(M(".json"), sidecar);
+            Log.Info($"Recording {f.Name} adopted as {found.Id} ({found.Champion}, {start:HH:mm}-{end:HH:mm} UTC) - delivery follows");
         }
     }
 

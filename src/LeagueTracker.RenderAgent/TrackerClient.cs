@@ -455,6 +455,32 @@ public sealed class TrackerClient
         }
     }
 
+    public sealed record MatchAt(string Id, DateTime GameCreationUtc, DateTime GameEndUtc, long QueueId, string? Champion);
+
+    /// The account's games overlapping a window of wall time (±5 min slack
+    /// server-side) - how a recording that lost its sidecar finds its match
+    /// again. Null = unreachable / not this key's account; empty = no game.
+    public async Task<List<MatchAt>?> MatchesAtAsync(DateTime startUtc, DateTime endUtc, CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _http.GetAsync($"{Api}/matches/at?startUtc={Uri.EscapeDataString(startUtc.ToString("O"))}&endUtc={Uri.EscapeDataString(endUtc.ToString("O"))}", ct);
+            if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            var list = new List<MatchAt>();
+            foreach (var m in doc.RootElement.GetProperty("matches").EnumerateArray())
+            {
+                list.Add(new MatchAt(m.GetProperty("id").GetString()!, m.GetProperty("gameCreationUtc").GetDateTime(), m.GetProperty("gameEndUtc").GetDateTime(),
+                    m.TryGetProperty("queueId", out var q) ? q.GetInt64() : 0, m.TryGetProperty("champion", out var c) ? c.GetString() : null));
+            }
+            return list;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
     /// Registers a match's YouTube link (the review player embeds it). False
     /// when this tracker doesn't know the match - same ownership routing as
     /// the VOD upload; the caller tries the next tracker.

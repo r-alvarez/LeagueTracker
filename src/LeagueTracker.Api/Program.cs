@@ -615,6 +615,21 @@ owner?.MapDelete("/matches/{id}/vod", (string id, VodService vods) =>
 
 // The match's YouTube upload (storage-free review mode: the video lives on
 // YouTube, the tracker keeps only markers/APM data). Empty url = unlink.
+// Which game was being played in a window of wall time: how a recorder
+// re-attaches footage that lost its sidecar (and with it the match id) - the
+// segment file's creation and last-write times bracket the game.
+recorder.MapGet("/matches/at", async (AccountContext acct, LeagueDbContext db, DateTime startUtc, DateTime endUtc, CancellationToken ct) =>
+{
+    var from = DateTime.SpecifyKind(startUtc, DateTimeKind.Utc).AddMinutes(-5);
+    var to = DateTime.SpecifyKind(endUtc, DateTimeKind.Utc).AddMinutes(5);
+    var items = await db.Matches.AsNoTracking()
+        .Where(m => m.GameCreationUtc <= to && m.GameEndUtc >= from)
+        .OrderBy(m => m.GameCreationUtc)
+        .Select(m => new { m.Id, m.GameCreationUtc, m.GameEndUtc, m.QueueId, m.Champion, m.Win })
+        .ToListAsync(ct);
+    return Results.Ok(new { player = acct.Current.RiotId, matches = items });
+});
+
 recorder.MapPost("/matches/{id}/vod/link", async (string id, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
 {
     if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == id, ct)) return Results.NotFound();
