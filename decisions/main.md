@@ -1710,3 +1710,36 @@ and wait for the windowed exe).
 **Not verified on real hardware yet.** The pacing, the loop and retention
 compile and reason correctly; Ben's machine is the first real test when the
 branch ships, with the Log button as the safety net.
+
+## 2026-08-19 — The camera check learns to see an already-locked camera
+
+Clip jobs were recycling on certain plays: the engage check failed three
+attempts, the job postponed as "user active?", and the next lease hit the
+same play the same way. Two composing causes, both read straight from the
+agent log. First, `ParkCameraAsync` never parked anything - the game
+silently ignores `cameraPosition` writes (known since 19 Jul, but the
+rotating park spots were built on the write working), so the check's
+reference is just wherever the camera already sits. When that is the play
+itself - the camera still locked from the previous window - the reference
+equals the champion's own position and both signals (distance from
+reference, movement between samples) go dark whenever the target stands
+still. Supports standing in lane made this constant once HeraArgiva's
+games arrived. Second, the 3-strike postpone counter lived in memory, and
+self-update restarts reset it, so the deterministic case never reached the
+hard fail the design demands.
+
+The fix uses the one primitive the game has never lied about: only the
+champion lock moves the camera without input. When the quick check is
+inconclusive, the agent fast-forwards playback at 4x for up to four
+seconds and watches - a locked camera follows the champion (even a laner
+covers ground over 16 game-seconds, and a dead target respawns), a free
+camera stays put at any speed. The consumed pre-roll is the price; the
+window lead absorbs it. The postpone counter now persists in
+`postpones.json` next to the exe (entries expire after three days), and
+the engage reason names the window index, so the same window failing
+lease after lease converges on the Data-page fail while failures that
+roam between windows (a human at the machine) earn fresh strikes.
+
+**Not verified against a live replay yet** - the 4x speed write is the one
+untested assumption; if the API clamps or ignores it, the check degrades
+to today's behaviour, no worse.

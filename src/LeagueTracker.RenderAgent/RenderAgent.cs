@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace LeagueTracker.RenderAgent;
 
@@ -15,8 +16,11 @@ public sealed class RenderAgent(AgentConfig config)
     private readonly List<TrackerClient> _trackers = [];
     private readonly HashSet<string> _reportedClaimFailures = [];
     // Postpone history per (tracker, job): a reason that repeats identically
-    // is a deterministic failure wearing a transient's clothes.
-    private readonly Dictionary<string, (string Reason, int Count)> _postpones = [];
+    // is a deterministic failure wearing a transient's clothes. Persisted
+    // next to the exe - self-update restarts the process between leases,
+    // and an in-memory count that resets each time never reaches the
+    // 3-strike fail, so a deterministic job recycles forever.
+    private readonly Dictionary<string, (string Reason, int Count)> _postpones = LoadPostpones();
     private readonly string _workDir = Path.Combine(Path.GetTempPath(), "leaguetracker-agent");
 
     private string _gameDir = "";
@@ -437,7 +441,7 @@ public sealed class RenderAgent(AgentConfig config)
             else await RenderJobAsync(tracker, job, windows, ct);
 
             await tracker.CompleteAsync(job, ct);
-            _postpones.Remove(postponeKey);
+            if (_postpones.Remove(postponeKey)) SavePostpones();
             Log.Info($"Job {job.MatchId} complete");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -449,12 +453,14 @@ public sealed class RenderAgent(AgentConfig config)
             var count = _postpones.TryGetValue(postponeKey, out var prior) && prior.Reason == ex.Message
                 ? prior.Count + 1 : 1;
             _postpones[postponeKey] = (ex.Message, count);
+            SavePostpones();
             if (count >= MaxIdenticalPostpones)
             {
                 // The same reason this many times running is deterministic,
                 // not transient - fail so it surfaces on the Data page (where
                 // retry is a click) instead of recycling on every lease expiry.
                 _postpones.Remove(postponeKey);
+                SavePostpones();
                 Log.Error($"Job {job.MatchId} failed: postponed {count} times with the same reason: {ex.Message}");
                 await tracker.FailAsync(job, $"postponed {count} times with the same reason - {ex.Message}", CancellationToken.None);
             }
@@ -465,7 +471,7 @@ public sealed class RenderAgent(AgentConfig config)
         }
         catch (Exception ex)
         {
-            _postpones.Remove(postponeKey);
+            if (_postpones.Remove(postponeKey)) SavePostpones();
             Log.Error($"Job {job.MatchId} failed: {ex.Message}");
             AgentStatus.LastError = $"render {job.MatchId}: {ex.Message}";
             await tracker.FailAsync(job, ex.Message, CancellationToken.None);
@@ -719,7 +725,12 @@ public sealed class RenderAgent(AgentConfig config)
                 if (!engaged)
                 {
                     await CaptureEngageFailureAsync(job, window.Index, ct);
-                    throw new RenderPostponedException("the camera did not engage (user active?)");
+                    // The window index in the reason splits the postpone
+                    // counter: the same window failing lease after lease is
+                    // deterministic and reaches the 3-strike fail, while
+                    // failures that roam between windows (a user at the
+                    // machine) earn fresh strikes each time.
+                    throw new RenderPostponedException($"window {window.Index}'s camera did not engage (user active?)");
                 }
 
                 await tracker.UploadAsync(job, window.Index, output, ct);
@@ -823,6 +834,41 @@ public sealed class RenderAgent(AgentConfig config)
     private const int EngagePreRollSec = 10;
     private const int MaxIdenticalPostpones = 3;
 
+    private static string PostponesPath => Path.Combine(AppContext.BaseDirectory, "postpones.json");
+
+    private sealed record PostponeEntry(string Key, string Reason, int Count, DateTime At);
+
+    private static Dictionary<string, (string Reason, int Count)> LoadPostpones()
+    {
+        try
+        {
+            if (!File.Exists(PostponesPath)) return [];
+            var entries = JsonSerializer.Deserialize<List<PostponeEntry>>(File.ReadAllText(PostponesPath)) ?? [];
+            // Stale strikes shouldn't fail a job that comes back days later
+            // for an unrelated reason (a plan re-run, a manual retry).
+            return entries.Where(e => e.At > DateTime.UtcNow.AddDays(-3))
+                .ToDictionary(e => e.Key, e => (e.Reason, e.Count));
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Could not read {PostponesPath}: {ex.Message} - starting with a clean postpone history");
+            return [];
+        }
+    }
+
+    private void SavePostpones()
+    {
+        try
+        {
+            var entries = _postpones.Select(p => new PostponeEntry(p.Key, p.Value.Reason, p.Value.Count, DateTime.UtcNow)).ToList();
+            File.WriteAllText(PostponesPath, JsonSerializer.Serialize(entries));
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Could not write {PostponesPath}: {ex.Message}");
+        }
+    }
+
     /// The lock check measures distance from a parked reference point. It
     /// rotates per attempt: a fight can coincide with one park spot (making a
     /// real lock look unengaged when the champion also stands still), but it
@@ -920,6 +966,23 @@ public sealed class RenderAgent(AgentConfig config)
 
         if (!tracks)
         {
+            // The distance-and-movement check goes dark when the camera
+            // already sits at the play: the park write is silently ignored
+            // by the game (the readback IS the current position, never the
+            // requested spot), so a camera still locked from the previous
+            // window makes the reference the champion's own position - and
+            // a champion who stands still through the sample (supports in
+            // lane, a recall) fails both signals despite a working lock.
+            // Only the lock moves the camera without input, so fast-forward
+            // and watch: at 4x even a laning champion covers real distance
+            // in seconds (and a dead one respawns), while a free camera
+            // stays put at any speed. The consumed pre-roll is the price;
+            // the window lead absorbs it.
+            tracks = await FastForwardTracksAsync(replayApi, ct);
+        }
+
+        if (!tracks)
+        {
             // Which failure is it? Camera still at the park = clicks never
             // landed (or lock has no effect); moved but near the park =
             // stationary champion near the reference; empty selection = a
@@ -941,6 +1004,32 @@ public sealed class RenderAgent(AgentConfig config)
     /// lock, selection). The job is left unfailed so it becomes claimable
     /// again when its lease expires, instead of needing a manual retry.
     private sealed class RenderPostponedException(string message) : Exception(message);
+
+    /// Second-opinion lock check for when CameraTracksAsync is blind (see
+    /// the call site). Samples once a second so a moving camera passes as
+    /// soon as it shows itself; speed is restored before recording either
+    /// way. A camera that stays put through 16 game-seconds at 4x is not
+    /// locked on anything that matters.
+    private static async Task<bool> FastForwardTracksAsync(ReplayApiClient api, CancellationToken ct)
+    {
+        if (await api.GetCameraPositionAsync(ct) is not { } origin) return false;
+        var moved = false;
+        await api.SetPlaybackAsync(time: null, paused: false, speed: 4, ct);
+        try
+        {
+            for (var i = 0; i < 4 && !moved; i++)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                moved = await api.GetCameraPositionAsync(ct) is { } now
+                    && Math.Abs(now.X - origin.X) + Math.Abs(now.Z - origin.Z) > 150;
+            }
+        }
+        finally
+        {
+            await api.SetPlaybackAsync(time: null, paused: false, speed: 1, CancellationToken.None);
+        }
+        return moved;
+    }
 
     private static async Task<bool> CameraTracksAsync(ReplayApiClient api, (double X, double Z)? reference, CancellationToken ct)
     {
