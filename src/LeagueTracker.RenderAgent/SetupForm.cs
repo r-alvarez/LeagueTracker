@@ -4,16 +4,14 @@ using System.Text.Json;
 namespace LeagueTracker.RenderAgent;
 
 /// The only questions a fresh install has to answer, as a window instead of
-/// a JSON file: which tracker, the Access token that gets through its wall,
-/// what this machine does, where recordings go. Writes appsettings.json
+/// a JSON file: which tracker, the join code that makes the machine its
+/// owner's, what this machine does, where recordings go. Writes appsettings.json
 /// (only these keys - everything else comes from the tracker's profile or
 /// stays at its default) and can prove the tracker answers before saving.
 public sealed class SetupForm : Form
 {
     private readonly TextBox _join = new() { Width = ContentWidth };
     private readonly TextBox _server = new() { Width = ContentWidth };
-    private readonly TextBox _cfId = new() { Width = ContentWidth };
-    private readonly TextBox _cfSecret = new() { UseSystemPasswordChar = true };
     private readonly ComboBox _role = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly TextBox _recordings = new();
     private readonly TextBox _prefix = new() { Width = ContentWidth };
@@ -70,8 +68,6 @@ public sealed class SetupForm : Form
 
         _server.Text = current.ServerUrl.Contains("localhost") ? "" : current.ServerUrl;
         _join.Text = current.JoinCode;
-        _cfId.Text = current.CfAccessClientId;
-        _cfSecret.Text = current.CfAccessClientSecret;
         foreach (var r in Roles) _role.Items.Add(r.Label);
         // A fresh install is almost always a player's PC; the owner's machines
         // already have a config that says otherwise.
@@ -80,7 +76,7 @@ public sealed class SetupForm : Form
         _recordings.Text = current.RecordingsDir;
         _prefix.Text = current.RecordNamePrefix;
 
-        foreach (var box in new[] { _server, _cfId, _cfSecret, _recordings, _prefix }) StyleField(box);
+        foreach (var box in new[] { _server, _recordings, _prefix }) StyleField(box);
         _role.FlatStyle = FlatStyle.Flat;
         _role.BackColor = Field;
         _role.ForeColor = Ink;
@@ -105,9 +101,7 @@ public sealed class SetupForm : Form
         _join.TextChanged += (_, _) => ApplyJoinCode(_join.Text);
         root.Controls.Add(Card("Tracker",
             Fields(
-                ("Tracker URL", _server, "Your tracker's address, e.g. https://league.rjav-tech.co.uk (several: comma-separated)."),
-                ("Access token ID", _cfId, "Optional. Leave empty: the machine asks the tracker to be let in and the owner approves it on the site's Data page. Fill it only if you were given a Cloudflare Access service token."),
-                ("Access token secret", SecretRow(), null))));
+                ("Tracker URL", _server, "Your tracker's address, e.g. https://league.rjav-tech.co.uk (several: comma-separated)."))));
         root.Controls.Add(Card("This machine",
             Fields(("Role", _role, "Recorder for a player's PC; Renderer for the box that cuts replay clips; Both for one machine doing everything."))));
         root.Controls.Add(Card("Recordings",
@@ -184,17 +178,6 @@ public sealed class SetupForm : Form
         return stack;
     }
 
-    private Control SecretRow()
-    {
-        var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
-        _cfSecret.Width = ContentWidth - 70;
-        var show = new CheckBox { Text = "Show", AutoSize = true, ForeColor = Muted, Margin = new Padding(8, 8, 0, 0) };
-        show.CheckedChanged += (_, _) => _cfSecret.UseSystemPasswordChar = !show.Checked;
-        row.Controls.Add(_cfSecret);
-        row.Controls.Add(show);
-        return row;
-    }
-
     private Control RecordingsRow()
     {
         var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
@@ -266,9 +249,9 @@ public sealed class SetupForm : Form
     }
 
     /// lt2:<base64url json> - {server, code, role} from the Data page's "Add
-    /// a machine" (lt1: was the older shape with an Access token instead of a
-    /// code). One paste fills the address and leaves the code in the box; a
-    /// bare eight-letter code just stays as typed.
+    /// a machine" (lt1: was the older shape; its address/role still apply, its
+    /// token fields are ignored). One paste fills the address and leaves the
+    /// code in the box; a bare eight-letter code just stays as typed.
     private void ApplyJoinCode(string text)
     {
         var code = text.Trim();
@@ -282,8 +265,6 @@ public sealed class SetupForm : Form
             var root = doc.RootElement;
             string? Get(string name) => root.TryGetProperty(name, out var v) && v.ValueKind is JsonValueKind.String ? v.GetString() : null;
             if (Get("server") is { Length: > 0 } server) _server.Text = server;
-            if (Get("cfId") is { Length: > 0 } id) _cfId.Text = id;
-            if (Get("cfSecret") is { Length: > 0 } secret) _cfSecret.Text = secret;
             if (Get("role") is { Length: > 0 } role)
             {
                 var index = role.ToLowerInvariant() switch { "recorder" => 0, "renderer" => 1, "both" or "full" => 2, _ => -1 };
@@ -312,11 +293,6 @@ public sealed class SetupForm : Form
             problem = "Tracker URL must be one or more http(s) addresses.";
             return false;
         }
-        if ((_cfId.Text.Trim() is { Length: > 0 }) != (_cfSecret.Text.Trim() is { Length: > 0 }))
-        {
-            problem = "Access token: fill both the ID and the secret, or neither (then the owner approves this machine on the site).";
-            return false;
-        }
         return true;
     }
 
@@ -327,8 +303,6 @@ public sealed class SetupForm : Form
         {
             ServerUrl = string.Join(",", _server.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)),
             JoinCode = _join.Text.Trim().StartsWith("lt", StringComparison.OrdinalIgnoreCase) ? "" : _join.Text.Trim().Replace("-", ""),
-            CfAccessClientId = _cfId.Text.Trim(),
-            CfAccessClientSecret = _cfSecret.Text.Trim(),
             RecordGames = record,
             RenderReplays = render,
             RecordingsDir = _recordings.Text.Trim(),
@@ -354,7 +328,7 @@ public sealed class SetupForm : Form
             var status = await client.EnrollAsync(CancellationToken.None);
             if (status is "approved") client.MarkKeyed();
             var accounts = await client.GetAccountsAsync(CancellationToken.None);
-            var profile = (status is "approved" || draft.CfAccessClientId is { Length: > 0 }) ? await client.GetProfileAsync(CancellationToken.None) : null;
+            var profile = status is "approved" ? await client.GetProfileAsync(CancellationToken.None) : null;
             var who = accounts is { Count: > 0 } ? $" - {accounts.Count} account(s): {string.Join(", ", accounts.Select(a => a.RiotId))}" : "";
             var youtube = profile is { Count: > 0 } ? $" (YouTube {(profile.ContainsKey("YouTubeRefreshToken") ? "ready" : "not configured")})" : "";
             results.Add(status switch
@@ -362,7 +336,7 @@ public sealed class SetupForm : Form
                 "approved" => $"{url}: OK - this machine is approved{who}{youtube}",
                 "pending" => $"{url}: OK - reachable; this machine is waiting for approval on the site's Data page (Save now, it starts by itself once approved){who}",
                 "revoked" => $"{url}: reachable, but this machine was revoked - ask the owner to re-approve it",
-                _ => draft.CfAccessClientId is { Length: > 0 } && accounts is not null ? $"{url}: OK{who}{youtube}" : $"{url}: reachable, but it did not accept the Access token and offers no enrolment",
+                _ => $"{url}: reachable, but it offers no enrolment - is this a LeagueTracker server?",
             });
         }
         var allOk = results.All(r => r.Contains(": OK"));
@@ -391,8 +365,6 @@ public sealed class SetupForm : Form
         void Set<T>(string key, T value) => settings[key] = JsonSerializer.SerializeToElement(value);
         Set("ServerUrl", draft.ServerUrl);
         Set("JoinCode", draft.JoinCode);
-        Set("CfAccessClientId", draft.CfAccessClientId);
-        Set("CfAccessClientSecret", draft.CfAccessClientSecret);
         Set("RecordGames", draft.RecordGames);
         Set("RenderReplays", draft.RenderReplays);
         Set("RecordingsDir", draft.RecordingsDir);

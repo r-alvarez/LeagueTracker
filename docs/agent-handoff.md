@@ -29,9 +29,9 @@ An agent is given ONE URL; it asks the server for its accounts and treats
 each as a tracker (`/api/a/{region}/{RiotId}`), so a recording lands on the account
 that was playing (the live client's Riot ID decides - a duo game exists on
 both players' pages, each PC's VOD goes to its own player) and the renderer
-pulls jobs from all of them. The old per-account hostnames still resolve to
-the same process and mean "that account", so nothing from the
-three-container era breaks.
+pulls jobs from all of them. The old per-account hostnames still land on the
+site (Traefik and AllowedHosts keep them), but the account is always in the
+path now - a hostname means nothing on its own.
 
 What a friend gets, automatically, once their agent runs: their games recorded
 and published to YouTube with the link on their match page, review data
@@ -202,8 +202,10 @@ is up on that box; the gaming PCs are never used for rendering again.
 4. Data page → Machines: assign the four existing keys to their owners
    (recorders → the player, the render box → you as renderer). Publish the new
    agent build; watch the heartbeats report it (`/api/me/agents`).
-5. Flip `Agents__AllowUnbound` to `false`. Then a follow-up commit removes the
-   Host-header `/api` group, `/api/a/{slug}` and `/api/agent/a/...` mounts and
-   the legacy `Hosts` bindings.
+5. Flip `Agents__AllowUnbound` to `false`. Then merge
+   `auth/legacy-mounts-removal` (prepared on top of this branch): it removes
+   the Host-header `/api` group, `/api/a/{slug}` and `/api/agent/a/...`
+   mounts, the `Hosts` bindings, the agent's Cloudflare service-token fields,
+   and points the waker at one URL.
 6. Public launch, later: `Auth__PublicReads=true` and the site-wide Access
    application off - nothing in-process changes.

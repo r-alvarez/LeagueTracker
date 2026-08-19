@@ -184,12 +184,6 @@ public sealed class AgentConfig
     /// signed in" in the Riot client so the launch lands logged in.
     public bool AutoLaunchClient { get; set; } = true;
 
-    /// Cloudflare Access service token (Zero Trust > Access > Service Auth) -
-    /// the pre-enrolment way through the Access wall. Kept readable for one
-    /// more release; new installs enrol with a join code instead.
-    public string CfAccessClientId { get; set; } = "";
-    public string CfAccessClientSecret { get; set; } = "";
-
     /// The code the owner minted on their Data page: sent with the enrolment
     /// so this machine's key is theirs from the start. Single use on the
     /// server; harmless to keep sending afterwards.
@@ -241,8 +235,6 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_POSTGAME_REVIEW") is { Length: > 0 } review) config.PostGameReview = review is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_AUTO_LAUNCH_CLIENT") is { Length: > 0 } autoLaunch) config.AutoLaunchClient = autoLaunch is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_JOIN_CODE") is { Length: > 0 } joinCode) config.JoinCode = joinCode;
-        if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_ID") is { Length: > 0 } cfId) config.CfAccessClientId = cfId;
-        if (Environment.GetEnvironmentVariable("LT_CF_ACCESS_CLIENT_SECRET") is { Length: > 0 } cfSecret) config.CfAccessClientSecret = cfSecret;
 
         if (config.AgentName is not { Length: > 0 }) config.AgentName = Environment.MachineName;
         return config;

@@ -41,9 +41,9 @@ public sealed class Account
     /// Blank = <Accounts:DataRoot>/<Slug>. The three legacy trackers' folders
     /// (main/alt/ben) plug straight in - nothing moves.
     public string DataDir { get; set; } = "";
-    /// Hostnames that mean "this account" for account-less requests - the
-    /// legacy per-account hostnames, so agents and bookmarks from the
-    /// three-tracker era keep working through the single process.
+    /// The three-container era's per-account hostnames. No longer bound to
+    /// anything; the column stays because registry.db has it NOT NULL and
+    /// SQLite cannot drop a constraint without rebuilding the table.
     public string Hosts { get; set; } = "";
     /// Shown in the account switcher; blank = GameName.
     public string DisplayName { get; set; } = "";
@@ -61,12 +61,11 @@ public sealed class Account
     /// "euw/ImRA-87166" - the canonical address.
     public string UrlPath => $"{RegionCode}/{UrlSlug}";
     public string Label => DisplayName is { Length: > 0 } ? DisplayName : GameName;
-    public string[] HostList => [.. Hosts.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)];
     public string[] PreviousSlugList => [.. PreviousSlugs.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)];
     public bool IsOwned => OwnerUserId is { Length: > 0 };
 }
 
-/// `Accounts` section. Env form: Accounts__List__0__Slug=main
+/// `Accounts` section. Env form: Accounts__List__0__GameName=ImRA
 /// Accounts__List__0__GameName=... Accounts__DataRoot=/data
 public sealed class AccountsOptions
 {

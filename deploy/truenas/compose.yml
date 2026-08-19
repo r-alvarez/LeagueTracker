@@ -50,12 +50,12 @@ x-lt-agent-env: &lt-agent-env
 services:
   # One process, every tracked account: /data is the parent of the per-account
   # folders (main/alt/ben - the three former containers' volumes, unmoved) plus
-  # agent-releases. league.rjav-tech.co.uk/{RiotId}/... is the site; the old
-  # per-account hostnames still resolve here and bind to their account via
-  # Accounts:List:N:Hosts, so agents and bookmarks from the three-container
-  # era keep working. Adding a player = one more Accounts__List__N block
-  # (GameName, TagLine, DataDir; DisplayName/HideLp/Region/Platform optional)
-  # - no hostname, no DNS, no extra Access application.
+  # agent-releases. league.rjav-tech.co.uk/{region}/{RiotId}/... is the site;
+  # the old per-account hostnames still route here (kept in the Traefik rule
+  # and AllowedHosts so bookmarks land on the site, not on a 400) but bind to
+  # nothing - the account is always in the path. Adding a player = the site's
+  # "Add account" (or one more Accounts__List__N block: GameName, TagLine,
+  # DataDir; DisplayName/HideLp/Region/Platform/Owner optional).
   # Built here from the checked-out commit. CI also publishes the same
   # Dockerfile as ghcr.io/r-alvarez/leaguetracker:<sha> (and :main, :latest)
   # on every green main - the immutable copy. To roll back to a known-good
@@ -92,19 +92,16 @@ services:
       Accounts__List__0__GameName: ImRA
       Accounts__List__0__TagLine: "87166"
       Accounts__List__0__DataDir: /data/main
-      Accounts__List__0__Hosts: league.rjav-tech.co.uk
       Accounts__List__0__DisplayName: Ruben
       Accounts__List__0__Owner: ${OWNER_RUBEN:-}
       Accounts__List__1__GameName: ImRA
       Accounts__List__1__TagLine: "5957"
       Accounts__List__1__DataDir: /data/alt
-      Accounts__List__1__Hosts: league-alt.rjav-tech.co.uk
       Accounts__List__1__DisplayName: Ruben (alt)
       Accounts__List__1__Owner: ${OWNER_RUBEN:-}
       Accounts__List__2__GameName: TheCosmicPeach
       Accounts__List__2__TagLine: TTV
       Accounts__List__2__DataDir: /data/ben
-      Accounts__List__2__Hosts: league-ben.rjav-tech.co.uk
       Accounts__List__2__DisplayName: Ben
       Accounts__List__2__Owner: ${OWNER_BEN:-}
       # Accounts__List__3__GameName: <Vanessa's game name>
@@ -147,9 +144,7 @@ services:
     network_mode: host
     environment:
       - TZ=Europe/London
-      # One site, every account: the waker discovers the accounts from the
-      # tracker and reads each queue on its canonical path. The legacy
-      # per-player hostnames are no longer needed here.
+      # One URL: /api/render/pending already counts every account.
       - TRACKER_URLS=https://league.rjav-tech.co.uk
       - PC_MAC=${PC_MAC:-}
       - WOL_BROADCAST=${WOL_BROADCAST:-255.255.255.255}
