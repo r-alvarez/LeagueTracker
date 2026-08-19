@@ -286,16 +286,34 @@ public sealed class TrackerClient
         {
             using var content = new StringContent(JsonSerializer.Serialize(beat), System.Text.Encoding.UTF8, "application/json");
             using var resp = await _http.PostAsync($"{ServerUrl}/api/agent/heartbeat", content, ct);
-            if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
+            if (!resp.IsSuccessStatusCode || !IsJson(resp))
+            {
+                var body = IsJson(resp) ? await resp.Content.ReadAsStringAsync(ct) : "";
+                NoteHeartbeat(false, $"HTTP {(int)resp.StatusCode}{(body is { Length: > 0 and < 300 } ? $" {body}" : "")}");
+                return null;
+            }
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
             var root = doc.RootElement;
             string? Str(string name) => root.TryGetProperty(name, out var v) && v.ValueKind is JsonValueKind.String ? v.GetString() : null;
+            NoteHeartbeat(true, null);
             return new HeartbeatReply(Str("latest"), Str("command"), Str("commandToken"));
         }
-        catch (Exception) when (!ct.IsCancellationRequested)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
+            NoteHeartbeat(false, Root(ex).Message);
             return null;
         }
+    }
+
+    // Heartbeats fail for whole outages at a time; one line at each edge
+    // (lost, back) is what a log reader needs, not one per poll.
+    private bool? _heartbeatOk;
+    private void NoteHeartbeat(bool ok, string? why)
+    {
+        if (_heartbeatOk == ok) return;
+        if (!ok) Log.Warn($"Heartbeat to {ServerUrl} failed: {why} - the tracker will show this machine as offline until it gets through");
+        else if (_heartbeatOk is false) Log.Info($"Heartbeat to {ServerUrl} is getting through again");
+        _heartbeatOk = ok;
     }
 
     public async Task<AgentRelease?> GetReleaseAsync(CancellationToken ct)
