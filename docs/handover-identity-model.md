@@ -1,4 +1,4 @@
-# Handover — `auth/identity-model` (written 2026-08-17, from the work machine)
+# Handover — `auth/identity-model` (written 2026-08-17; merged to `main` 2026-08-18)
 
 Everything you need to pick this up from another machine: what exists, how to
 run it, what to check, and the exact cutover steps. The design rationale is in
@@ -14,14 +14,20 @@ file plus `decisions/` carries what it held. Paste it in or point Claude at it.
 
 ## 1. State of the branch
 
-- Branch `auth/identity-model`, 10 commits on top of `main` (`76b634e`),
-  pushed to origin. **Not merged. Do not merge into `main` until the cutover
-  prerequisites below are in place** — a push to `main` deploys.
-- Phases 0–5 of the plan are implemented and verified on a local instance;
-  phase 6 is the deploy-time cutover (section 5 here).
+- **Merged into `main` on 2026-08-18** (`0a3ff2e` and the commits above it);
+  the live site signs in through Auth0 (`c4c8ecc`). Phases 0–6 are done; the
+  legacy mounts went with the `auth/legacy-mounts-removal` merge on
+  2026-08-19 and `Agents__AllowUnbound` is off. Sections 2–4 remain the
+  local-run and review reference; section 5 is history, kept for the order
+  things had to happen in.
 - Commits, in order: registry (`bd99853`), authentication (`15992b1`),
   authorization (`e0ca6c0`), accounts-by-puuid (`d2a242f`), agents (`5c6bb9b`),
   claims (`ebd42fa`), cutover material (`0a01953`), last fixes (`22e3373`).
+- Settled after the merge, against the original design: recording is
+  owner-based rather than role-based (`7d6cb11` — a renderer still uploads
+  its own owner's games), sign-out also ends the Auth0 session (`8cf882d`),
+  and the OIDC code comes back on a top-level GET with Lax cookies
+  (`c4c8ecc` — form_post could not run on the http review instance).
 
 What it does, in one paragraph: the app owns its users (Auth0 only
 authenticates), a user owns the Riot accounts they proved are theirs (profile-
@@ -106,10 +112,10 @@ accounts/{id}/owner) · `/api/agent/enroll|ping|release*` anon ·
 `/api/agent/accounts|profile|heartbeat|agents` agent key ·
 `/api/render/pending` anon.
 
-Legacy mounts still alive on purpose: Host-header `/api` and `/api/a/{slug}`
-(full API, same policies) and `/api/agent/a/{region}/{slug}` (agent subset
-only). They go with `auth/legacy-mounts-removal` after the agents update
-(step 5.7).
+`/api/a/{region}/{slug}` is the only account mount. The Host-header `/api`,
+`/api/a/{slug}` and `/api/agent/a/{region}/{slug}` mounts were removed on
+2026-08-19 (`auth/legacy-mounts-removal`), once the agents on the new build
+were the only ones heartbeating.
 
 ## 5. Cutover (do in this order; also `docs/agent-handoff.md` §E)
 
@@ -148,6 +154,7 @@ only). They go with `auth/legacy-mounts-removal` after the agents update
    follow-up, already prepared on top of this branch: removes the Host-header
    `/api` group, `/api/a/{slug}`, `/api/agent/a/...`, the `Hosts` bindings,
    the `CfAccess*` fields in the agent config, and points the waker at one URL).
+   *Done 2026-08-19; the flag's code default is now `false` too.*
 8. **Waker**: it now polls `/api/render/pending`; the stack rebuild picks it up.
 9. Later, the public launch: `Auth__PublicReads=true`, site-wide Access app
    off. Nothing in-process changes.

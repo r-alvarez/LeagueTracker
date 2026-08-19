@@ -194,3 +194,32 @@ this branch touches and are folded into phase 2 unless Ruben says otherwise.
   claiming a job and uploading (mock render); settings + media policy flip;
   a simulated rename (registry edit) → config precedence log + 308; a real
   claim round-trip against Riot (icon mismatch reported with the live icon).
+
+## 2026-08-19 — Cutover tail: one mount, unbound keys refused by default
+
+**Decision:** merge `auth/legacy-mounts-removal` into `main` and set
+`Agents__AllowUnbound` to `false` — in the compose *and* as the code default.
+
+**Why now:** the identity merge deployed on 2026-08-18 14:20 and five agent
+releases followed it the same day (`agent-2026.818.2024.12` onward), all
+calling `/api/a/{region}/{slug}` on the key; the Host-header `/api`,
+`/api/a/{slug}` and `/api/agent/a/…` mounts had nothing left to serve. The
+merge conflicted only on `/render/{matchId}/retry`, where main had grown the
+`keep` flag (`4041886`) on a group the branch made non-nullable — resolved
+by keeping the flag.
+
+**Default flipped, not just the env value:** the artifact's plan was "grace
+flag until you assign them, then false". Leaving the code default at `true`
+would have meant a deployment that forgot the env var lets any pre-ownership
+key act on every account — the permissive setting should be the one you have
+to ask for. Cost: a local review instance with an imported, unassigned
+`agents.json` key gets 403 on account routes until the key is assigned on
+the Data page, which is the same thing production now does.
+
+**Rejected:** deleting the `AllowUnbound` option outright — one config value
+is a cheaper rollback than a revert if a heartbeat turns out to be on an old
+build after all.
+
+**Not verified from the repo:** that every machine's heartbeat reports the
+new build, and the Cloudflare Access `api` Bypass application — both are
+console state; check the Data page before pushing (a push to `main` deploys).

@@ -189,7 +189,7 @@ is up on that box; the gaming PCs are never used for rendering again.
 - Old trackers without the `/api/agent/*` endpoints just get a working
   agent with no profile/heartbeat/updates - every call is best-effort.
 
-## E. Cutover to the identity model (once, in this order)
+## E. Cutover to the identity model (done 2026-08-18/19; kept for the order)
 
 1. Merge `auth/identity-model`; Portainer redeploys with the new env
    (`AUTH0_*`, `AUTH_ADMINS`, `OWNER_*`, `Agents__AllowUnbound=true`). First
@@ -206,6 +206,6 @@ is up on that box; the gaming PCs are never used for rendering again.
    `auth/legacy-mounts-removal` (prepared on top of this branch): it removes
    the Host-header `/api` group, `/api/a/{slug}` and `/api/agent/a/...`
    mounts, the `Hosts` bindings, the agent's Cloudflare service-token fields,
-   and points the waker at one URL.
+   and points the waker at one URL. (Done 2026-08-19.)
 6. Public launch, later: `Auth__PublicReads=true` and the site-wide Access
    application off - nothing in-process changes.

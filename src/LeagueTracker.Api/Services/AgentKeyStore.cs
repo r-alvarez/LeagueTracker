@@ -35,10 +35,10 @@ public sealed class AgentKeyRecord
 
 public sealed class AgentsOptions
 {
-    // Rollout switch: approved keys from before ownership keep working on
-    // every account until the owner assigns them. Off = an unbound key is
-    // refused everywhere account-scoped.
-    public bool AllowUnbound { get; set; } = true;
+    // Rollout switch, off since the 2026-08 cutover: an unbound key is refused
+    // everywhere account-scoped. On only lets keys approved before ownership
+    // existed keep working on every account until the owner assigns them.
+    public bool AllowUnbound { get; set; }
 }
 
 // Agents enrol themselves with a key they generated; a join code minted by a

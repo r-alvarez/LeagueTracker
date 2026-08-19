@@ -83,9 +83,9 @@ services:
       # Cloudflare Access still walls the site: reads need a signed-in person
       # until the public launch flips this to "true".
       Auth__PublicReads: "false"
-      # Rollout: approved agent keys from before ownership keep working on every
-      # account until each is assigned an owner on the Data page; then "false".
-      Agents__AllowUnbound: "true"
+      # Every agent key belongs to a user; the pre-ownership grace period is
+      # over. "true" only if a key ever has to work before it is assigned.
+      Agents__AllowUnbound: "false"
       AllowedHosts: league.rjav-tech.co.uk;league-alt.rjav-tech.co.uk;league-ben.rjav-tech.co.uk
       Accounts__DataRoot: /data
       Accounts__Default: ImRA-87166
