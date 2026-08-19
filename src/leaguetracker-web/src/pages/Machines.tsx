@@ -1,26 +1,30 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import { auth } from '../auth'
-import type { AgentKey, MyAgents } from '../types'
+import OwnerSelect from '../components/OwnerSelect'
+import type { AdminUser, AgentKey, MyAgents } from '../types'
 
 interface Release { version: string; file: string; sizeBytes: number; installer: string | null; installerSizeBytes: number }
 
-/// The owner's machines: the agent build to install, a join code that
-/// makes a new machine theirs at enrolment, and one table of every machine
-/// they may see - theirs, plus the renderer that serves everyone - each row
-/// joined with the heartbeat of the agent behind the key (version against
-/// the newest build, what it is doing, whether it still reports, its last
-/// error, the log it shipped). Admins see everyone's and can hand a machine
-/// to its owner.
+type Role = 'recorder' | 'renderer'
+
+/// A person's machines: every machine they may see - theirs, plus the
+/// renderer that serves everyone; all of them for an admin - each row joined
+/// with the heartbeat of the agent behind the key (version against the newest
+/// build, what it is doing, whether it still reports, its last error, the log
+/// it shipped), the join code that makes a new machine theirs at enrolment,
+/// and the agent build to install. Admins can hand a machine to its owner.
 export default function Machines() {
   const [release, setRelease] = useState<Release | null>(null)
   const [mine, setMine] = useState<MyAgents | null>(null)
+  const [users, setUsers] = useState<AdminUser[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [code, setCode] = useState<{ pretty: string; paste: string; expiresUtc: string; role: string } | null>(null)
-  const [role, setRole] = useState<'recorder' | 'renderer'>('recorder')
+  const [role, setRole] = useState<Role>('recorder')
   const [copied, setCopied] = useState(false)
-  const [assign, setAssign] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
+  // The one row whose assign form is open, and what it holds.
+  const [assigning, setAssigning] = useState<{ id: string; owner: string; role: Role } | null>(null)
   // Rows whose log was just requested: the file lands on the next heartbeat,
   // so the button reads "asked" until the list shows a newer file.
   const [logAsked, setLogAsked] = useState<Record<string, number>>({})
@@ -30,6 +34,7 @@ export default function Machines() {
   }, [])
   useEffect(() => {
     fetch('/api/agent/release').then(r => (r.status === 200 ? r.json() : null)).then(setRelease).catch(() => setRelease(null))
+    if (auth.isAdmin) api.adminUsers().then(setUsers).catch(() => setUsers([]))
     load()
     const t = window.setInterval(load, 15000)
     return () => window.clearInterval(t)
@@ -59,17 +64,16 @@ export default function Machines() {
   const copy = async (text: string) => {
     try { await navigator.clipboard.writeText(text); setCopied(true) } catch { /* selectable text stays */ }
   }
-  const [assignRole, setAssignRole] = useState<Record<string, string>>({})
-  // Blank box = keep the current owner (the endpoint reads blank as "unown").
-  const doAssign = async (k: AgentKey) => {
+
+  const saveAssign = async (k: AgentKey) => {
+    if (!assigning) return
     setError(null)
-    const owner = assign[k.id]?.trim() || k.ownerEmail || null
-    const role = assignRole[k.id] && assignRole[k.id] !== k.role ? assignRole[k.id] : null
-    try { await api.adminAssignAgent(k.id, owner, role); load() } catch (e) { setError(String(e)) }
-  }
-  const doUnown = async (k: AgentKey) => {
-    setError(null)
-    try { await api.adminAssignAgent(k.id, null, null); load() } catch (e) { setError(String(e)) }
+    setBusy(k.id)
+    try {
+      await api.adminAssignAgent(k.id, assigning.owner || null, assigning.role !== k.role ? assigning.role : null)
+      setAssigning(null)
+      load()
+    } catch (e) { setError(String(e)) } finally { setBusy(null) }
   }
 
   const keys = mine?.keys ?? []
@@ -91,70 +95,55 @@ export default function Machines() {
     return live.paused ? { cls: 'remake', text: 'paused', title: 'Approved; paused from its tray icon' } : { cls: 'win', text: 'online', title: 'Approved and reporting' }
   }
   const canAct = (k: AgentKey) => auth.isAdmin || k.mine
+  const columns = 8
 
   return (
-    <>
+    <div className="grid" style={{ gap: 14 }}>
       <div className="card">
-        <h2>Machines {pending > 0 && <span className="badge loss">{pending} waiting</span>}</h2>
-        <p className="mut" style={{ marginTop: 0 }}>
-          The agent runs on your gaming PC: it records your games and publishes them to YouTube. Install it (no admin
-          rights needed), then in its setup window paste the join code below - the machine appears here as{' '}
-          <em>waiting</em>, you press Approve once, and it stays yours until you revoke it. It updates itself from here.
-          {latest && <> Newest published build: <strong>{latest}</strong>.</>}
-        </p>
-        <p style={{ margin: '0 0 10px' }}>
-          {release ? (
-            <>
-              {release.installer && (
-                <a className="action primary" href={`/api/agent/release/${encodeURIComponent(release.installer)}`} download>
-                  Download installer {release.version} ({Math.round(release.installerSizeBytes / 1_000_000)} MB)
-                </a>
-              )}{' '}
-              <a className={`action${release.installer ? '' : ' primary'}`} href={`/api/agent/release/${encodeURIComponent(release.file)}`} download title="Portable: unzip anywhere and double-click the exe">
-                {release.installer ? 'zip' : `Download agent ${release.version}`} ({Math.round(release.sizeBytes / 1_000_000)} MB)
-              </a>
-            </>
-          ) : (
-            <span className="mut">No agent build published on this tracker yet.</span>
-          )}
-        </p>
-        <p className="mut sm-text" style={{ margin: '0 0 12px' }}>
-          Windows SmartScreen may say "not commonly downloaded" - the build is not code-signed yet. Choose <strong>Keep</strong>{' '}
-          in the download bar, then <strong>More info → Run anyway</strong> if the blue box appears.
-        </p>
-        <div className="agent-join">
-          <p style={{ margin: '0 0 8px' }}>
+        <div className="card-head">
+          <h2>Machines {pending > 0 && <span className="badge loss">{pending} waiting</span>}</h2>
+          <div className="card-head-actions">
             {auth.isAdmin && (
-              <select value={role} onChange={e => setRole(e.target.value as typeof role)} aria-label="Machine role" style={{ marginRight: 8 }}>
+              <select className="select" value={role} onChange={e => setRole(e.target.value as Role)} aria-label="Role of the machine to add">
                 <option value="recorder">Recorder – a player's PC</option>
-                <option value="renderer">Renderer – the replay box (serves every account)</option>
+                <option value="renderer">Renderer – the replay box, serves every account</option>
               </select>
             )}
             <button className="action primary" onClick={mint}>Add a machine…</button>
-            {mine && mine.joinCodes.length > 0 && !code && (
-              <span className="mut sm-text" style={{ marginLeft: 10 }}>
-                open code{mine.joinCodes.length > 1 ? 's' : ''}: {mine.joinCodes.map(c => `${c.code.slice(0, 4)}-${c.code.slice(4)}`).join(', ')}
-              </span>
-            )}
-          </p>
-          {code && (
-            <div className="join-code-box">
-              <div className="join-code">{code.pretty}</div>
-              <p className="mut sm-text" style={{ margin: '4px 0 8px' }}>
-                Type this in the agent's setup window as the join code, or paste the one-line version below (it carries the
-                site address too). Valid 15 minutes, single use, {code.role} role.
-              </p>
-              <textarea className="agent-join-code" readOnly value={code.paste} rows={2} onFocus={e => e.currentTarget.select()} />
-              <p style={{ margin: '6px 0 0' }}>
-                <button className="action" onClick={() => copy(code.paste)}>{copied ? 'Copied' : 'Copy'}</button>
-              </p>
-            </div>
-          )}
-          {error && <p className="warn-text sm-text">{error}</p>}
+          </div>
         </div>
+        <p className="mut card-intro">
+          Every machine that runs the agent for you{auth.isAdmin ? ' - and, as an admin, everyone else\'s' : ''}. Press{' '}
+          <strong>Add a machine</strong> for a join code, paste it in the agent's setup window on that PC, and the machine appears
+          here as <em>waiting</em>; approve it once and it stays yours until you revoke it.
+          {latest && <> Newest published build: <strong>{latest}</strong> - machines update themselves when idle.</>}
+        </p>
 
-        {keys.length > 0 && (
-          <div className="table-scroll" style={{ marginTop: 14 }}>
+        {code && (
+          <div className="join-code-box">
+            <div className="join-code">{code.pretty}</div>
+            <p className="mut sm-text">
+              Type this in the agent's setup window as the join code, or paste the one-line version below (it carries the
+              site address too). Valid 15 minutes, single use, {code.role} role.
+            </p>
+            <textarea className="agent-join-code" readOnly value={code.paste} rows={2} onFocus={e => e.currentTarget.select()} />
+            <div className="filters" style={{ margin: '8px 0 0' }}>
+              <button className="action" onClick={() => copy(code.paste)}>{copied ? 'Copied' : 'Copy'}</button>
+              <button className="action" onClick={() => setCode(null)}>Done</button>
+            </div>
+          </div>
+        )}
+        {mine && mine.joinCodes.length > 0 && !code && (
+          <p className="mut sm-text card-intro">
+            Open join code{mine.joinCodes.length > 1 ? 's' : ''}: {mine.joinCodes.map(c => `${c.code.slice(0, 4)}-${c.code.slice(4)}`).join(', ')}
+          </p>
+        )}
+        {error && <p className="warn-text sm-text">{error}</p>}
+
+        {mine && keys.length === 0 ? (
+          <p className="empty">No machines yet - install the agent below, then press <strong>Add a machine</strong> for its join code.</p>
+        ) : keys.length > 0 && (
+          <div className="table-scroll">
             <table className="data agent-access">
               <thead>
                 <tr>
@@ -173,6 +162,7 @@ export default function Machines() {
                   const live = k.live
                   const outdated = !!(live && latest && live.version !== latest && live.version !== '0.0.0.0')
                   const status = statusOf(k)
+                  const assignOpen = assigning?.id === k.id
                   return (
                     <Fragment key={k.id}>
                     <tr className={k.status === 'pending' ? 'pending' : undefined}>
@@ -222,46 +212,53 @@ export default function Machines() {
                       <td className="actions">
                         {canAct(k) && k.status === 'pending' && <>
                           <button className="action primary sm-action" disabled={busy === k.id || (!k.bound && !auth.isAdmin)} title={!k.bound && !auth.isAdmin ? 'Enrolled without a join code - an admin has to assign it first' : undefined}
-                            onClick={() => act(k.id, 'approve')}>Approve</button>{' '}
+                            onClick={() => act(k.id, 'approve')}>Approve</button>
                           <button className="action sm-action" disabled={busy === k.id} onClick={() => act(k.id, 'delete')}>Reject</button>
                         </>}
                         {canAct(k) && k.status === 'approved' && <>
                           {live && <>
                             <button className="action sm-action" title="Ask this agent to restart on its next heartbeat (when it is idle) - it re-reads settings and updates itself"
-                              disabled={busy === k.id} onClick={() => act(k.id, 'restart')}>Restart</button>{' '}
+                              disabled={busy === k.id} onClick={() => act(k.id, 'restart')}>Restart</button>
                             <button className="action sm-action" title="Ask this agent to send the tail of its agent.log - it arrives on the next heartbeat (about a minute)"
                               disabled={busy === k.id || !!logAsked[k.id]} onClick={() => askLog(k.id)}>
                               {logAsked[k.id] && !(k.logs[0] && new Date(k.logs[0].whenUtc).getTime() > logAsked[k.id]) ? 'Log asked…' : 'Log'}
-                            </button>{' '}
+                            </button>
                           </>}
                           <button className="action sm-action" disabled={busy === k.id} onClick={() => act(k.id, 'revoke')}>Revoke</button>
                         </>}
                         {canAct(k) && k.status === 'revoked' && <>
-                          <button className="action sm-action" disabled={busy === k.id} onClick={() => act(k.id, 'approve')}>Re-approve</button>{' '}
+                          <button className="action sm-action" disabled={busy === k.id} onClick={() => act(k.id, 'approve')}>Re-approve</button>
                           <button className="action sm-action" disabled={busy === k.id} onClick={() => act(k.id, 'delete')}>Delete</button>
                         </>}
+                        {auth.isAdmin && (
+                          <button className={`action sm-action${assignOpen ? ' on' : ''}`} title="Set who owns this machine and what it does"
+                            onClick={() => setAssigning(assignOpen ? null : { id: k.id, owner: k.ownerEmail ?? '', role: k.role })}>{k.bound ? 'Change…' : 'Assign…'}</button>
+                        )}
                         {!canAct(k) && <span className="mut sm-text">shared</span>}
                       </td>
                     </tr>
-                    {auth.isAdmin && (
-                      <tr className="agent-error-row">
-                        <td colSpan={8}>
-                          <span className="sm-text">
-                            <input className="text" placeholder={k.ownerEmail ?? 'owner email'} value={assign[k.id] ?? ''} style={{ width: 220 }}
-                              onChange={e => setAssign({ ...assign, [k.id]: e.target.value })} />{' '}
-                            <select value={assignRole[k.id] ?? k.role} aria-label="Machine role" onChange={e => setAssignRole({ ...assignRole, [k.id]: e.target.value })}>
-                              <option value="recorder">recorder – records and renders its owner's accounts</option>
-                              <option value="renderer">renderer – renders replays for everyone</option>
-                            </select>{' '}
-                            <button className="action sm-action" onClick={() => doAssign(k)}>Save owner &amp; role</button>
-                            {k.ownerEmail && <>{' '}<button className="action sm-action" onClick={() => doUnown(k)} title="Make this machine unowned again">Unown</button></>}
-                          </span>
+                    {assignOpen && assigning && (
+                      <tr className="agent-detail-row">
+                        <td colSpan={columns}>
+                          <div className="assign-form">
+                            <label>Owner
+                              <OwnerSelect users={users} value={assigning.owner} onChange={owner => setAssigning({ ...assigning, owner })} />
+                            </label>
+                            <label>Role
+                              <select className="select" value={assigning.role} onChange={e => setAssigning({ ...assigning, role: e.target.value as Role })}>
+                                <option value="recorder">recorder – records and renders its owner's accounts</option>
+                                <option value="renderer">renderer – renders replays for everyone</option>
+                              </select>
+                            </label>
+                            <button className="action primary sm-action" disabled={busy === k.id} onClick={() => saveAssign(k)}>Save</button>
+                            <button className="action sm-action" disabled={busy === k.id} onClick={() => setAssigning(null)}>Cancel</button>
+                          </div>
                         </td>
                       </tr>
                     )}
                     {live?.lastError && canAct(k) && (
-                      <tr className="agent-error-row">
-                        <td colSpan={8}>
+                      <tr className="agent-detail-row">
+                        <td colSpan={columns}>
                           <div className="agent-error">
                             <span className="agent-error-label">Last error</span>{live.lastError}
                             <button className="dismiss-x" title="Dismiss (comes back only if a new error appears)" onClick={() => act(k.id, 'dismiss-error')}>✕</button>
@@ -277,6 +274,32 @@ export default function Machines() {
           </div>
         )}
       </div>
-    </>
+
+      <div className="card">
+        <h2>Install the agent</h2>
+        <p className="mut card-intro">
+          The agent runs on the gaming PC - no admin rights needed. It records your games, renders the replay clips, publishes to
+          YouTube, and updates itself from this site.
+        </p>
+        {release ? (
+          <div className="filters" style={{ margin: 0 }}>
+            {release.installer && (
+              <a className="action primary" href={`/api/agent/release/${encodeURIComponent(release.installer)}`} download>
+                Download installer {release.version} ({Math.round(release.installerSizeBytes / 1_000_000)} MB)
+              </a>
+            )}
+            <a className={`action${release.installer ? '' : ' primary'}`} href={`/api/agent/release/${encodeURIComponent(release.file)}`} download title="Portable: unzip anywhere and double-click the exe">
+              {release.installer ? 'Portable zip' : `Download agent ${release.version}`} ({Math.round(release.sizeBytes / 1_000_000)} MB)
+            </a>
+          </div>
+        ) : (
+          <p className="mut">No agent build published on this tracker yet.</p>
+        )}
+        <p className="mut sm-text" style={{ margin: '10px 0 0' }}>
+          Windows SmartScreen may say "not commonly downloaded" - the build is not code-signed yet. Choose <strong>Keep</strong>{' '}
+          in the download bar, then <strong>More info → Run anyway</strong> if the blue box appears.
+        </p>
+      </div>
+    </div>
   )
 }

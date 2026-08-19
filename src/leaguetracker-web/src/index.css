@@ -95,12 +95,8 @@ a { color: inherit; }
   display: inline-flex; align-items: center; gap: 10px;
   font-size: 19px; font-weight: 750; letter-spacing: -0.02em; margin: 0;
 }
-/* The brand mark: the one place the signature gradient shows at full strength. */
-.topbar h1::before {
-  content: 'LT'; display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border-radius: 8px;
-  background: var(--grad); color: #fff; font-size: 12.5px; font-weight: 800; letter-spacing: 0;
-}
+/* The brand mark is the favicon itself, so the tab and the page agree. */
+.topbar h1 .brand-mark { width: 26px; height: 25px; display: block; }
 .topbar .player {
   color: var(--accent); font-weight: 650; font-size: 13px;
   background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
@@ -1497,15 +1493,30 @@ div.seg { --edge-cover: #0d111a; background-color: #0d111a; }
   .cp-drop { left: 50%; transform: translateX(-50%); max-width: calc(100vw - 48px); }
 }
 
-/* Get-the-agent card: the join-code builder. */
-.agent-join { border-top: 1px solid var(--border); padding-top: 10px; }
-.agent-join-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
-.agent-join-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
-.agent-join-grid input, .agent-join-grid select {
-  background: var(--panel-2); color: var(--ink); border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font: inherit; font-size: 13px;
-}
+/* Machines page: the join code the owner reads to a new machine. */
 .agent-join-code { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: var(--panel-2); color: var(--ink);
   border: 1px solid var(--border); border-radius: 8px; padding: 8px; word-break: break-all; resize: vertical; }
+
+/* Card header row: the title on the left, the card's own controls on the
+   right; wraps on phones. Cards without controls keep the bare h2. */
+.card-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.card-head h2 { margin: 0; }
+.card-head-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+p.card-intro { margin: 0 0 14px; }
+
+/* The one select style for forms outside the header (the header's account
+   switcher wears the player pill instead). */
+select.select {
+  background: var(--panel-2); color: var(--ink); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 9px; font: inherit; font-size: 13px; max-width: 100%;
+}
+select.select:disabled { opacity: 0.5; }
+
+/* Admin's assign form, opened under a machine row on demand. */
+.assign-form { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; padding: 6px 0 4px; }
+.assign-form label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.assign-form .sm-action { margin-bottom: 1px; }
+button.action.on { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 
 /* Data page: agents, clip rendering, storage. Prose intro then structured
    rows/tiles - the sentence-with-dots layout read as one grey run of text. */
@@ -1542,40 +1553,102 @@ table.data.render-failed-table td.reason { color: var(--ink-2); font-size: 12.5p
 .failed-game { display: inline-flex; align-items: center; }
 .agent-error { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 
-.agent-head .sm-action { margin-left: auto; font-size: 12px; padding: 3px 9px; }
-
-/* Identity pill: sits at the right end of the header row; quiet when signed
-   in, an accent link when not. */
+/* Identity control at the right end of the header row: an accent link when
+   signed out; signed in, a quiet pill that opens the person's menu. */
 .topbar .signin-pill {
   margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
   font-size: 12.5px; color: var(--muted); text-decoration: none;
 }
 .topbar .signin-pill:not(.signed-in) { color: var(--accent); font-weight: 650; }
-.topbar .signin-pill .who { color: var(--ink); font-weight: 600; }
-.topbar .signin-pill .signout { color: var(--muted); text-decoration: none; border-bottom: 1px dotted currentColor; }
-.topbar .signin-pill .signout:hover { color: var(--accent); }
+.topbar .user-menu { margin-left: auto; position: relative; }
+.topbar .user-menu .signin-pill {
+  margin-left: 0; background: transparent; border: 1px solid transparent; border-radius: var(--radius-pill);
+  padding: 3px 9px 3px 4px; font: inherit; font-size: 12.5px; cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+.topbar .user-menu .signin-pill:hover, .topbar .user-menu .signin-pill.open { background: var(--overlay-hover); border-color: var(--border); }
+.topbar .signin-pill .who { color: var(--ink); font-weight: 600; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar .signin-pill .avatar {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--grad); color: #fff; font-size: 11px; font-weight: 750;
+}
+.topbar .signin-pill .caret {
+  width: 6px; height: 6px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
+  transform: translateY(-2px) rotate(45deg);
+}
+.user-menu .menu {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 60;
+  min-width: 230px; max-width: min(340px, calc(100vw - 32px));
+  padding: 6px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px;
+  box-shadow: var(--shadow-pop);
+}
+.user-menu .menu-head { padding: 8px 10px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--border); }
+/* Long addresses wrap inside the name and email lines; the admin chip is
+   one unbreakable piece that moves to the next line whole. */
+.user-menu .menu-name { font-weight: 650; font-size: 13px; overflow-wrap: anywhere; }
+.user-menu .menu-email { color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.user-menu .menu-tag {
+  display: inline-block; white-space: nowrap; vertical-align: 1px;
+  margin-left: 6px; padding: 0 6px; border-radius: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--accent); background: var(--accent-soft);
+}
+.user-menu [role="menuitem"] {
+  display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 8px;
+  color: var(--ink-2); font-size: 13px; font-weight: 500; text-decoration: none;
+  transition: background 100ms, color 100ms;
+}
+.user-menu [role="menuitem"] svg { color: var(--muted); flex: 0 0 auto; }
+.user-menu [role="menuitem"]:hover, .user-menu [role="menuitem"]:focus-visible { background: var(--overlay-hover); color: var(--ink); outline: none; }
+.user-menu [role="menuitem"]:hover svg { color: var(--ink-2); }
+.user-menu .menu-sep { height: 1px; margin: 6px 4px; background: var(--border); }
+/* Sign-in screen: the only thing a visitor sees. One panel in the middle of
+   the page glow, the brand mark, one button; the notice keeps its place at
+   the foot. */
+.signin-screen { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }
+.signin { display: flex; flex-direction: column; align-items: center; width: min(380px, 100%); text-align: center; }
+.signin-logo { display: block; margin-bottom: 18px; filter: drop-shadow(0 6px 18px rgba(134, 59, 255, 0.35)); }
+.signin h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 20px; }
+.signin-panel {
+  width: 100%; padding: 22px 22px 20px;
+  background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-pop);
+}
+.signin-panel p { margin: 0 0 16px; font-size: 13.5px; line-height: 1.5; }
+.signin-panel p.sm-text { margin: 10px 0 0; }
+.signin-cta { display: block; width: 100%; padding: 9px 14px; font-size: 14px; text-align: center; }
+a.signin-cta { display: block; }
+.signin-dev { display: flex; flex-wrap: wrap; gap: 8px; }
+.signin-dev input { flex: 1 1 100%; text-align: center; }
+.signin-dev p { flex-basis: 100%; }
+.signin-help { margin: 18px 0 0; font-size: 12.5px; }
+.signin-screen .footer { width: min(720px, 100%); margin-top: 32px; padding-top: 14px; text-align: center; }
+/* Admin page for a non-admin: one card, centred, nothing else. */
 .signin-wall { max-width: 520px; margin: 40px auto; text-align: center; }
 
 .setting-row { display: flex; align-items: flex-start; gap: 10px; margin: 8px 0; cursor: pointer; }
 .setting-row input { margin-top: 3px; accent-color: var(--accent); }
-.join-code-box { margin-top: 8px; }
+.join-code-box { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-inset); }
+.join-code-box p { margin: 4px 0 8px; }
 .join-code { font: 700 26px/1.2 ui-monospace, "Cascadia Code", Consolas, monospace; letter-spacing: 0.12em; color: var(--accent); }
 
 .claim-box { display: flex; gap: 14px; align-items: flex-start; }
 .claim-icon { border-radius: 10px; border: 2px solid var(--accent); flex: 0 0 auto; }
 
-/* Agent access table: compact action buttons, and pending rows read as
-   "needs you" without a second badge. */
-table.agent-access .sm-action { font-size: 12px; padding: 3px 9px; }
-table.agent-access td.actions { text-align: right; }
+/* Compact per-row actions in any data table (machines, people, accounts). */
+table.data .sm-action { font-size: 12px; padding: 3px 9px; }
+table.data td.actions { text-align: right; }
+table.data td.actions .action + .action { margin-left: 6px; }
+table.data .badge.tag { margin-left: 8px; font-size: 10px; padding: 1px 6px; text-transform: uppercase; letter-spacing: 0.04em; vertical-align: 1px; }
+/* Pending rows read as "needs you" without a second badge; detail rows
+   (assign form, last error) hang under their machine without a hover tint. */
 /* The "now" cell carries free text (recording names get long); clip it and
    keep the full line on hover so the table stays one screen wide. */
 table.agent-access td.now { max-width: 260px; }
 table.agent-access .agent-now { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
 table.agent-access tr.pending td { background: color-mix(in srgb, var(--warn) 6%, transparent); }
-table.agent-access tr.agent-error-row td { padding-top: 0; white-space: normal; }
+table.agent-access tr.agent-detail-row td { padding-top: 0; white-space: normal; }
 /* Recorded but not yet on YouTube: the sidecar arrived, the video is in
    transit - read as a state, not an error. */
 .vod-pending { text-align: center; padding: 24px; line-height: 1.5; }
 .vod-pending strong { color: var(--ink); }
-table.agent-access tr.agent-error-row:hover td { background: transparent; }
+table.agent-access tr.agent-detail-row:hover td { background: transparent; }

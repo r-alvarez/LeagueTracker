@@ -4,7 +4,7 @@ import { api } from './api'
 import { account } from './account'
 import { auth } from './auth'
 import AccountSwitch from './components/AccountSwitch'
-import SignInPill from './components/SignInPill'
+import UserMenu from './components/UserMenu'
 import type { Status } from './types'
 import Dashboard from './pages/Dashboard'
 import Matches from './pages/Matches'
@@ -12,6 +12,8 @@ import MatchDetail from './pages/MatchDetail'
 import DataPage from './pages/DataPage'
 import Coach from './pages/Coach'
 import Fundamentals from './pages/Fundamentals'
+import Machines from './pages/Machines'
+import Admin from './pages/Admin'
 import LiveGameBanner from './components/LiveGameBanner'
 import StopLossBanner from './components/StopLossBanner'
 
@@ -41,7 +43,7 @@ export default function App() {
         <h1>LeagueTracker</h1>
         {account.all.length > 1 || account.canAdd ? <AccountSwitch /> : status && <span className="player">{status.riotId}</span>}
         {scope && <span className="sub" title={patches.length > 1 ? `patches ${patches.join(', ')}` : undefined}>{scope}</span>}
-        <SignInPill />
+        <UserMenu />
       </header>
 
       <nav className="tabs">
@@ -78,6 +80,8 @@ export default function App() {
         <Route path="/matches" element={<Matches />} />
         <Route path="/matches/:id" element={<MatchDetail />} />
         <Route path="/data" element={<DataPage />} />
+        <Route path="/machines" element={<Machines />} />
+        <Route path="/admin" element={<Admin />} />
       </Routes>
       </>)}
 

@@ -3,13 +3,11 @@ import { Link } from 'react-router-dom'
 import { account } from '../account'
 import { auth } from '../auth'
 import ClaimAccount from '../components/ClaimAccount'
-import Machines from '../components/Machines'
-import People from '../components/People'
 import { api } from '../api'
 import type { JobStatus, RenderQueueRow, Status, StorageInfo } from '../types'
 
 export default function DataPage() {
-  // The page has two readers: the owner (jobs, machines, exports, settings)
+  // The page has two readers: the owner (jobs, exports, settings)
   // and everyone else (the public figures and, when signed in, a way to claim
   // an account nobody owns). The server enforces the same split; this only
   // decides what to draw.
@@ -98,7 +96,7 @@ export default function DataPage() {
             <h2>{status?.account.owned ? 'Owned account' : 'Nobody owns this account yet'}</h2>
             <p className="mut" style={{ marginTop: 0 }}>
               {status?.account.owned
-                ? 'Only its owner can run syncs, manage machines, download exports or change what the profile shows.'
+                ? 'Only its owner can run syncs, download exports or change what the profile shows.'
                 : 'Sign in to claim it if it is yours.'}
             </p>
           </div>
@@ -186,10 +184,6 @@ export default function DataPage() {
           <span><strong>Hide rank and LP</strong> <span className="mut">— capture continues, the pages just don't show it</span></span>
         </label>
       </div>
-
-      <Machines />
-
-      {auth.isAdmin && <People />}
 
       {renderQueue.length > 0 && (
         <div className="card">
