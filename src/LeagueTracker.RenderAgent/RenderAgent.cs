@@ -978,7 +978,9 @@ public sealed class RenderAgent(AgentConfig config)
             // in seconds (and a dead one respawns), while a free camera
             // stays put at any speed. The consumed pre-roll is the price;
             // the window lead absorbs it.
+            Log.Info("Quick camera check inconclusive - fast-forwarding to see if the camera follows");
             tracks = await FastForwardTracksAsync(replayApi, ct);
+            if (tracks) Log.Info("The camera followed at speed - lock verified");
         }
 
         if (!tracks)
