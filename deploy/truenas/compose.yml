@@ -80,6 +80,15 @@ services:
       Auth__Oidc__ClientId: ${AUTH0_CLIENT_ID:-}
       Auth__Oidc__ClientSecret: ${AUTH0_CLIENT_SECRET:-}
       Auth__Admins: ${AUTH_ADMINS:-}
+      # Invites: a separate Machine-to-Machine application authorised for the
+      # Management API (create:users read:users delete:users
+      # create:user_tickets). Unset = "Add a person" still makes the row here
+      # but creates nothing at Auth0 and sends no mail.
+      Auth__Management__ClientId: ${AUTH0_MGMT_CLIENT_ID:-}
+      Auth__Management__ClientSecret: ${AUTH0_MGMT_CLIENT_SECRET:-}
+      # Nobody signs in without a row here (invited, configured or already
+      # known); "false" lets any identity the tenant accepts create one.
+      Auth__InviteOnly: "true"
       # Cloudflare Access still walls the site: reads need a signed-in person
       # until the public launch flips this to "true".
       Auth__PublicReads: "false"

@@ -97,13 +97,59 @@ public static class ManagementEndpoints
 
         // --- Admin ----------------------------------------------------------------
 
-        admin.MapGet("/users", (UserStore users, AccountRegistry accounts, AgentKeyStore keys) => Results.Ok(users.All().Select(u => new
+        admin.MapGet("/users", (UserStore users, AccountRegistry accounts, AgentKeyStore keys, Auth0ManagementClient auth0) => Results.Ok(new
         {
-            u.Id, u.Email, u.DisplayName, u.IsAdmin, u.CreatedUtc, u.LastSeenUtc,
-            Logins = u.Logins.Select(l => l.Issuer),
-            Accounts = accounts.OwnedBy(u.Id).Select(a => a.RiotId),
-            Agents = keys.OwnedBy(u.Id).Count,
-        })));
+            // Whether "Add a person" can reach the provider on this instance;
+            // without it the row is still made and the page says the rest.
+            InvitesConfigured = auth0.Configured,
+            Users = users.All().Select(u => UserView(u, accounts, keys)),
+        }));
+
+        // Add a person: our row first (assignable at once), then the identity
+        // at Auth0 and Auth0's own "set your password" mail. A provider
+        // failure leaves the row - Resend finishes the job later.
+        admin.MapPost("/users", async (InviteRequest request, Caller caller, UserStore users, AccountRegistry accounts, AgentKeyStore keys, Auth0ManagementClient auth0, ILoggerFactory logs, CancellationToken ct) =>
+        {
+            if (request.Email is not { Length: > 3 } email || !email.Contains('@')) return Results.BadRequest(new { error = "Type the person's email address" });
+            if (users.Invite(email, request.DisplayName, caller.UserId!) is not { } user) return Results.Conflict(new { error = $"{email.Trim().ToLowerInvariant()} is already here" });
+            var (mailed, warning) = await SendInviteAsync(user, users, auth0, logs.CreateLogger("LeagueTracker.Invites"), ct);
+            return Results.Ok(new { user = UserView(users.ById(user.Id)!, accounts, keys), mailed, warning });
+        }).RequireRateLimiting("invite");
+
+        admin.MapPost("/users/{id}/invite", async (string id, UserStore users, AccountRegistry accounts, AgentKeyStore keys, Auth0ManagementClient auth0, ILoggerFactory logs, CancellationToken ct) =>
+        {
+            if (users.ById(id) is not { IsInvitedPending: true } user) return Results.NotFound(new { error = "only a person who has not signed in yet can be re-invited" });
+            var (mailed, warning) = await SendInviteAsync(user, users, auth0, logs.CreateLogger("LeagueTracker.Invites"), ct);
+            return Results.Ok(new { user = UserView(users.ById(user.Id)!, accounts, keys), mailed, warning });
+        }).RequireRateLimiting("invite");
+
+        // The link the mail carries, for the admin to hand over when the mail
+        // does not arrive. Shown once; nothing of it is stored.
+        admin.MapPost("/users/{id}/invite-link", async (string id, HttpContext http, UserStore users, Auth0ManagementClient auth0, CancellationToken ct) =>
+        {
+            if (users.ById(id) is not { IsInvitedPending: true } user) return Results.NotFound(new { error = "only a person who has not signed in yet gets an invite link" });
+            if (!auth0.Configured) return Results.Problem("Auth0 management is not configured on this instance (Auth:Management)", statusCode: 503);
+            try
+            {
+                var providerId = user.ProviderUserId ?? await auth0.EnsureUserAsync(user.Email, user.DisplayName, ct);
+                if (user.ProviderUserId is null) users.SetProviderUserId(user.Id, providerId);
+                var (url, expires) = await auth0.PasswordSetupLinkAsync(providerId, $"{http.Request.Scheme}://{http.Request.Host}/", TimeSpan.FromDays(7), ct);
+                return Results.Ok(new { url, expiresUtc = expires });
+            }
+            catch (Auth0Exception ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway); }
+        }).RequireRateLimiting("invite");
+
+        admin.MapDelete("/users/{id}", async (string id, Caller caller, UserStore users, Auth0ManagementClient auth0, CancellationToken ct) =>
+        {
+            if (id == caller.UserId) return Results.BadRequest(new { error = "you cannot remove yourself" });
+            if (users.ById(id) is not { IsInvitedPending: true } user) return Results.NotFound(new { error = "only a person who has not signed in yet can be removed" });
+            if (user.ProviderUserId is { } providerId && auth0.Configured)
+            {
+                try { await auth0.DeleteUserAsync(providerId, ct); }
+                catch (Auth0Exception ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway); }
+            }
+            return users.DeleteInvited(id) ? Results.NoContent() : Results.NotFound();
+        });
 
         admin.MapGet("/agents", (AgentKeyStore keys, UserStore users, AgentRegistry agents) =>
         {
@@ -158,6 +204,39 @@ public static class ManagementEndpoints
         Live = live, Logs = logs ?? [],
     };
 
+    private static object UserView(User u, AccountRegistry accounts, AgentKeyStore keys) => new
+    {
+        u.Id, u.Email, u.DisplayName, u.IsAdmin, u.CreatedUtc, u.LastSeenUtc, u.InvitedUtc, u.InviteSentUtc,
+        Invited = u.IsInvitedPending,
+        ProviderLinked = u.ProviderUserId is not null,
+        Logins = u.Logins.Select(l => l.Issuer),
+        Accounts = accounts.OwnedBy(u.Id).Select(a => a.RiotId),
+        Agents = keys.OwnedBy(u.Id).Count,
+    };
+
+    // Make sure the person exists at Auth0, then have Auth0 mail them. Either
+    // step may fail without undoing the row; the answer says what happened so
+    // the admin can act (Resend, Copy link) instead of guessing.
+    private static async Task<(bool Mailed, string? Warning)> SendInviteAsync(User user, UserStore users, Auth0ManagementClient auth0, ILogger log, CancellationToken ct)
+    {
+        if (!auth0.Configured) return (false, "Auth0 management is not configured on this instance, so no invite was sent - the person is on the list and can sign in if their address already exists at the provider.");
+        try
+        {
+            var providerId = user.ProviderUserId ?? await auth0.EnsureUserAsync(user.Email, user.DisplayName, ct);
+            if (user.ProviderUserId is null) users.SetProviderUserId(user.Id, providerId);
+            await auth0.SendPasswordSetupEmailAsync(user.Email, ct);
+            users.MarkInviteSent(user.Id);
+            log.LogInformation("Invite mailed to {Email} ({ProviderId})", user.Email, providerId);
+            return (true, null);
+        }
+        catch (Auth0Exception ex)
+        {
+            log.LogWarning("Invite for {Email} did not complete: {Message}", user.Email, ex.Message);
+            return (false, ex.Message);
+        }
+    }
+
     public sealed record AssignRequest(string? OwnerEmail, string? Role);
     public sealed record ClaimRequest(string AccountId);
+    public sealed record InviteRequest(string? Email, string? DisplayName);
 }

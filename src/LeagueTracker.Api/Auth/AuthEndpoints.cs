@@ -55,6 +55,9 @@ public static class AuthEndpoints
         // the container whatever the config says.
         app.MapGet("/api/auth/dev-login", async (HttpContext http, UserStore users, string email, string? name, bool admin = false, string? returnUrl = null) =>
         {
+            // "Any email" means the invite gate does not apply here: the row is
+            // made on the spot, as configuration would have.
+            users.EnsureByEmail(email);
             var (user, _) = users.FromLogin("dev", email.ToLowerInvariant(), email, emailVerified: true, name);
             if (admin && !user.IsAdmin) { users.SetAdmin(user.Id, true); user.IsAdmin = true; }
             await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, AuthSetup.SessionPrincipal(user), AuthSetup.PersistentSession());
