@@ -1743,3 +1743,21 @@ roam between windows (a human at the machine) earn fresh strikes.
 **Not verified against a live replay yet** - the 4x speed write is the one
 untested assumption; if the API clamps or ignores it, the check degrades
 to today's behaviour, no worse.
+
+## 2026-08-19 — Unrenderable windows complete around the gap
+
+A skipped window (sim-hang proved twice on fresh processes, a camera
+target the replay doesn't know, a fight target dead past the fight) used
+to fail the whole job so partial coverage never read as complete. Right
+instinct, wrong resting state: the failure sat on the Data page and the
+Machines banner awaiting a manual dismiss, for a verdict the agent had
+already proved deterministic - EUW1_7955610306's window 3 was the live
+case. Now the agent reports the skipped windows with their reasons to
+`POST /render/{matchId}/unrenderable`; the tracker stores them per match
+(`unrenderable.json`), keeps them out of render/next and the missing
+counts, and the match reads done with the gap named in its own `gaps`
+field - a muted line on the Data page with a per-match ↻ that lifts the
+verdict (keep=true, so the good clips stay). Owner retry lifts it too.
+An agent talking to a tracker that predates the endpoint falls back to
+the old job failure, so partial coverage still never silently reads as
+complete anywhere.

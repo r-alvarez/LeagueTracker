@@ -806,8 +806,12 @@ render.MapPost("/render/next", async (AccountContext acct, ClipService clips, Fu
         var plan = await clips.LoadPlanAsync(matchId, ct) ?? await clips.PlanAsync(matchId, ct);
         if (plan is not { Windows.Count: > 0 }) continue;
         // Only windows without an mp4: deleting a single bad clip on the match
-        // page re-renders just that window, keeping the good ones.
+        // page re-renders just that window, keeping the good ones. Windows the
+        // agent reported unrenderable stay out of the job: asking again
+        // reproduces the same hang or missing target every time.
+        var unrenderable = clips.UnrenderableWindows(matchId);
         var missing = plan.Windows.Where(w => clips.ClipPath(matchId, w.Index) is null
+            && !unrenderable.ContainsKey(w.Index)
             && (!vodCovered || w.Kind is "fight")).ToList();
         if (missing is not { Count: > 0 }) continue;
         if (!leases.TryClaim($"clips:{matchId}", agent)) continue;
@@ -891,6 +895,17 @@ render.MapPost("/render/{matchId}/complete", (string matchId, RenderLeaseService
     return Results.Ok();
 });
 
+// The agent proved these windows can never render (the replay simulation
+// hangs at the spot, a camera target the replay doesn't know): record the
+// verdict so the match completes with a named gap instead of failing forever,
+// and render/next stops asking for them. An owner retry lifts it.
+render.MapPost("/render/{matchId}/unrenderable", async (string matchId, Dictionary<int, string> windows, ClipService clips, string kind = "clips", CancellationToken ct = default) =>
+{
+    if (kind is not "clips" || windows is not { Count: > 0 }) return Results.BadRequest();
+    await clips.MarkUnrenderableAsync(matchId, windows, ct);
+    return Results.Ok();
+});
+
 render.MapPost("/render/{matchId}/fail", async (string matchId, HttpRequest request, RenderLeaseService leases, ClipService clips, FullGameService full, string kind = "clips", CancellationToken ct = default) =>
 {
     using var reader = new StreamReader(request.Body);
@@ -922,6 +937,7 @@ owner.MapPost("/render/{matchId}/retry", (string matchId, ClipService clips, Ful
     else
     {
         clips.ClearFailed(matchId);
+        clips.ClearUnrenderable(matchId);
         if (!keep) clips.DeleteClips(matchId);
     }
     return Results.Ok();

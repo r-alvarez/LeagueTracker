@@ -473,6 +473,7 @@ export interface RenderQueueRow {
   kind: 'clips' | 'full'
   status: 'pending' | 'partial' | 'rendering' | 'done' | 'failed' | 'no-events'
   error: string | null
+  gaps: string | null
 }
 
 export interface FullGameStatus {

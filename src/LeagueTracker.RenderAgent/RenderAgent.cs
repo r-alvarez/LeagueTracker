@@ -587,7 +587,7 @@ public sealed class RenderAgent(AgentConfig config)
             }
             var slot = (Index: slotIndex, Blue: players[slotIndex].Blue);
 
-            var skippedWindows = new List<int>();
+            var skippedWindows = new List<(int Index, string Reason)>();
             foreach (var window in windows)
             {
                 // Between windows is the safe place to honor a deploy's stop
@@ -618,7 +618,7 @@ public sealed class RenderAgent(AgentConfig config)
                 if (targetSlotIndex < 0)
                 {
                     Log.Warn($"Window {window.Index} ({window.Label}): camera target \"{targetChampion}\" is not in the replay's player list - skipping this window");
-                    skippedWindows.Add(window.Index);
+                    skippedWindows.Add((window.Index, $"camera target \"{targetChampion}\" is not in the replay's player list"));
                     continue;
                 }
                 var windowSlot = (Index: targetSlotIndex, Blue: players[targetSlotIndex].Blue);
@@ -652,7 +652,7 @@ public sealed class RenderAgent(AgentConfig config)
                         // postpone replays the same respawn timer. Skip the
                         // window so the rest render and the job names the gap.
                         Log.Warn($"Window {window.Index} ({window.Label}): \"{targetChampion}\" is dead until after the fight - no POV to film it from, skipping this window");
-                        skippedWindows.Add(window.Index);
+                        skippedWindows.Add((window.Index, $"\"{targetChampion}\" stays dead past the fight - no POV to film it from"));
                         skippedThis = true;
                         break;
                     }
@@ -699,13 +699,13 @@ public sealed class RenderAgent(AgentConfig config)
                     // recovers, so the retry needs a fresh process; a window
                     // that hangs the fresh process too has a cursed timestamp
                     // in this .rofl - skip it so the remaining windows render,
-                    // and the job-end failure names it.
+                    // and the job end names the gap.
                     if (await SimFrozeDuringAsync(output, ct))
                     {
                         frozen++;
                         if (frozen >= 2)
                         {
-                            skippedWindows.Add(window.Index);
+                            skippedWindows.Add((window.Index, "the replay simulation hangs at its recording"));
                             skippedThis = true;
                             Log.Warn($"Window {window.Index}: the simulation hung again on a fresh game process - skipping this window");
                             await RestartReplayAsync();
@@ -739,11 +739,22 @@ public sealed class RenderAgent(AgentConfig config)
             }
             if (skippedWindows is { Count: > 0 })
             {
-                // Partial coverage must not read as complete: fail with the
-                // skipped windows named, so the gap is visible on the Data
-                // page next to the clips that did upload.
-                throw new InvalidOperationException(
-                    $"window(s) {string.Join(", ", skippedWindows)} skipped - the replay simulation hangs at their recordings; every other window uploaded");
+                // Every skip above is deterministic - the same replay
+                // reproduces the same hang or the same missing target on any
+                // retry - so tell the tracker to stop asking: the job then
+                // completes and the Data page names the gap. A tracker too
+                // old to know the endpoint gets the old failure instead, so
+                // partial coverage never silently reads as complete.
+                var names = string.Join(", ", skippedWindows.Select(s => s.Index));
+                if (await tracker.ReportUnrenderableAsync(job, skippedWindows, ct))
+                {
+                    Log.Warn($"Window(s) {names} reported unrenderable - the tracker won't ask for them again");
+                }
+                else
+                {
+                    throw new InvalidOperationException(
+                        $"window(s) {names} skipped - {string.Join("; ", skippedWindows.Select(s => s.Reason).Distinct())}; every other window uploaded");
+                }
             }
         }
         finally

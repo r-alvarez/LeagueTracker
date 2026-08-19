@@ -529,6 +529,22 @@ public sealed class TrackerClient
         return true;
     }
 
+    /// Tells the tracker these windows can never render (deterministic
+    /// replay defects: sim-hangs, targets the replay doesn't know), so it
+    /// completes the match around them instead of re-queueing the gap
+    /// forever. False when the tracker predates the endpoint - the caller
+    /// falls back to failing the job the old way.
+    public async Task<bool> ReportUnrenderableAsync(RenderJob job, IEnumerable<(int Index, string Reason)> windows, CancellationToken ct)
+    {
+        var body = windows.ToDictionary(w => w.Index.ToString(), w => w.Reason);
+        using var content = new StringContent(JsonSerializer.Serialize(body),
+            System.Text.Encoding.UTF8, "application/json");
+        using var resp = await _http.PostAsync($"{Api}/render/{job.MatchId}/unrenderable?kind={job.Kind}", content, ct);
+        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) return false;
+        resp.EnsureSuccessStatusCode();
+        return true;
+    }
+
     public async Task CompleteAsync(RenderJob job, CancellationToken ct)
     {
         using var resp = await _http.PostAsync($"{Api}/render/{job.MatchId}/complete?kind={job.Kind}", null, ct);
