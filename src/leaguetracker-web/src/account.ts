@@ -48,12 +48,16 @@ export const account = {
 /// address - the server's current account (Host header on a legacy
 /// hostname, else the default) when the URL names none.
 export async function bootAccount(): Promise<void> {
-  const resp = await fetch('/api/accounts')
+  const resp = await fetch('/api/accounts', { credentials: 'same-origin' })
+  // Signed out on a private tracker: the list is not ours to see. The app
+  // shows the sign-in screen and this runs again, cookie in hand, on return.
+  if (resp.status === 401 || resp.status === 403) return
   if (!resp.ok) throw new Error(`/api/accounts -> HTTP ${resp.status}`)
   const data: AccountsResponse = await resp.json()
   all = data.accounts
   regions = data.regions
   canAdd = data.canAdd
+  if (all.length === 0) return
 
   const segments = window.location.pathname.split('/').map(decodeURIComponent)
   const first = segments[1] ?? ''

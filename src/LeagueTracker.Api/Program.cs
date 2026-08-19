@@ -189,6 +189,8 @@ object AccountView(Account a) => new
     Unavailable = initializer.ErrorFor(a),
 };
 
+// The list is Riot IDs and who owns them - Read data, so a visitor gets it
+// only once PublicReads is on; the SPA shows the sign-in screen on a 401.
 app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct) => Results.Ok(new
 {
     Default = registry.Default.Slug,
@@ -198,7 +200,7 @@ app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct) => R
     registry.CanAdd,
     Regions = Platforms.All.Select(p => new { Code = p.Code, p.Label, p.Platform }),
     Accounts = registry.All.Select(AccountView),
-}));
+})).RequireAuthorization(Policies.Read);
 
 // The "add account" box: a Riot ID typed by a person, checked against Riot
 // (account-v1 answers with the canonical casing and the puuid), then given a

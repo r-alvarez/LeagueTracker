@@ -16,13 +16,20 @@ import Machines from './pages/Machines'
 import Admin from './pages/Admin'
 import LiveGameBanner from './components/LiveGameBanner'
 import StopLossBanner from './components/StopLossBanner'
+import SignInScreen from './components/SignInScreen'
+import Footer from './components/Footer'
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null)
 
   useEffect(() => {
+    if (!auth.canRead) return
     api.status().then(setStatus).catch(() => setStatus(null))
   }, [])
+
+  // Signed out on a private tracker: not the shell with a wall in it, the
+  // sign-in screen alone - no tabs, no account names, nothing to read.
+  if (!auth.canRead) return <SignInScreen />
 
   // Month-level dates and a patch range keep the scope line one calm phrase;
   // the full patch list lives in the tooltip for anyone who wants it.
@@ -40,7 +47,7 @@ export default function App() {
   return (
     <div className="shell">
       <header className="topbar">
-        <h1>LeagueTracker</h1>
+        <h1><img className="brand-mark" src="/favicon.svg" alt="" />LeagueTracker</h1>
         {account.all.length > 1 || account.canAdd ? <AccountSwitch /> : status && <span className="player">{status.riotId}</span>}
         {scope && <span className="sub" title={patches.length > 1 ? `patches ${patches.join(', ')}` : undefined}>{scope}</span>}
         <UserMenu />
@@ -60,16 +67,6 @@ export default function App() {
           {account.current.unavailable ? ` (${account.current.unavailable})` : ''}. The tracker retries every minute; the other accounts are unaffected.
         </div>
       )}
-      {!auth.canRead ? (
-        <div className="card signin-wall">
-          <h2>Sign in to view this tracker</h2>
-          <p className="mut">
-            This tracker is invite-only while it is being built. Sign in with the email its owner invited you with;
-            if you have not been invited, there is nothing to see here yet.
-          </p>
-          <p><a className="action primary" href={auth.loginUrl()}>Sign in</a></p>
-        </div>
-      ) : (<>
       <LiveGameBanner />
       <StopLossBanner />
 
@@ -83,13 +80,8 @@ export default function App() {
         <Route path="/machines" element={<Machines />} />
         <Route path="/admin" element={<Admin />} />
       </Routes>
-      </>)}
 
-      <footer className="footer">
-        LeagueTracker is a personal, non-commercial tool. It isn't endorsed by Riot Games and doesn't reflect the views
-        or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot
-        Games and League of Legends are trademarks or registered trademarks of Riot Games, Inc.
-      </footer>
+      <Footer />
     </div>
   )
 }
