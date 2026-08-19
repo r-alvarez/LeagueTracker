@@ -71,8 +71,14 @@ export interface JoinCodeInfo { code: string; role: 'recorder' | 'renderer'; exp
 export interface MyAgents { latestVersion: string | null; keys: AgentKey[]; joinCodes: JoinCodeInfo[] }
 export interface AdminUser {
   id: string; email: string; displayName: string; isAdmin: boolean; createdUtc: string; lastSeenUtc: string | null
+  invitedUtc: string | null; inviteSentUtc: string | null
+  /// Added by an admin and not signed in yet: re-invitable, removable.
+  invited: boolean
+  providerLinked: boolean
   logins: string[]; accounts: string[]; agents: number
 }
+export interface AdminUsers { invitesConfigured: boolean; users: AdminUser[] }
+export interface InviteResult { user: AdminUser; mailed: boolean; warning: string | null }
 
 export interface MatchSummary {
   id: string

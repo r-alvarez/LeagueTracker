@@ -1,6 +1,6 @@
 import { account } from './account'
 import { csrfHeaders } from './auth'
-import type { AdminUser, AgentKey, AnalyticsSummary, ClaimInfo, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
+import type { AdminUsers, AgentKey, AnalyticsSummary, ClaimInfo, InviteResult, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
 
 /// Every API call goes through here: account-scoped URL rewriting, the
 /// session cookie, and the CSRF header on writes. Bare fetch() elsewhere is
@@ -22,6 +22,19 @@ async function post<T>(url: string): Promise<T> {
   const resp = await apiFetch(url, { method: 'POST' })
   if (!resp.ok && resp.status !== 409) throw new Error(`${url} -> HTTP ${resp.status}`)
   return resp.json()
+}
+
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const resp = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  if (!resp.ok) throw new Error(await errorText(resp))
+  return resp.json()
+}
+
+/// The server's own sentence when it has one ({error} from our endpoints,
+/// {detail}/{title} from Results.Problem), else the bare status.
+async function errorText(resp: Response): Promise<string> {
+  const body = await resp.json().catch(() => null) as { error?: string; detail?: string; title?: string } | null
+  return body?.error ?? body?.detail ?? body?.title ?? `HTTP ${resp.status}`
 }
 
 export const api = {
@@ -94,7 +107,17 @@ export const api = {
   },
   // Admin
   adminAgents: () => get<{ latestVersion: string | null; keys: AgentKey[] }>('/api/admin/agents'),
-  adminUsers: () => get<AdminUser[]>('/api/admin/users'),
+  adminUsers: () => get<AdminUsers>('/api/admin/users'),
+  // Errors from these carry the server's sentence (error / detail / title),
+  // which the People card shows as is.
+  adminInvite: (email: string, displayName: string | null) =>
+    postJson<InviteResult>('/api/admin/users', { email, displayName }),
+  adminReinvite: (id: string) => postJson<InviteResult>(`/api/admin/users/${id}/invite`, {}),
+  adminInviteLink: (id: string) => postJson<{ url: string; expiresUtc: string }>(`/api/admin/users/${id}/invite-link`, {}),
+  adminRemoveInvited: async (id: string) => {
+    const r = await apiFetch(`/api/admin/users/${id}`, { method: 'DELETE' })
+    if (!r.ok) throw new Error(await errorText(r))
+  },
   adminSetUserAdmin: async (id: string, admin: boolean) => {
     const r = await apiFetch(`/api/admin/users/${id}/admin?admin=${admin}`, { method: 'POST' })
     if (!r.ok) throw new Error(await r.text())
