@@ -664,6 +664,28 @@ public sealed class RenderAgent(AgentConfig config)
                         continue;
                     }
 
+                    // A retry after a freeze usually re-seeks straight into
+                    // the same cursed timestamp - probe a few seconds before
+                    // committing to the full recording, so the repeat verdict
+                    // costs seconds instead of another whole clip. Only the
+                    // post-freeze attempt pays for the probe; first attempts
+                    // rely on the post-capture check below as before.
+                    if (frozen > 0)
+                    {
+                        var probe = output + ".probe.mp4";
+                        await CaptureAsync(probe, 7, ct);
+                        var probeFroze = await SimFrozeDuringAsync(probe, ct);
+                        if (File.Exists(probe)) File.Delete(probe);
+                        if (probeFroze)
+                        {
+                            skippedWindows.Add((window.Index, "the replay simulation hangs at its recording"));
+                            skippedThis = true;
+                            Log.Warn($"Window {window.Index}: the simulation hung again on a fresh game process - skipping this window");
+                            await RestartReplayAsync();
+                            break;
+                        }
+                    }
+
                     // Engaging ate a variable slice of the pre-roll while
                     // playback ran, so a fixed duration would shift the clip's
                     // end by the same slack - clipping the play's tail when

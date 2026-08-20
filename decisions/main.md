@@ -1761,3 +1761,25 @@ verdict (keep=true, so the good clips stay). Owner retry lifts it too.
 An agent talking to a tracker that predates the endpoint falls back to
 the old job failure, so partial coverage still never silently reads as
 complete anywhere.
+
+## 2026-08-20 — The review remote polls; F12 finishes; a hung window re-proves cheaply
+
+Ruben: the review F-keys stopped responding. The hook code hadn't changed
+since 7 Aug and the recorder's identical low-level hook still captured
+thousands of key events per game - so the hook installs and the machine
+sees keys. What changed is when reviews run: since the delivery-loop
+branch, finalize's ffmpeg and paced uploads overlap the review session,
+and Windows silently removes a low-level hook whose callback is starved
+past the hook timeout - keys then die for the rest of the session with
+nothing logged. ReviewHotkeys now polls GetAsyncKeyState at 40ms on an
+above-normal thread instead: nothing to deregister, and a real press
+can't fall between samples (verified with injected keys). Every consumed
+press is logged, so a dead remote is diagnosable from the field. F12 ends
+the review (Ruben reached for it; alt+F4 stays), and the banner says so.
+
+The sim-hang retry also got cheaper: the retry after a freeze usually
+re-seeks straight into the same cursed timestamp, so it now records a 7s
+probe and runs freezedetect on that before committing - the repeat
+verdict costs seconds instead of a second full recording. The replay
+relaunch itself stays: a hung game process cannot be revived, only
+replaced.
