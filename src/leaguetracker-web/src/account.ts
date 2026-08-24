@@ -30,7 +30,7 @@ export const account = {
   /// Account-scoped calls (/api/status, /api/matches, ...) go under the
   /// current account's prefix; the global roots stay as they are.
   apiUrl(path: string) {
-    const global = ['/api/a/', '/api/agent/', '/api/accounts', '/api/me', '/api/admin', '/api/auth', '/api/render/pending']
+    const global = ['/api/a/', '/api/agent/', '/api/accounts', '/api/me', '/api/admin', '/api/auth', '/api/render/pending', '/api/version']
     return current.slug && path.startsWith('/api/') && !global.some(g => path.startsWith(g))
       ? `/api/a${pathOf(current)}${path.slice(4)}`
       : path

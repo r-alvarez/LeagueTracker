@@ -25,6 +25,12 @@ WORKDIR /app
 # deploy clone's umask leaks into publish output via preserved source perms).
 COPY --chown=568:568 --from=api /app/publish .
 COPY --chown=568:568 --from=web /web/dist ./wwwroot
+# What GET /api/version reports as builtUtc - the only way to tell which build
+# is live, since .git is not in the build context and the site sits behind
+# Access. After both COPYs on purpose: Docker re-runs this exactly when either
+# stage produced something new, so an all-cached rebuild keeps the old stamp,
+# which is correct - the image is the same one.
+RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/build-info.txt && chown 568:568 /app/build-info.txt
 # Unprefixed `Urls` because appsettings.json carries a localhost value for host
 # runs, and app config (JSON) outranks ASPNETCORE_URLS; plain env vars outrank both.
 ENV Urls=http://+:5170 \

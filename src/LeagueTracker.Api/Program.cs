@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text;
 using LeagueTracker.Api.Accounts;
 using LeagueTracker.Api.Auth;
@@ -5,8 +6,10 @@ using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Registry;
 using LeagueTracker.Api.Riot;
 using LeagueTracker.Api.Services;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Match = LeagueTracker.Api.Data.Match;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -91,6 +94,16 @@ if (builder.Environment.IsDevelopment())
 
 builder.AddTrackerAuth();
 
+// Session cookies are encrypted with Data Protection keys. Left at the
+// default those keys live in the container's filesystem, so every redeploy
+// invented new ones and signed everyone out - and an OIDC login in flight
+// across a restart failed on a nonce it could no longer read. Keys go beside
+// the data instead. They are unencrypted at rest (no DPAPI on Linux, no
+// certificate here): that folder is as sensitive as a session cookie.
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(DataProtectionKeyDir(builder)))
+    .SetApplicationName("LeagueTracker");
+
 // Tracking a Riot ID costs a Riot call, a folder, a database and a permanent
 // poller slot: a signed-in person gets a handful per hour, not a script's worth.
 builder.Services.AddRateLimiter(o =>
@@ -136,6 +149,21 @@ app.Services.GetRequiredService<RegistryBootstrap>().Run();
 // Built now, not on the first agent request: its one-time agents.json import
 // belongs in the boot log next to the account import.
 app.Services.GetRequiredService<AgentKeyStore>();
+
+// Whether invites can reach Auth0, said once at boot. Without this the only
+// symptom of a missing stack variable is a sentence on the People page after
+// someone has already been added.
+{
+    var auth = app.Services.GetRequiredService<IOptions<AuthOptions>>().Value;
+    List<string> missing = [];
+    if (!auth.Oidc.Configured) missing.Add("Auth__Oidc__*");
+    if (auth.Management.ClientId is not { Length: > 0 }) missing.Add("Auth__Management__ClientId");
+    if (auth.Management.ClientSecret is not { Length: > 0 }) missing.Add("Auth__Management__ClientSecret");
+    if (missing is { Count: 0 })
+        app.Logger.LogInformation("Auth0 management configured: invites create the sign-in and Auth0 mails it (connection {Connection})", auth.Management.Connection);
+    else
+        app.Logger.LogWarning("Auth0 management not configured ({Missing}) - invites will create the person here only", string.Join(", ", missing));
+}
 
 app.UseForwardedHeaders();
 app.Use((http, next) =>
@@ -295,6 +323,19 @@ static (string? GameName, string? TagLine) ParseRiotId(string? riotId)
 
 app.MapAuthEndpoints();
 
+// "Which build is this?" - the question a deploy leaves you with, and the one
+// thing here that has to answer without a session, since the site itself is
+// behind Access. BuiltUtc is stamped into the image (see Dockerfile) and is
+// null on a host run; nothing here is worth hiding.
+app.MapGet("/api/version", () => Results.Ok(new
+{
+    Version = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? typeof(Program).Assembly.GetName().Version?.ToString(),
+    BuiltUtc = BuildStamp.BuiltUtc,
+    StartedUtc = BuildStamp.StartedUtc,
+    app.Environment.EnvironmentName,
+}));
+
 app.MapPost("/api/agent/enroll", (EnrollRequest request, HttpContext http, AgentKeyStore keys) =>
 {
     if (request.Key is not { Length: >= 32 } || request.Key.Length > 200) return Results.BadRequest(new { error = "key must be 32-200 characters" });
@@ -391,6 +432,20 @@ app.MapGet("/api/agent/release/{file}", (string file, AgentRegistry agents) =>
 app.MapFallbackToFile("index.html", staticFiles);
 
 app.Run();
+
+// Beside the registry database, by the same resolution rule - one folder to
+// back up, and a host run keeps its keys in the repo's data folder too.
+static string DataProtectionKeyDir(WebApplicationBuilder builder)
+{
+    var configured = builder.Configuration["Accounts:DataRoot"]
+        ?? builder.Configuration["Accounts:List:0:DataDir"]
+        ?? builder.Configuration["Riot:DataDir"]
+        ?? "data";
+    var root = Path.IsPathRooted(configured) ? configured : Path.Combine(builder.Environment.ContentRootPath, configured);
+    var keys = Path.Combine(root, "keys");
+    Directory.CreateDirectory(keys);
+    return keys;
+}
 
 void MapAccountApi(RouteGroupBuilder api)
 {

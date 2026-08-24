@@ -79,6 +79,7 @@ export interface AdminUser {
 }
 export interface AdminUsers { invitesConfigured: boolean; users: AdminUser[] }
 export interface InviteResult { user: AdminUser; mailed: boolean; warning: string | null }
+export interface BuildVersion { version: string | null; builtUtc: string | null; startedUtc: string; environmentName: string }
 
 export interface MatchSummary {
   id: string
