@@ -248,6 +248,22 @@ table.data th.sortable:hover { color: var(--ink-2); }
 table.data th.sortable.sorted { color: var(--accent); }
 table.data th .sort-arrow { display: inline-block; width: 12px; text-align: center; }
 
+/* Champion-table chrome: search + min-games filters, the pinned all-champions
+   aggregate, the W-L record under each winrate bar, per-row form dots. */
+.table-filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; }
+.table-filters input.search { width: 180px; min-width: 0; padding: 5px 10px; font-size: 13px; }
+.seg.mini button { padding: 3px 10px; font-size: 12px; }
+tr.all-row td { background: rgba(148, 170, 210, 0.09); border-bottom: 1px solid var(--border-strong); }
+table.data tbody tr.all-row:hover td { background: rgba(148, 170, 210, 0.09); }
+tr.all-row .champ-name { font-weight: 700; }
+.all-star { color: var(--accent); font-size: 15px; line-height: 1; }
+td.wr-cell { white-space: nowrap; }
+.wr-rec { display: block; margin-top: 2px; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.kda-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+th.last5-col, td.last5-col { text-align: right; }
+td.last5-col .form-dots { justify-content: flex-end; }
+td.empty-cell { text-align: center; color: var(--muted); padding: 22px 12px; }
+
 /* Result-tinted rows: the wash carries the outcome at a glance, the stripe
    anchors it; hover still reads on top of both. */
 tr.row-win td { background: rgba(63, 185, 80, 0.055); }
@@ -413,34 +429,25 @@ tr.drill td { background: var(--panel-2); padding: 14px 16px; }
 }
 .mini-tile .label { color: var(--muted); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; white-space: nowrap; }
 .mini-tile .value { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; margin-top: 3px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mini-tile .sub { color: var(--muted); font-size: 11px; margin-top: 1px; white-space: nowrap; }
+.mini-tile.side-blue .label { color: var(--accent); }
+.mini-tile.side-red .label { color: var(--lp-loss); }
 
-/* Matchup widgets: every opponent faced as a row - icon, games, the same
-   winrate bar the champion rows use, then laning deltas. The list scrolls in
-   place so a champ with 15 distinct laners never blows out the card height. */
+/* Matchup table: every opponent faced with the same column vocabulary as the
+   champion rows above it. The body scrolls in place under a sticky header so
+   a champ with 15 distinct laners never blows out the card height. */
 .matchup-block { display: flex; flex-direction: column; gap: 8px; }
 .matchup-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
   font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-4);
 }
 .matchup-head .mut { font-weight: 500; text-transform: none; letter-spacing: 0; font-size: 12px; }
-.matchup-scroll {
-  display: flex; flex-direction: column; gap: 6px;
-  max-height: 236px; overflow-y: auto; scrollbar-width: thin; padding-right: 4px;
-}
-.matchup-row {
-  display: grid; align-items: center; gap: 12px;
-  grid-template-columns: minmax(0, 1.5fr) 40px minmax(88px, 1fr) 76px 60px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-  padding: 7px 12px; transition: border-color 120ms ease, background 120ms ease;
-}
-.matchup-row:hover { border-color: var(--border-strong); background: var(--overlay-hover); }
-.mu-champ { min-width: 0; overflow: hidden; }
-.mu-champ .champ-name { overflow: hidden; text-overflow: ellipsis; }
-.mu-games { text-align: right; font-size: 12px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.mu-metric { text-align: right; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-4); white-space: nowrap; }
-.mu-metric b { display: block; margin-top: 2px; font-size: 13px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--ink); font-variant-numeric: tabular-nums; }
-.mu-metric b.win { color: var(--delta-good); }
-.mu-metric b.loss { color: var(--lp-loss); }
+.matchup-scroll { max-height: 280px; overflow: auto; scrollbar-width: thin; padding-right: 4px; }
+/* Sticky header paints over rows scrolling beneath it; the drill's own
+   background so the seam is invisible. */
+.matchup-table th { position: sticky; top: 0; background: var(--panel-2); z-index: 1; }
+.matchup-table td { border-bottom-color: var(--grid); }
+.matchup-table tbody tr:last-child td { border-bottom: 0; }
 .matchup-empty {
   color: var(--muted); font-size: 13px; text-align: center; padding: 22px 0;
   background: var(--surface); border: 1px dashed var(--border); border-radius: 8px;
@@ -1328,12 +1335,6 @@ nav.tabs a { white-space: nowrap; flex: 0 0 auto; }
   .tile:has(.mh-row), .tile:has(.rank-duel) { grid-column: 1 / -1; }
   .mh-row, .rank-duel { flex-wrap: wrap; }
 
-  /* Drill matchups stack the winrate bar onto its own line so the deltas
-     keep room to breathe (tiles handle narrow widths by flex-wrapping). */
-  .matchup-row { grid-template-columns: minmax(0, 1fr) auto; gap: 7px 12px; }
-  .matchup-row .wr-wrap { grid-column: 1 / -1; }
-  .mu-metric { text-align: left; }
-  .mu-metric:last-child { text-align: right; }
   .profile-detail .tiles { grid-template-columns: repeat(2, 1fr); }
 
   /* Strengths & weaknesses: the diverging bar drops to its own line under
@@ -1416,8 +1417,6 @@ div.seg { --edge-cover: #0d111a; background-color: #0d111a; }
   .table-scroll.tall table.data td { padding-left: 6px; padding-right: 6px; }
   .table-scroll.tall table.data .champ-name { max-width: 84px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: bottom; }
   tr.drill td { padding: 12px 10px; white-space: normal; }
-  .matchup-row { grid-template-columns: minmax(0, 1fr) auto auto; }
-  .matchup-row .wr-wrap { grid-column: 1 / -1; }
 
   /* Match-detail scoreboard: one card per player instead of a 900px table.
      Cell order is ring, player, runes, spells, items, K/D/A, KP, CS/m,
