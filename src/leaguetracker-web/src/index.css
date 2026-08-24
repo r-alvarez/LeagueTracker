@@ -1529,6 +1529,16 @@ button.action.on { background: var(--accent-soft); border-color: color-mix(in sr
 .invite-notice.ok { color: var(--delta-good); background: rgba(63, 185, 80, 0.1); border: 1px solid rgba(63, 185, 80, 0.25); }
 .invite-notice.warn { color: var(--warn); background: rgba(227, 179, 65, 0.1); border: 1px solid rgba(227, 179, 65, 0.28); }
 
+/* Renaming a person in place. Faint rather than hover-revealed: a phone has
+   no hover, and this table is read on one. */
+.rename-x { margin-left: 8px; background: transparent; border: 0; color: var(--ink-4); font-size: 12px; cursor: pointer; padding: 0 4px; transition: color 120ms; }
+.rename-x:hover, .rename-x:focus-visible { color: var(--accent); }
+.rename-form { display: inline-flex; align-items: center; gap: 6px; }
+.rename-form input { width: 180px; padding: 4px 8px; font-size: 13px; }
+
+/* Which build is live, at the foot of the admin page. */
+.build-line { margin: 2px 4px 0; text-align: right; }
+
 /* Data page: agents, clip rendering, storage. Prose intro then structured
    rows/tiles - the sentence-with-dots layout read as one grey run of text. */
 .warn-text { color: var(--warn); }

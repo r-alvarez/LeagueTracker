@@ -4,7 +4,7 @@ import { account } from '../account'
 import { api } from '../api'
 import { auth } from '../auth'
 import OwnerSelect from '../components/OwnerSelect'
-import type { AdminUser, AdminUsers, InviteResult } from '../types'
+import type { AdminUser, AdminUsers, BuildVersion, InviteResult } from '../types'
 
 /// The admin's view of who is here: every person invited, signed in or named
 /// in configuration, what they own, and the hands that invite someone, give a
@@ -27,6 +27,9 @@ export default function Admin() {
   const [inviteName, setInviteName] = useState('')
   const [link, setLink] = useState<{ email: string; url: string; expiresUtc: string } | null>(null)
   const [copied, setCopied] = useState(false)
+  // The one row being renamed, and the name typed so far.
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null)
+  const [build, setBuild] = useState<BuildVersion | null>(null)
 
   const warn = (where: 'people' | 'accounts', text: string) => setNotice({ where, kind: 'warn', text })
 
@@ -35,6 +38,7 @@ export default function Admin() {
     api.adminUsers().then(setPeople).catch(e => warn('people', String(e)))
   }, [])
   useEffect(load, [load])
+  useEffect(() => { api.version().then(setBuild).catch(() => setBuild(null)) }, [])
 
   const afterInvite = (r: InviteResult, verb: 'added' | 'resent') => {
     if (r.mailed) setNotice({ where: 'people', kind: 'ok', text: `Invite sent to ${r.user.email} - Auth0 mailed them a link to set their password.` })
@@ -137,7 +141,25 @@ export default function Admin() {
                 {users.map(u => (
                   <tr key={u.id}>
                     <td>
-                      <strong>{u.displayName || u.email}</strong>
+                      {renaming?.id === u.id ? (
+                        <form className="rename-form" onSubmit={e => {
+                          e.preventDefault()
+                          const name = renaming.name
+                          run(u.id, async () => { await api.adminSetUserName(u.id, name); setRenaming(null) })
+                        }}>
+                          <input className="text" value={renaming.name} autoFocus disabled={busy === u.id}
+                            placeholder={u.email} aria-label={`Name for ${u.email}`}
+                            onChange={e => setRenaming({ id: u.id, name: e.target.value })} />
+                          <button type="submit" className="action primary sm-action" disabled={busy === u.id}>Save</button>
+                          <button type="button" className="action sm-action" disabled={busy === u.id} onClick={() => setRenaming(null)}>Cancel</button>
+                        </form>
+                      ) : (
+                        <>
+                          <strong>{u.displayName || u.email}</strong>
+                          <button className="rename-x" title="Rename - what this person is called here, nothing at Auth0"
+                            onClick={() => setRenaming({ id: u.id, name: u.displayName === u.email ? '' : u.displayName })}>✎</button>
+                        </>
+                      )}
                       {u.isAdmin && <span className="badge remake tag">admin</span>}
                       {u.invited && <span className="badge remake tag">invited</span>}
                       <div className="mut sm-text">
@@ -225,6 +247,18 @@ export default function Admin() {
         </div>
         {noticeIn('accounts')}
       </div>
+
+      {build && (
+        <p className="build-line mut sm-text">
+          {build.builtUtc
+            ? <>Build of {new Date(build.builtUtc).toLocaleString()}</>
+            : <>Running from source</>}
+          {/* 1.0.0+<40 hex> on a source run - the sha is the useful half, at reading length. */}
+          {build.version && ` · ${build.version.replace(/\+([0-9a-f]{7})[0-9a-f]+$/, '+$1')}`}
+          {' · '}up since {new Date(build.startedUtc).toLocaleString()}
+          {build.environmentName !== 'Production' && ` · ${build.environmentName}`}
+        </p>
+      )}
     </div>
   )
 }

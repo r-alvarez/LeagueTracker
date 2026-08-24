@@ -111,6 +111,35 @@ public class UserStoreInviteTests : IDisposable
         Assert.Null(users.ByEmail("other@example.com"));
     }
 
+    [Fact]
+    public void A_name_set_by_hand_survives_the_next_sign_in()
+    {
+        var users = Store(inviteOnly: false);
+        var (user, _) = users.FromLogin(Issuer, "auth0|ben", "ben@example.com", emailVerified: true, "ben@example.com");
+        Assert.Equal("ben@example.com", user.DisplayName);
+
+        Assert.True(users.SetDisplayName(user.Id, "  Ben  "));
+        Assert.Equal("Ben", users.ById(user.Id)!.DisplayName);
+
+        // Auth0 keeps sending the email as `name` for database users; that must
+        // not undo what an admin typed.
+        users.FromLogin(Issuer, "auth0|ben", "ben@example.com", emailVerified: true, "ben@example.com");
+        Assert.Equal("Ben", users.ById(user.Id)!.DisplayName);
+    }
+
+    [Fact]
+    public void Clearing_a_name_falls_back_to_the_address_not_to_nothing()
+    {
+        var users = Store();
+        var admin = users.EnsureByEmail("admin@example.com", admin: true);
+        var invited = users.Invite("friend@example.com", "Friend", admin.Id)!;
+
+        Assert.True(users.SetDisplayName(invited.Id, "   "));
+
+        Assert.Equal("friend", users.ById(invited.Id)!.DisplayName);
+        Assert.False(users.SetDisplayName("no-such-user", "Someone"));
+    }
+
     private sealed class Env(string root) : IWebHostEnvironment
     {
         public string ApplicationName { get; set; } = "tests";

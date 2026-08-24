@@ -190,6 +190,11 @@ public static class ManagementEndpoints
 
         admin.MapPost("/users/{id}/admin", (string id, bool admin, UserStore users) =>
             users.SetAdmin(id, admin) ? Results.Ok() : Results.NotFound());
+
+        // What a person is called here. Auth0 hands us the email as the name
+        // for database users, so most rows arrive reading as an address.
+        admin.MapPost("/users/{id}/name", (string id, NameRequest request, UserStore users) =>
+            users.SetDisplayName(id, request.DisplayName) ? Results.Ok() : Results.NotFound());
     }
 
     // A renderer is visible to everyone (it serves everyone) but only its
@@ -239,4 +244,5 @@ public static class ManagementEndpoints
     public sealed record AssignRequest(string? OwnerEmail, string? Role);
     public sealed record ClaimRequest(string AccountId);
     public sealed record InviteRequest(string? Email, string? DisplayName);
+    public sealed record NameRequest(string? DisplayName);
 }
