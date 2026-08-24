@@ -197,6 +197,11 @@ were the only ones heartbeating.
       in the Outlook iOS app, since each client rewrites dark mail its own
       way and `[data-ogsc]` hooks only reach Outlook.com. Don't restore the
       dark palette without testing in Outlook first.
+    - **`<DataRoot>/keys`** (so `/data/keys` in the container) holds the Data
+      Protection keys that encrypt session cookies. Back it up with the rest
+      of `/data`, and treat it as a secret: it is written unencrypted, and
+      whoever has it can forge a session. Deleting it signs everyone out, and
+      nothing else.
     - **The logo in those mails** is `docs/brand/leaguetracker-mark.png`
       (the favicon rendered to PNG — email clients ignore SVG), served from
       `brand.rjav-tech.co.uk`, a Cloudflare Worker holding that one static
