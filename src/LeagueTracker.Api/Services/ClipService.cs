@@ -253,6 +253,43 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
     public bool IsDismissed(string matchId) =>
         DirFor(matchId) is { } dir && File.Exists(Path.Combine(dir, "render-dismissed"));
 
+    /// Windows the agent proved can never render (the replay simulation
+    /// hangs at the spot, a camera target the replay doesn't know): kept out
+    /// of render/next and the missing counts, so the match reads done with a
+    /// named gap instead of failing forever. An owner retry lifts the verdict
+    /// along with everything else.
+    public async Task MarkUnrenderableAsync(string matchId, Dictionary<int, string> windows, CancellationToken ct)
+    {
+        if (DirFor(matchId) is not { } dir) return;
+        Directory.CreateDirectory(dir);
+        var merged = UnrenderableWindows(matchId);
+        foreach (var (index, reason) in windows) merged[index] = reason;
+        await File.WriteAllTextAsync(Path.Combine(dir, "unrenderable.json"), JsonSerializer.Serialize(merged, Json), ct);
+    }
+
+    public Dictionary<int, string> UnrenderableWindows(string matchId)
+    {
+        try
+        {
+            if (DirFor(matchId) is not { } dir) return [];
+            var path = Path.Combine(dir, "unrenderable.json");
+            return File.Exists(path)
+                ? JsonSerializer.Deserialize<Dictionary<int, string>>(File.ReadAllText(path)) ?? []
+                : [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    public void ClearUnrenderable(string matchId)
+    {
+        if (DirFor(matchId) is not { } dir) return;
+        var path = Path.Combine(dir, "unrenderable.json");
+        if (File.Exists(path)) File.Delete(path);
+    }
+
     /// Drops rendered clips so the match re-qualifies for the render queue,
     /// and the plan with them: nothing is pinned to the old window indices any
     /// more, so the re-render should use current analysis (camera targets in
@@ -303,6 +340,7 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
             // The saved plan is the manifest existing clips were rendered
             // against; only never-claimed matches need a fresh plan.
             var plan = await LoadPlanAsync(m.Id, ct) ?? (m.HasTimeline ? await PlanAsync(m.Id, ct) : null);
+            var unrenderable = UnrenderableWindows(m.Id);
             string status;
             if (plan is not { Windows.Count: > 0 })
             {
@@ -312,9 +350,12 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
             {
                 // A VOD-covered match only ever renders its "fight" windows
                 // (the render/next rule) - counting the others against it
-                // reported every reviewed match as "partial" forever.
+                // reported every reviewed match as "partial" forever. Windows
+                // the agent proved unrenderable don't count against it either:
+                // the gap is named in its own column, not held as "partial".
                 var vodCovered = vods.HasVod(m.Id) || vods.ReadLink(m.Id) is not null;
-                var renderable = plan.Windows.Where(w => !vodCovered || w.Kind is "fight").ToList();
+                var renderable = plan.Windows
+                    .Where(w => (!vodCovered || w.Kind is "fight") && !unrenderable.ContainsKey(w.Index)).ToList();
                 var missing = renderable.Count(w => ClipPath(m.Id, w.Index) is null);
                 status = missing == 0 ? "done"
                     : failed is not null ? "failed"
@@ -322,7 +363,10 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
                     : missing < renderable.Count ? "partial"
                     : "pending";
             }
-            rows.Add(new { MatchId = m.Id, m.Champion, m.GameEndUtc, Kind = "clips", Status = status, Error = failed });
+            var gaps = unrenderable is { Count: > 0 }
+                ? $"window(s) {string.Join(", ", unrenderable.Keys.OrderBy(k => k))} unrenderable - {string.Join("; ", unrenderable.Values.Distinct())}"
+                : null;
+            rows.Add(new { MatchId = m.Id, m.Champion, m.GameEndUtc, Kind = "clips", Status = status, Error = failed, Gaps = gaps });
         }
         return rows;
     }

@@ -244,6 +244,20 @@ export default function DataPage() {
               )}
             </div>
           )}
+          {renderQueue.some(r => r.gaps) && (
+            <p className="mut render-gaps">
+              Unrenderable windows (replay defects the agent proved twice; hover for details, ↻ tries them again):{' '}
+              {renderQueue.filter(r => r.gaps).map(r => (
+                <span key={r.matchId} className="failed-game">
+                  <Link to={`/matches/${r.matchId}`} title={r.gaps!}>
+                    {r.champion} · {new Date(r.gameEndUtc).toLocaleDateString()}
+                  </Link>
+                  <button className="dismiss-x" title={`${r.gaps} - retry these windows (keeps the rendered clips)`}
+                    onClick={async () => { await api.retryRender(r.matchId, r.kind, true); reloadRenderQueue() }}>↻</button>
+                </span>
+              ))}
+            </p>
+          )}
         </div>
       )}
 

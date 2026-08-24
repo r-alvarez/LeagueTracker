@@ -1710,3 +1710,76 @@ and wait for the windowed exe).
 **Not verified on real hardware yet.** The pacing, the loop and retention
 compile and reason correctly; Ben's machine is the first real test when the
 branch ships, with the Log button as the safety net.
+
+## 2026-08-19 — The camera check learns to see an already-locked camera
+
+Clip jobs were recycling on certain plays: the engage check failed three
+attempts, the job postponed as "user active?", and the next lease hit the
+same play the same way. Two composing causes, both read straight from the
+agent log. First, `ParkCameraAsync` never parked anything - the game
+silently ignores `cameraPosition` writes (known since 19 Jul, but the
+rotating park spots were built on the write working), so the check's
+reference is just wherever the camera already sits. When that is the play
+itself - the camera still locked from the previous window - the reference
+equals the champion's own position and both signals (distance from
+reference, movement between samples) go dark whenever the target stands
+still. Supports standing in lane made this constant once HeraArgiva's
+games arrived. Second, the 3-strike postpone counter lived in memory, and
+self-update restarts reset it, so the deterministic case never reached the
+hard fail the design demands.
+
+The fix uses the one primitive the game has never lied about: only the
+champion lock moves the camera without input. When the quick check is
+inconclusive, the agent fast-forwards playback at 4x for up to four
+seconds and watches - a locked camera follows the champion (even a laner
+covers ground over 16 game-seconds, and a dead target respawns), a free
+camera stays put at any speed. The consumed pre-roll is the price; the
+window lead absorbs it. The postpone counter now persists in
+`postpones.json` next to the exe (entries expire after three days), and
+the engage reason names the window index, so the same window failing
+lease after lease converges on the Data-page fail while failures that
+roam between windows (a human at the machine) earn fresh strikes.
+
+**Not verified against a live replay yet** - the 4x speed write is the one
+untested assumption; if the API clamps or ignores it, the check degrades
+to today's behaviour, no worse.
+
+## 2026-08-19 — Unrenderable windows complete around the gap
+
+A skipped window (sim-hang proved twice on fresh processes, a camera
+target the replay doesn't know, a fight target dead past the fight) used
+to fail the whole job so partial coverage never read as complete. Right
+instinct, wrong resting state: the failure sat on the Data page and the
+Machines banner awaiting a manual dismiss, for a verdict the agent had
+already proved deterministic - EUW1_7955610306's window 3 was the live
+case. Now the agent reports the skipped windows with their reasons to
+`POST /render/{matchId}/unrenderable`; the tracker stores them per match
+(`unrenderable.json`), keeps them out of render/next and the missing
+counts, and the match reads done with the gap named in its own `gaps`
+field - a muted line on the Data page with a per-match ↻ that lifts the
+verdict (keep=true, so the good clips stay). Owner retry lifts it too.
+An agent talking to a tracker that predates the endpoint falls back to
+the old job failure, so partial coverage still never silently reads as
+complete anywhere.
+
+## 2026-08-20 — The review remote polls; F12 finishes; a hung window re-proves cheaply
+
+Ruben: the review F-keys stopped responding. The hook code hadn't changed
+since 7 Aug and the recorder's identical low-level hook still captured
+thousands of key events per game - so the hook installs and the machine
+sees keys. What changed is when reviews run: since the delivery-loop
+branch, finalize's ffmpeg and paced uploads overlap the review session,
+and Windows silently removes a low-level hook whose callback is starved
+past the hook timeout - keys then die for the rest of the session with
+nothing logged. ReviewHotkeys now polls GetAsyncKeyState at 40ms on an
+above-normal thread instead: nothing to deregister, and a real press
+can't fall between samples (verified with injected keys). Every consumed
+press is logged, so a dead remote is diagnosable from the field. F12 ends
+the review (Ruben reached for it; alt+F4 stays), and the banner says so.
+
+The sim-hang retry also got cheaper: the retry after a freeze usually
+re-seeks straight into the same cursed timestamp, so it now records a 7s
+probe and runs freezedetect on that before committing - the repeat
+verdict costs seconds instead of a second full recording. The replay
+relaunch itself stays: a hung game process cannot be revived, only
+replaced.

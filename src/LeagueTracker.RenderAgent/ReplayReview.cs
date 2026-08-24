@@ -40,7 +40,7 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnl
         Log.Info("Post-game review on - the replay opens after a game unless the next one is already queued " +
                  $"({config.PostGameReviewDelaySec}s settle, {config.PostGameReviewWaitMin}min import wait, " +
                  $"{(config.PostGameReviewAutoAdvance ? "rolls on by itself" : "waits for a key at each window")}). " +
-                 "F9 next · F8 previous · F10 replay this moment · close the replay to stop");
+                 "F9 next · F8 previous · F10 replay this moment · F12 (or close the replay) to stop");
 
         string? lastMatchId = null;
         var wasInGame = false;
@@ -346,6 +346,9 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnl
             }
             switch (command)
             {
+                case ReviewHotkeys.Command.End:
+                    Log.Info("F12 - ending the review");
+                    return;
                 case ReviewHotkeys.Command.Previous:
                     i = Math.Max(0, i - 1);
                     break;
@@ -373,7 +376,14 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnl
         while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
         {
             if (game.HasExited) return null;
-            if (hotkeys?.TryDequeue() is { } pressed) return pressed;
+            if (hotkeys?.TryDequeue() is { } pressed)
+            {
+                // Logged so a dead remote is diagnosable from the field: a
+                // press that works shows up here, a press that doesn't never
+                // arrived at all.
+                Log.Info($"   hotkey: {pressed}");
+                return pressed;
+            }
 
             if (!parked && await replayApi.GetPlaybackAsync(ct) is { Seeking: false } playback
                 && playback.Time >= moment.EndSec)
