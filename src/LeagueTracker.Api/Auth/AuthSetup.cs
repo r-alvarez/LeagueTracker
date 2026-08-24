@@ -102,6 +102,8 @@ public static class AuthSetup
                     {
                         UnverifiedEmailException u => (StatusCodes.Status403Forbidden,
                             $"Your identity provider has not verified {u.Email} yet. Open the verification email it sent you (or ask the tracker's admin to mark it verified), then sign in again."),
+                        NotInvitedException n => (StatusCodes.Status403Forbidden,
+                            $"This tracker is invite-only and {n.Email} is not on the list. Ask its admin for an invite, or sign in with the address you were invited with."),
                         _ => (StatusCodes.Status400BadRequest, "Sign-in did not complete. Go back and try again; if it keeps happening, tell the tracker's admin."),
                     };
                     ctx.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("LeagueTracker.Auth")
@@ -115,7 +117,10 @@ public static class AuthSetup
                         "<div style=\"max-width:32rem;padding:2rem;background:#111827;border:1px solid #1f2937;border-radius:12px\">" +
                         "<h1 style=\"font-size:1.1rem;margin:0 0 .75rem\">Sign-in failed</h1><p style=\"margin:0 0 1.25rem;line-height:1.5\">" +
                         System.Net.WebUtility.HtmlEncode(message) +
-                        "</p><a href=\"/\" style=\"color:#93c5fd\">Back to the tracker</a></div>");
+                        // The provider still remembers them, so "Sign in" would come
+                        // straight back here; the logout route clears that side too.
+                        "</p><a href=\"/\" style=\"color:#93c5fd\">Back to the tracker</a>" +
+                        " &nbsp;·&nbsp; <a href=\"/auth/logout\" style=\"color:#93c5fd\">Sign in with a different account</a></div>");
                 };
                 o.Events.OnTokenValidated = ctx =>
                 {

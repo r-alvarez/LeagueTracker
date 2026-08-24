@@ -60,7 +60,13 @@ public sealed class RegistryDbContext(DbContextOptions<RegistryDbContext> option
 // only the ALTERs a table lacks, a current db runs nothing.
 public sealed class RegistryDatabase
 {
-    private static readonly (string Table, string Column, string Definition)[] Upgrades = [];
+    private static readonly (string Table, string Column, string Definition)[] Upgrades =
+    [
+        ("Users", "InvitedUtc", "TEXT NULL"),
+        ("Users", "InvitedByUserId", "TEXT NULL"),
+        ("Users", "InviteSentUtc", "TEXT NULL"),
+        ("Users", "ProviderUserId", "TEXT NULL"),
+    ];
 
     public string Path { get; }
     public string Root { get; }

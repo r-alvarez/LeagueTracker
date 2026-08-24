@@ -14,7 +14,18 @@ public sealed class User
     public bool IsAdmin { get; set; }
     public DateTime CreatedUtc { get; set; }
     public DateTime? LastSeenUtc { get; set; }
+    // Set when an admin added this person from the People page (as opposed
+    // to configuration or a first login); the row waits for them.
+    public DateTime? InvitedUtc { get; set; }
+    public string? InvitedByUserId { get; set; }
+    public DateTime? InviteSentUtc { get; set; }
+    // The identity we created for them at the provider (Auth0's user_id,
+    // which is also the id_token subject). Their first sign-in joins on it,
+    // so it does not matter whether the provider has verified the email yet.
+    public string? ProviderUserId { get; set; }
     public List<UserLogin> Logins { get; set; } = [];
+
+    public bool IsInvitedPending => InvitedUtc is not null && LastSeenUtc is null;
 }
 
 // One provider identity of a user (issuer + subject from the id_token). One

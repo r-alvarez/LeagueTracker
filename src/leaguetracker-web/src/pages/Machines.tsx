@@ -34,7 +34,7 @@ export default function Machines() {
   }, [])
   useEffect(() => {
     fetch('/api/agent/release').then(r => (r.status === 200 ? r.json() : null)).then(setRelease).catch(() => setRelease(null))
-    if (auth.isAdmin) api.adminUsers().then(setUsers).catch(() => setUsers([]))
+    if (auth.isAdmin) api.adminUsers().then(r => setUsers(r.users)).catch(() => setUsers([]))
     load()
     const t = window.setInterval(load, 15000)
     return () => window.clearInterval(t)

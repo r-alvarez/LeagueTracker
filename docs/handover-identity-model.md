@@ -158,6 +158,60 @@ were the only ones heartbeating.
 8. **Waker**: it now polls `/api/render/pending`; the stack rebuild picks it up.
 9. Later, the public launch: `Auth__PublicReads=true`, site-wide Access app
    off. Nothing in-process changes.
+10. **Invites** (branch `admin/invites`, 2026-08-19) — *Add a person* on
+    `/admin` creates the row here, the identity at Auth0, and has Auth0 mail
+    the "set your password" link. Three tenant steps, once:
+    - **Applications → Create → Machine to Machine**, named e.g.
+      `LeagueTracker invites`; authorise it for the *Auth0 Management API*
+      with exactly `create:users read:users delete:users create:user_tickets`.
+      Its client id/secret go into the stack as `AUTH0_MGMT_CLIENT_ID` /
+      `AUTH0_MGMT_CLIENT_SECRET` (→ `Auth__Management__*`). Keep it separate
+      from the login application: the login client never holds
+      user-management scopes.
+    - **Branding → Email Provider**: the built-in sender is test-only
+      (`no-reply@auth0user.net`, 10/minute, and *no custom templates* - so
+      the invite would arrive as Auth0's stock "reset your password" text).
+      Configure a real one so invite and forgot-password mails come from our
+      address. **Resend** is what this tracker uses: a native Auth0
+      integration (paste an API key, no SMTP fields) and free at 3,000
+      mails/month, 100/day, one custom domain. SendGrid is no longer an
+      option worth listing - Twilio retired its free plan in July 2025.
+      Domain: add `send.rjav-tech.co.uk` in Resend (a subdomain keeps the
+      root domain's mail reputation out of it), then the MX + two TXT
+      records it prints go into Cloudflare DNS with proxy **DNS only**, and
+      paste only the short names (`send`, `resend._domainkey`) - Cloudflare
+      appends the zone itself.
+    - **Branding → Email Templates → Change Password**: this is the mail an
+      invitee gets, and the same template serves forgot-password — both end
+      in "set a password", so one wording covers both. Paste
+      `docs/auth0-change-password-email.html` into *Message* and set *URL
+      Lifetime* to 604800, the "7 days" the body promises. Mind the template
+      picker: *Verification Email (using Link)* is a different mail (subject
+      "Verify Your Account", link `/u/email-verification`) and the invite
+      flow never sends it — testing that one against an already-verified
+      address answers "This account is already verified", which is correct,
+      not a fault. It is branded too (`docs/auth0-verification-email.html`)
+      so the tenant has no stock Auth0 mail left in it. Both files are the
+      only copy outside the dashboard. They are deliberately **light** though
+      the app is dark: the dark version came out mid-grey in Outlook.com and
+      in the Outlook iOS app, since each client rewrites dark mail its own
+      way and `[data-ogsc]` hooks only reach Outlook.com. Don't restore the
+      dark palette without testing in Outlook first.
+    - **The logo in those mails** is `docs/brand/leaguetracker-mark.png`
+      (the favicon rendered to PNG — email clients ignore SVG), served from
+      `brand.rjav-tech.co.uk`, a Cloudflare Worker holding that one static
+      asset, on a custom domain so the URL outlives wherever the file is
+      hosted. Keep that host out of every Access application or the image
+      becomes a login page in people's inboxes. Re-uploading `docs/brand`
+      restores it if the Worker is ever lost.
+    - Also: `Auth__InviteOnly=true` in the compose means a sign-in from an
+      identity nobody invited or configured is refused with a page, not
+      silently turned into a user. Leave *Disable Sign Ups* on as well -
+      belt and braces.
+    - If a mail does not arrive: *Copy link* on the person's row mints the
+      same link (a Management-API password-change ticket, 7 days, single
+      use) to hand over by other means. *Remove* deletes an invite that was
+      never used - here and at Auth0.
 
 ## 6. Open items and follow-ups
 

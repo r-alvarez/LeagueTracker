@@ -1,11 +1,13 @@
+using LeagueTracker.Api.Auth;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace LeagueTracker.Api.Registry;
 
 // Users are ours; providers only vouch for them. A login is matched by
 // (issuer, subject) first, then by verified email - the link that survives a
 // provider change - and only then created.
-public sealed class UserStore(RegistryDatabase registry, ILogger<UserStore> log)
+public sealed class UserStore(RegistryDatabase registry, IOptions<AuthOptions> auth, ILogger<UserStore> log)
 {
     public User? ById(string? id)
     {
@@ -48,6 +50,54 @@ public sealed class UserStore(RegistryDatabase registry, ILogger<UserStore> log)
         return user;
     }
 
+    // An admin adds a person before they have ever signed in: the row is
+    // theirs to be assigned things at once; the provider identity and the
+    // mail follow. Null when the address is already somebody here.
+    public User? Invite(string email, string? displayName, string invitedByUserId)
+    {
+        var key = Normalize(email) ?? throw new ArgumentException("email required", nameof(email));
+        using var db = registry.Open();
+        if (db.Users.Any(u => u.Email == key)) return null;
+        var user = new User
+        {
+            Id = Ids.New(),
+            Email = key,
+            DisplayName = displayName is { Length: > 0 } ? displayName.Trim() : key[..key.IndexOf('@')],
+            CreatedUtc = DateTime.UtcNow,
+            InvitedUtc = DateTime.UtcNow,
+            InvitedByUserId = invitedByUserId,
+        };
+        db.Users.Add(user);
+        db.SaveChanges();
+        log.LogInformation("User {Email} invited by {By}", key, invitedByUserId);
+        return user;
+    }
+
+    public void SetProviderUserId(string userId, string providerUserId)
+    {
+        using var db = registry.Open();
+        db.Users.Where(u => u.Id == userId).ExecuteUpdate(s => s.SetProperty(u => u.ProviderUserId, providerUserId));
+    }
+
+    public void MarkInviteSent(string userId)
+    {
+        using var db = registry.Open();
+        db.Users.Where(u => u.Id == userId).ExecuteUpdate(s => s.SetProperty(u => u.InviteSentUtc, DateTime.UtcNow));
+    }
+
+    // Only a person who never arrived can be removed here: once they have
+    // signed in they own things, and that is a different conversation.
+    public bool DeleteInvited(string userId)
+    {
+        using var db = registry.Open();
+        if (db.Users.FirstOrDefault(u => u.Id == userId) is not { IsInvitedPending: true } user) return false;
+        db.UserLogins.Where(l => l.UserId == userId).ExecuteDelete();
+        db.Users.Remove(user);
+        db.SaveChanges();
+        log.LogInformation("User {Email}: invite removed", user.Email);
+        return true;
+    }
+
     public (User User, bool Created) FromLogin(string issuer, string subject, string? email, bool emailVerified, string? displayName)
     {
         using var db = registry.Open();
@@ -58,6 +108,15 @@ public sealed class UserStore(RegistryDatabase registry, ILogger<UserStore> log)
         {
             user = db.Users.Include(u => u.Logins).First(u => u.Id == login.UserId);
             login.LastUsedUtc = now;
+        }
+        else if (db.Users.Include(u => u.Logins).FirstOrDefault(u => u.ProviderUserId == subject) is { } invited)
+        {
+            // The identity we created for an invited person, arriving for the
+            // first time - ours by construction, whatever the provider says
+            // about the email.
+            user = invited;
+            db.UserLogins.Add(new UserLogin { UserId = user.Id, Issuer = issuer, Subject = subject, CreatedUtc = now, LastUsedUtc = now });
+            log.LogInformation("User {Email}: invited person signed in from {Issuer}", user.Email, issuer);
         }
         else if (emailVerified && Normalize(email) is { } key && db.Users.Include(u => u.Logins).FirstOrDefault(u => u.Email == key) is { } byEmail)
         {
@@ -77,6 +136,8 @@ public sealed class UserStore(RegistryDatabase registry, ILogger<UserStore> log)
             // mail or the admin flips the flag.
             if (!emailVerified && db.Users.Any(u => u.Email == key))
                 throw new UnverifiedEmailException(key);
+            if (auth.Value.InviteOnly)
+                throw new NotInvitedException(key);
             user = new User
             {
                 Id = Ids.New(),
@@ -118,8 +179,12 @@ public sealed class UserStore(RegistryDatabase registry, ILogger<UserStore> log)
     }
 }
 
-/// <summary>The provider vouched for a login whose email matches an existing user but is not verified there.</summary>
 public sealed class UnverifiedEmailException(string email) : Exception($"The email {email} is registered here but your identity provider has not verified it yet")
+{
+    public string Email { get; } = email;
+}
+
+public sealed class NotInvitedException(string email) : Exception($"{email} has not been invited to this tracker")
 {
     public string Email { get; } = email;
 }
