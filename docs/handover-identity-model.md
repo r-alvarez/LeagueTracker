@@ -192,7 +192,11 @@ were the only ones heartbeating.
       address answers "This account is already verified", which is correct,
       not a fault. It is branded too (`docs/auth0-verification-email.html`)
       so the tenant has no stock Auth0 mail left in it. Both files are the
-      only copy outside the dashboard.
+      only copy outside the dashboard. They are deliberately **light** though
+      the app is dark: the dark version came out mid-grey in Outlook.com and
+      in the Outlook iOS app, since each client rewrites dark mail its own
+      way and `[data-ogsc]` hooks only reach Outlook.com. Don't restore the
+      dark palette without testing in Outlook first.
     - **The logo in those mails** is `docs/brand/leaguetracker-mark.png`
       (the favicon rendered to PNG — email clients ignore SVG), served from
       `brand.rjav-tech.co.uk`, a Cloudflare Worker holding that one static
