@@ -38,7 +38,7 @@ public sealed class UserStore(RegistryDatabase registry, IOptions<AuthOptions> a
         var user = db.Users.FirstOrDefault(u => u.Email == key);
         if (user is null)
         {
-            user = new User { Id = Ids.New(), Email = key, DisplayName = key[..key.IndexOf('@')], CreatedUtc = DateTime.UtcNow, IsAdmin = admin ?? false };
+            user = new User { Id = Ids.New(), Email = key, DisplayName = DefaultDisplayName(key), CreatedUtc = DateTime.UtcNow, IsAdmin = admin ?? false };
             db.Users.Add(user);
             log.LogInformation("User {Email} created from configuration{Admin}", key, user.IsAdmin ? " (admin)" : "");
         }
@@ -62,7 +62,7 @@ public sealed class UserStore(RegistryDatabase registry, IOptions<AuthOptions> a
         {
             Id = Ids.New(),
             Email = key,
-            DisplayName = displayName is { Length: > 0 } ? displayName.Trim() : key[..key.IndexOf('@')],
+            DisplayName = displayName is { Length: > 0 } ? displayName.Trim() : DefaultDisplayName(key),
             CreatedUtc = DateTime.UtcNow,
             InvitedUtc = DateTime.UtcNow,
             InvitedByUserId = invitedByUserId,
@@ -142,7 +142,7 @@ public sealed class UserStore(RegistryDatabase registry, IOptions<AuthOptions> a
             {
                 Id = Ids.New(),
                 Email = key,
-                DisplayName = displayName is { Length: > 0 } ? displayName : key[..Math.Max(1, key.IndexOf('@'))],
+                DisplayName = displayName is { Length: > 0 } ? displayName : DefaultDisplayName(key),
                 CreatedUtc = now,
             };
             db.Users.Add(user);
@@ -150,10 +150,22 @@ public sealed class UserStore(RegistryDatabase registry, IOptions<AuthOptions> a
             created = true;
             log.LogInformation("User {Email} created on first login from {Issuer}", user.Email, issuer);
         }
-        if (displayName is { Length: > 0 } && user.DisplayName == user.Email[..Math.Max(1, user.Email.IndexOf('@'))]) user.DisplayName = displayName;
+        if (displayName is { Length: > 0 } && user.DisplayName == DefaultDisplayName(user.Email)) user.DisplayName = displayName;
         user.LastSeenUtc = now;
         db.SaveChanges();
         return (user, created);
+    }
+
+    // Blank clears it back to the email's local part, which is also what a
+    // provider-less row starts as - so "clear" never leaves a nameless person.
+    public bool SetDisplayName(string userId, string? displayName)
+    {
+        using var db = registry.Open();
+        if (db.Users.FirstOrDefault(u => u.Id == userId) is not { } user) return false;
+        user.DisplayName = displayName?.Trim() is { Length: > 0 } name ? name[..Math.Min(name.Length, 64)] : DefaultDisplayName(user.Email);
+        db.SaveChanges();
+        log.LogInformation("User {Email}: display name set to {Name}", user.Email, user.DisplayName);
+        return true;
     }
 
     public bool SetAdmin(string userId, bool admin)
@@ -171,6 +183,12 @@ public sealed class UserStore(RegistryDatabase registry, IOptions<AuthOptions> a
         using var db = registry.Open();
         db.Users.Where(u => u.Id == userId).ExecuteUpdate(s => s.SetProperty(u => u.LastSeenUtc, DateTime.UtcNow));
     }
+
+    // Auth0 sets `name` to the email for database users, so a row that has
+    // never been named by hand reads as an address. This is the value that
+    // counts as "unnamed": FromLogin only lets the provider overwrite it,
+    // and clearing a name returns to it.
+    private static string DefaultDisplayName(string email) => email[..Math.Max(1, email.IndexOf('@'))];
 
     private static string? Normalize(string? email)
     {
