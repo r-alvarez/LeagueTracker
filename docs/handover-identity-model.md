@@ -193,6 +193,13 @@ were the only ones heartbeating.
       not a fault. It is branded too (`docs/auth0-verification-email.html`)
       so the tenant has no stock Auth0 mail left in it. Both files are the
       only copy outside the dashboard.
+    - **The logo in those mails** is `docs/brand/leaguetracker-mark.png`
+      (the favicon rendered to PNG — email clients ignore SVG), served from
+      `brand.rjav-tech.co.uk`, a Cloudflare Worker holding that one static
+      asset, on a custom domain so the URL outlives wherever the file is
+      hosted. Keep that host out of every Access application or the image
+      becomes a login page in people's inboxes. Re-uploading `docs/brand`
+      restores it if the Worker is ever lost.
     - Also: `Auth__InviteOnly=true` in the compose means a sign-in from an
       identity nobody invited or configured is refused with a page, not
       silently turned into a user. Leave *Disable Sign Ups* on as well -
