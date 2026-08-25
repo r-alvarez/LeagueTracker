@@ -33,13 +33,17 @@ public sealed class Caller(IHttpContextAccessor http, AgentKeyStore keys, UserSt
     public bool IsAuthenticated => IsUser || IsAgent;
 
     // The owner test every policy reduces to: admin, or the account's owner,
-    // or an agent whose owner is the account's owner (unbound agents only
-    // while the rollout flag says so).
+    // or an agent whose owner is the account's owner - or that carries an
+    // explicit grant for this account (the shared-PC case: a friend's games
+    // are recorded on this machine, so only this machine can deliver them).
+    // Unbound agents pass only while the rollout flag says so.
     public bool Owns(Accounts.Account account)
     {
         if (IsAdmin) return true;
         if (UserId is { } user) return account.OwnerUserId == user;
-        if (Agent is { } agent) return agent.IsBound ? account.OwnerUserId == agent.OwnerUserId : keys.AllowUnbound;
+        if (Agent is { } agent) return agent.IsBound
+            ? account.OwnerUserId == agent.OwnerUserId || agent.MayActFor(account.Id)
+            : keys.AllowUnbound;
         return false;
     }
 }

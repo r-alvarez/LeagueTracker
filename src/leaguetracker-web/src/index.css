@@ -1515,6 +1515,12 @@ select.select:disabled { opacity: 0.5; }
 .assign-form { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; padding: 6px 0 4px; }
 .assign-form label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .assign-form .sm-action { margin-bottom: 1px; }
+/* The shared-PC grant: a field whose "input" is a row of checkboxes. The
+   outer element is a div (labels don't nest), styled like the labels. */
+.assign-form .assign-field { display: flex; flex-direction: column; gap: 4px; }
+.assign-form .assign-field-name { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.assign-form .assign-grants { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 30px; }
+.assign-form .assign-grant { flex-direction: row; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; text-transform: none; letter-spacing: normal; color: var(--text); cursor: pointer; }
 button.action.on { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 
 /* Add-a-person form on the People card, and the one-line outcome under it. */

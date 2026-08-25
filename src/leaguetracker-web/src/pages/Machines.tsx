@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
+import { account } from '../account'
 import { api } from '../api'
 import { auth } from '../auth'
 import OwnerSelect from '../components/OwnerSelect'
@@ -23,8 +24,10 @@ export default function Machines() {
   const [role, setRole] = useState<Role>('recorder')
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // The one row whose assign form is open, and what it holds.
-  const [assigning, setAssigning] = useState<{ id: string; owner: string; role: Role } | null>(null)
+  // The one row whose assign form is open, and what it holds. actsFor is the
+  // shared-PC grant: accounts someone else owns that get played on this
+  // machine, so only this machine can deliver their recordings.
+  const [assigning, setAssigning] = useState<{ id: string; owner: string; role: Role; actsFor: string[] } | null>(null)
   // Rows whose log was just requested: the file lands on the next heartbeat,
   // so the button reads "asked" until the list shows a newer file.
   const [logAsked, setLogAsked] = useState<Record<string, number>>({})
@@ -70,7 +73,8 @@ export default function Machines() {
     setError(null)
     setBusy(k.id)
     try {
-      await api.adminAssignAgent(k.id, assigning.owner || null, assigning.role !== k.role ? assigning.role : null)
+      const grantChanged = [...assigning.actsFor].sort().join(',') !== [...(k.actsFor ?? [])].sort().join(',')
+      await api.adminAssignAgent(k.id, assigning.owner || null, assigning.role !== k.role ? assigning.role : null, grantChanged ? assigning.actsFor : null)
       setAssigning(null)
       load()
     } catch (e) { setError(String(e)) } finally { setBusy(null) }
@@ -171,6 +175,7 @@ export default function Machines() {
                         <strong>{k.name}</strong>
                         {k.machine && k.machine !== k.name && <span className="mut sm-text"> · {k.machine}</span>}
                         <span className="mut sm-text"> · {k.role}</span>
+                        {k.actsForRiotIds?.length > 0 && <span className="mut sm-text"> · also {k.actsForRiotIds.join(', ')}</span>}
                         {!k.bound && <span className="warn-text sm-text"> · not tied to anyone</span>}
                         {k.logs.length > 0 && (
                           <div className="sm-text">
@@ -232,7 +237,7 @@ export default function Machines() {
                         </>}
                         {auth.isAdmin && (
                           <button className={`action sm-action${assignOpen ? ' on' : ''}`} title="Set who owns this machine and what it does"
-                            onClick={() => setAssigning(assignOpen ? null : { id: k.id, owner: k.ownerEmail ?? '', role: k.role })}>{k.bound ? 'Change…' : 'Assign…'}</button>
+                            onClick={() => setAssigning(assignOpen ? null : { id: k.id, owner: k.ownerEmail ?? '', role: k.role, actsFor: k.actsFor ?? [] })}>{k.bound ? 'Change…' : 'Assign…'}</button>
                         )}
                         {!canAct(k) && <span className="mut sm-text">shared</span>}
                       </td>
@@ -250,6 +255,32 @@ export default function Machines() {
                                 <option value="renderer">renderer – renders replays for everyone</option>
                               </select>
                             </label>
+                            {(() => {
+                              // Accounts the owner doesn't already cover: the
+                              // shared-PC grant - someone else's account that
+                              // gets played on this machine, whose games only
+                              // this machine can deliver.
+                              const ownerId = users.find(u => u.email === assigning.owner)?.id ?? k.ownerUserId
+                              const grantable = account.all.filter(a => a.ownerUserId !== ownerId)
+                              if (grantable.length === 0) return null
+                              return (
+                                <div className="assign-field" title="Accounts someone else owns that get played on this machine - their recordings can only come from here">
+                                  <span className="assign-field-name">Also acts for</span>
+                                  <span className="assign-grants">
+                                    {grantable.map(a => (
+                                      <label key={a.id} className="assign-grant">
+                                        <input type="checkbox" checked={assigning.actsFor.includes(a.id)}
+                                          onChange={e => setAssigning({
+                                            ...assigning,
+                                            actsFor: e.target.checked ? [...assigning.actsFor, a.id] : assigning.actsFor.filter(id => id !== a.id),
+                                          })} />
+                                        {a.riotId}
+                                      </label>
+                                    ))}
+                                  </span>
+                                </div>
+                              )
+                            })()}
                             <button className="action primary sm-action" disabled={busy === k.id} onClick={() => saveAssign(k)}>Save</button>
                             <button className="action sm-action" disabled={busy === k.id} onClick={() => setAssigning(null)}>Cancel</button>
                           </div>

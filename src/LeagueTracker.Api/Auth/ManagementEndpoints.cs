@@ -32,7 +32,7 @@ public static class ManagementEndpoints
         // everyone; all of them for an admin - each joined with the heartbeat
         // of the agent running under it and the logs it shipped, plus the
         // newest published build, so one table says who is on what.
-        me.MapGet("/agents", (Caller caller, AgentKeyStore keys, AgentRegistry agents, UserStore users) =>
+        me.MapGet("/agents", (Caller caller, AgentKeyStore keys, AgentRegistry agents, UserStore users, AccountRegistry accounts) =>
         {
             var emails = caller.IsAdmin ? users.All().ToDictionary(u => u.Id, u => u.Email) : [];
             var visible = caller.IsAdmin ? keys.All : keys.All.Where(k => k.OwnerUserId == caller.UserId || k.Role is AgentRole.Renderer).ToList();
@@ -40,7 +40,7 @@ public static class ManagementEndpoints
             {
                 LatestVersion = agents.Latest()?.Version,
                 Keys = visible.Select(k => KeyView(k, k.OwnerUserId is { } o && emails.TryGetValue(o, out var e) ? e : null,
-                    agents.Find(k.Id, caller.UserId, caller.IsAdmin), agents.Logs(k.Id), k.OwnerUserId == caller.UserId)),
+                    agents.Find(k.Id, caller.UserId, caller.IsAdmin), agents.Logs(k.Id), k.OwnerUserId == caller.UserId, accounts)),
                 JoinCodes = keys.OpenJoinCodes(caller.UserId!).Select(c => new { c.Code, Role = c.Role.ToString().ToLowerInvariant(), c.ExpiresUtc }),
             });
         });
@@ -151,19 +151,22 @@ public static class ManagementEndpoints
             return users.DeleteInvited(id) ? Results.NoContent() : Results.NotFound();
         });
 
-        admin.MapGet("/agents", (AgentKeyStore keys, UserStore users, AgentRegistry agents) =>
+        admin.MapGet("/agents", (AgentKeyStore keys, UserStore users, AgentRegistry agents, AccountRegistry accounts) =>
         {
             var byId = users.All().ToDictionary(u => u.Id, u => u.Email);
             return Results.Ok(new
             {
                 LatestVersion = agents.Latest()?.Version,
-                Keys = keys.All.Select(k => KeyView(k, k.OwnerUserId is { } o && byId.TryGetValue(o, out var e) ? e : null, agents.Find(k.Id, null, admin: true), agents.Logs(k.Id), false)),
+                Keys = keys.All.Select(k => KeyView(k, k.OwnerUserId is { } o && byId.TryGetValue(o, out var e) ? e : null, agents.Find(k.Id, null, admin: true), agents.Logs(k.Id), false, accounts)),
             });
         });
 
         // The owner and role of a machine, by hand: the four keys from before
-        // ownership existed, or a friend who enrolled without a code.
-        admin.MapPost("/agents/{id}/assign", (string id, AssignRequest request, AgentKeyStore keys, UserStore users) =>
+        // ownership existed, or a friend who enrolled without a code. ActsFor
+        // (account ids) grants the machine other people's accounts on top of
+        // its owner's - for the accounts that get played on this very PC;
+        // null leaves the grant as it is, [] clears it.
+        admin.MapPost("/agents/{id}/assign", (string id, AssignRequest request, AgentKeyStore keys, UserStore users, AccountRegistry accounts) =>
         {
             string? ownerId = null;
             if (request.OwnerEmail is { Length: > 0 } email)
@@ -172,7 +175,11 @@ public static class ManagementEndpoints
                 ownerId = owner.Id;
             }
             AgentRole? role = request.Role is { Length: > 0 } r && Enum.TryParse<AgentRole>(r, ignoreCase: true, out var parsed) ? parsed : null;
-            return keys.Assign(id, ownerId, role) ? Results.Ok() : Results.NotFound();
+            if (request.ActsFor is { } grant && grant.FirstOrDefault(a => accounts.ById(a) is null) is { } unknown)
+            {
+                return Results.NotFound(new { error = $"no account with id {unknown}" });
+            }
+            return keys.Assign(id, ownerId, role, request.ActsFor) ? Results.Ok() : Results.NotFound();
         });
 
         admin.MapPost("/accounts/{id}/owner", (string id, AssignRequest request, AccountRegistry accounts, UserStore users) =>
@@ -202,10 +209,12 @@ public static class ManagementEndpoints
     private static AgentKeyRecord? Own(Caller caller, AgentKeyStore keys, string id) =>
         keys.ById(id) is { } key && (caller.IsAdmin || key.OwnerUserId == caller.UserId) ? key : null;
 
-    private static object KeyView(AgentKeyRecord r, string? ownerEmail = null, AgentLive? live = null, List<AgentLogInfo>? logs = null, bool mine = false) => new
+    private static object KeyView(AgentKeyRecord r, string? ownerEmail = null, AgentLive? live = null, List<AgentLogInfo>? logs = null, bool mine = false, AccountRegistry? accounts = null) => new
     {
         r.Id, r.Name, r.Machine, Status = r.Status.ToString().ToLowerInvariant(), Role = r.Role.ToString().ToLowerInvariant(),
         r.OwnerUserId, OwnerEmail = ownerEmail, Bound = r.IsBound, Mine = mine, r.CreatedUtc, r.DecidedUtc, r.LastSeenUtc, r.LastIp, r.Note,
+        ActsFor = r.ActsFor,
+        ActsForRiotIds = r.ActsFor.Select(id => accounts?.ById(id)?.RiotId).OfType<string>().ToList(),
         Live = live, Logs = logs ?? [],
     };
 
@@ -241,7 +250,7 @@ public static class ManagementEndpoints
         }
     }
 
-    public sealed record AssignRequest(string? OwnerEmail, string? Role);
+    public sealed record AssignRequest(string? OwnerEmail, string? Role, string[]? ActsFor = null);
     public sealed record ClaimRequest(string AccountId);
     public sealed record InviteRequest(string? Email, string? DisplayName);
     public sealed record NameRequest(string? DisplayName);

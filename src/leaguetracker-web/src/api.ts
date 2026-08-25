@@ -127,8 +127,10 @@ export const api = {
     if (!r.ok) throw new Error(await errorText(r))
   },
   version: () => get<BuildVersion>('/api/version'),
-  adminAssignAgent: async (id: string, ownerEmail: string | null, role: string | null) => {
-    const r = await apiFetch(`/api/admin/agents/${id}/assign`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ownerEmail, role }) })
+  // actsFor replaces the machine's extra-accounts grant wholesale; null
+  // leaves whatever it has.
+  adminAssignAgent: async (id: string, ownerEmail: string | null, role: string | null, actsFor: string[] | null = null) => {
+    const r = await apiFetch(`/api/admin/agents/${id}/assign`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ownerEmail, role, actsFor }) })
     if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error ?? `assign -> HTTP ${r.status}`)
   },
   adminSetAccountOwner: async (accountId: string, ownerEmail: string | null) => {
