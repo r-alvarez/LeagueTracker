@@ -30,7 +30,13 @@ public sealed class AgentKeyRecord
     // A recorder acts on its owner's accounts; a renderer reaches every
     // account's render endpoints and nothing else.
     public AgentRole Role { get; set; }
+    // Accounts beyond the owner's this machine may also act for (comma-joined
+    // account ids) - the shared-PC case: a friend plays on this machine, so
+    // their games are recorded here, and only here can upload them.
+    public string? ActsForAccountIds { get; set; }
     public bool IsBound => OwnerUserId is { Length: > 0 };
+    public IReadOnlyList<string> ActsFor => ActsForAccountIds is { Length: > 0 } ids ? ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) : [];
+    public bool MayActFor(string accountId) => ActsFor.Contains(accountId);
 }
 
 public sealed class AgentsOptions
@@ -147,15 +153,17 @@ public sealed class AgentKeyStore
 
     // Admin's hand: the owner (and role) of a key, for the machines enrolled
     // before ownership existed or when a friend enrolled without a code.
-    public bool Assign(string id, string? ownerUserId, AgentRole? role)
+    // actsFor replaces the extra-accounts grant wholesale; null leaves it.
+    public bool Assign(string id, string? ownerUserId, AgentRole? role, IReadOnlyList<string>? actsFor = null)
     {
         lock (_gate)
         {
             if (_records.FirstOrDefault(r => r.Id == id) is not { } record) return false;
             record.OwnerUserId = ownerUserId is { Length: > 0 } ? ownerUserId : null;
             if (role is { } r) record.Role = r;
+            if (actsFor is not null) record.ActsForAccountIds = actsFor is { Count: > 0 } ? string.Join(',', actsFor.Distinct()) : null;
             Persist(record);
-            _log.LogInformation("Agent {Name}: owner {Owner}, role {Role}", record.Name, record.OwnerUserId ?? "(none)", record.Role);
+            _log.LogInformation("Agent {Name}: owner {Owner}, role {Role}, also acts for [{ActsFor}]", record.Name, record.OwnerUserId ?? "(none)", record.Role, string.Join(", ", record.ActsFor));
             return true;
         }
     }

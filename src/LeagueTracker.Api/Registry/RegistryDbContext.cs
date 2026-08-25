@@ -66,6 +66,7 @@ public sealed class RegistryDatabase
         ("Users", "InvitedByUserId", "TEXT NULL"),
         ("Users", "InviteSentUtc", "TEXT NULL"),
         ("Users", "ProviderUserId", "TEXT NULL"),
+        ("AgentKeys", "ActsForAccountIds", "TEXT NULL"),
     ];
 
     public string Path { get; }

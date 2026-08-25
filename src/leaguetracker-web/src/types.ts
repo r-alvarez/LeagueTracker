@@ -61,6 +61,9 @@ export interface AgentLog { file: string; whenUtc: string; sizeBytes: number }
 export interface AgentKey {
   id: string; name: string; machine: string; status: 'pending' | 'approved' | 'revoked'; role: 'recorder' | 'renderer'
   ownerUserId: string | null; ownerEmail?: string | null; bound: boolean; mine: boolean
+  /// Accounts beyond the owner's this machine may also act for (shared-PC
+  /// grants): ids for the assign form, Riot ids for display.
+  actsFor: string[]; actsForRiotIds: string[]
   createdUtc: string; decidedUtc: string | null; lastSeenUtc: string | null; lastIp: string | null; note: string | null
   /// The heartbeat of the agent running under this key, if it has reported.
   live: AgentInfo | null

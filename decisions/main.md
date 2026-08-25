@@ -1783,3 +1783,30 @@ probe and runs freezedetect on that before committing - the repeat
 verdict costs seconds instead of a second full recording. The replay
 relaunch itself stays: a hung game process cannot be revived, only
 replaced.
+
+## 2026-08-25 — Shared-PC grants; deliveries stop knocking on 403; a stranded hub clears itself
+
+Since the identity cutover an agent may only act for accounts its owner
+owns. True for machines in general, wrong for THIS machine in particular:
+HeraArgiva and TheCosmicPeach get played on Ruben's PC, their games are
+recorded here, and only here exists the footage - yet every delivery
+answered 403 and three VODs sat in "no tracker accepted it" limbo while
+the log repeated the same warnings every ten minutes for two days.
+
+The model gains one explicit edge instead of a blanket loosening: an
+admin can grant a machine's key extra accounts ("also acts for", on the
+Machines assign form; `AgentKeys.ActsForAccountIds` in the registry).
+`Caller.Owns` honours the grant for agents; everything else - roles,
+owner-only policies, unbound refusal - stands. The agent, for its part,
+now treats a 403 as what it is (deterministic authorization, per the
+no-postpone-loop rule): one warning naming the fix, then that tracker is
+skipped until restart; "no tracker accepted it" says itself once per run.
+
+Separately, the reason clips sat queued while the machine idled on
+2026-08-23: the Riot hub was started six times in a row and its API never
+answered within any 90s window - and the log could not say why. The
+launch failure now logs a diagnosis (process there? lockfile there? pid
+alive?), and after two consecutive dead windows the agent clears the
+wreck - kills the Riot client processes and drops a stale lockfile - so
+the third launch starts clean. Only ever on the auto-launch path, where
+League is known closed and the user idle.
