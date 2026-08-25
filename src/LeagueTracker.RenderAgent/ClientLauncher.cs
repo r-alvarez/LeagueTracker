@@ -64,6 +64,80 @@ public static class ClientLauncher
         }
     }
 
+    private static string LockfilePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Riot Games", "Riot Client", "Config", "lockfile");
+
+    /// One sentence on why the hub isn't answering, for the log line after a
+    /// failed launch window: is the process there, is the lockfile there, and
+    /// does its pid still exist. Turns "did not answer within 90s" from a
+    /// mystery into a diagnosis.
+    public static string Diagnose()
+    {
+        var hubs = Process.GetProcessesByName("RiotClientServices");
+        var running = hubs.Length;
+        foreach (var p in hubs) p.Dispose();
+        if (!File.Exists(LockfilePath))
+        {
+            return running == 0
+                ? "no RiotClientServices process and no lockfile - the launch died before the hub came up"
+                : $"RiotClientServices is running ({running} process(es)) but never wrote its lockfile - likely stuck patching or at a login prompt";
+        }
+        try
+        {
+            using var stream = new FileStream(LockfilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            var parts = new StreamReader(stream).ReadToEnd().Split(':');
+            if (parts.Length < 5) return "the hub's lockfile is malformed";
+            if (!int.TryParse(parts[1], out var pid) || !ProcessAlive(pid))
+            {
+                return $"the lockfile points at dead pid {parts[1]} - a stale file from a crashed hub";
+            }
+            return $"the hub (pid {pid}) is up on port {parts[2]} but its API is not answering";
+        }
+        catch (Exception ex)
+        {
+            return $"the hub's lockfile is unreadable ({ex.Message})";
+        }
+    }
+
+    private static bool ProcessAlive(int pid)
+    {
+        try
+        {
+            using var p = Process.GetProcessById(pid);
+            return !p.HasExited;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// A hub that repeatedly starts but never serves its API is stranded - a
+    /// zombie RiotClientServices from a crashed session, or a lockfile
+    /// pointing at a dead pid, and every fresh launch defers to the wreck and
+    /// exits. Killing the Riot client processes (NOT the game - the caller's
+    /// path only runs with League closed) and dropping the stale lockfile
+    /// gives the next attempt a clean start. True when anything was cleared.
+    public static bool ResetStrandedHub()
+    {
+        var cleared = false;
+        foreach (var name in (string[])["RiotClientServices", "Riot Client", "RiotClientUx", "RiotClientUxRender"])
+        {
+            foreach (var p in Process.GetProcessesByName(name))
+            {
+                try { p.Kill(entireProcessTree: true); cleared = true; } catch { /* already gone */ }
+                p.Dispose();
+            }
+        }
+        try
+        {
+            if (File.Exists(LockfilePath)) { File.Delete(LockfilePath); cleared = true; }
+        }
+        catch { /* still held open - the kill above missed something; next window tells us */ }
+        return cleared;
+    }
+
     /// The Riot hub's own local API - lockfile scheme identical to the LCU's.
     /// RiotClientServices ignores --launch-product entirely (observed
     /// 2026-08-12 on cold start AND with the hub already open) and only ever
@@ -74,9 +148,7 @@ public static class ClientLauncher
     /// failure warning for callers probing a hub that is still starting.
     public static async Task<bool> PressPlayAsync(CancellationToken ct, bool quiet = false)
     {
-        var lockfile = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Riot Games", "Riot Client", "Config", "lockfile");
+        var lockfile = LockfilePath;
         if (!File.Exists(lockfile)) return false;
         try
         {

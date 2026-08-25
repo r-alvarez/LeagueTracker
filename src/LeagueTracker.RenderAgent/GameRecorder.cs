@@ -608,11 +608,33 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         return mine.Count > 0 ? mine.Concat(_trackers.Except(mine)) : _trackers;
     }
 
+    /// Trackers that answered 403 to a delivery: the key may not act for that
+    /// account, which no amount of retrying changes - authorization is
+    /// deterministic (per the no-postpone-loop rule). Skipped for the rest of
+    /// this run; a restart re-tests, so granting access on the server heals it.
+    private readonly HashSet<string> _refusedTrackers = [];
+    /// Matches already reported as taken by nobody - said once per run, not
+    /// every ten-minute sweep.
+    private readonly HashSet<string> _reportedUnplaced = [];
+
+    /// True when the failure is the tracker refusing this machine for that
+    /// account (HTTP 403) - remembered so the sweep stops knocking.
+    private bool RefusedByPolicy(TrackerClient tracker, Exception ex)
+    {
+        if (ex is not HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden }) return false;
+        if (_refusedTrackers.Add(tracker.Name))
+        {
+            Log.Warn($"{tracker.Name} refuses this machine (403 - this key may not act for that account). Not retrying; grant the machine access on the tracker's Machines page, then restart the agent.");
+        }
+        return true;
+    }
+
     private async Task TryUploadVodAsync(string matchId, string baseName, CancellationToken ct)
     {
         string M(string ext) => Path.Combine(MetaDir, baseName + ext);
         foreach (var tracker in TrackersFor(baseName))
         {
+            if (_refusedTrackers.Contains(tracker.Name)) continue;
             try
             {
                 if (!await tracker.UploadVodAsync(matchId, Path.Combine(RecordingsDir, baseName + ".mp4"),
@@ -633,13 +655,17 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             }
             catch (Exception ex)
             {
-                Log.Warn($"VOD upload to {tracker.Name} failed: {ex.Message} (retried at next agent start)");
+                if (!RefusedByPolicy(tracker, ex)) Log.Warn($"VOD upload to {tracker.Name} failed: {ex.Message} (retried at next agent start)");
             }
         }
         // No tracker knew the match: normal for a brand-new game - the
         // poller imports it within minutes, and the startup sweep (or the
-        // post-game re-try below) delivers it then.
-        Log.Info($"VOD {matchId}: no tracker accepted it yet (match not imported) - will retry");
+        // post-game re-try below) delivers it then. Said once per run - the
+        // sweep itself keeps retrying quietly.
+        if (_reportedUnplaced.Add($"vod:{matchId}"))
+        {
+            Log.Info($"VOD {matchId}: no tracker accepted it yet (match not imported) - will retry");
+        }
     }
 
     /// Uploads the finished mp4 to YouTube (unless already published) and
@@ -727,6 +753,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         if (url.Length == 0) return;
         foreach (var tracker in TrackersFor(baseName))
         {
+            if (_refusedTrackers.Contains(tracker.Name)) continue;
             try
             {
                 if (!await tracker.SetVodLinkAsync(matchId, url, ct)) continue;
@@ -740,10 +767,13 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             }
             catch (Exception ex)
             {
-                Log.Warn($"VOD link post to {tracker.Name} failed: {ex.Message} (retried at next sweep)");
+                if (!RefusedByPolicy(tracker, ex)) Log.Warn($"VOD link post to {tracker.Name} failed: {ex.Message} (retried at next sweep)");
             }
         }
-        Log.Info($"VOD link for {matchId}: no tracker accepted it yet (match not imported) - will retry");
+        if (_reportedUnplaced.Add($"link:{matchId}"))
+        {
+            Log.Info($"VOD link for {matchId}: no tracker accepted it yet (match not imported) - will retry");
+        }
     }
 
     /// The between-chunks pause signal for YouTube uploads: a running game
