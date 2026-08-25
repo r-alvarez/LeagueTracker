@@ -710,9 +710,15 @@ export interface LiveGame {
 export interface MatchupRow {
   opponent: string
   games: number
+  wins: number
   winRate: number
+  avgKills: number
+  avgDeaths: number
+  avgAssists: number
+  kp: number
   laneGoldAt10: number | null
   kda: number
+  avgGameSec: number
 }
 
 export interface SplitRow {
@@ -721,21 +727,29 @@ export interface SplitRow {
   wins: number
   winRate: number
   kda: number
+  avgKills: number
+  avgDeaths: number
+  avgAssists: number
   kp: number
   csPerMin: number
   dpm: number
   laneGoldAt10: number | null
   deathsPerGame: number
+  /** Oldest first, so form dots read left-to-right like the profile header. */
+  last5: boolean[]
   lpTotal: number | null
   lpKnown: number
   detail: {
-    avgKills: number
-    avgDeaths: number
-    avgAssists: number
     csAt10: number
     soloKillsPerGame: number
     visionPerMin: number
     skillshotsDodgedPerGame: number
+    avgGameSec: number
+    totalGameSec: number
+    triples: number
+    quadras: number
+    pentas: number
+    side: { blue: BucketStat; red: BucketStat }
     matchups: MatchupRow[]
   } | null
 }
@@ -762,6 +776,9 @@ export interface Stats {
   }
   overall: {
     kda: number
+    avgKills: number
+    avgDeaths: number
+    avgAssists: number
     kp: number
     dpm: number
     gpm: number

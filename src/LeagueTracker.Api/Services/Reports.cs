@@ -356,6 +356,15 @@ public static class Reports
             Behind = Bucket(matches.Where(m => m.LaneGoldDiff15 <= -500).ToList()),
         };
 
+        // Side (blue/red) is only on the participant rows, and a duplicate IsMe
+        // row (bad data) must degrade to last-wins, not 500 the stats endpoint.
+        Dictionary<string, int> myTeamByMatch = [];
+        foreach (var p in await db.Participants.AsNoTracking().Where(p => p.IsMe)
+                     .Select(p => new { p.MatchId, p.TeamId }).ToListAsync(ct))
+        {
+            myTeamByMatch[p.MatchId] = p.TeamId;
+        }
+
         List<object> SplitBy(Func<Match, string> key, bool withDetail = false) => matches
             .GroupBy(key).Where(g => g.Key is { Length: > 0 })
             .Select(g => new
@@ -365,6 +374,9 @@ public static class Reports
                 Wins = g.Count(m => m.Win),
                 WinRate = Math.Round(g.Count(m => m.Win) / (double)g.Count(), 3),
                 Kda = Math.Round(Avg(g.Select(Kda)), 2),
+                AvgKills = Math.Round(Avg(g.Select(m => (double)m.Kills)), 1),
+                AvgDeaths = Math.Round(Avg(g.Select(m => (double)m.Deaths)), 1),
+                AvgAssists = Math.Round(Avg(g.Select(m => (double)m.Assists)), 1),
                 Kp = Math.Round(Avg(g.Where(m => m.KillParticipation is not null).Select(m => m.KillParticipation!.Value)), 3),
                 CsPerMin = Math.Round(Avg(g.Select(m => m.Cs / DurMin(m))), 2),
                 Dpm = Math.Round(Avg(g.Select(m => m.DamageToChampions / DurMin(m))), 1),
@@ -372,6 +384,8 @@ public static class Reports
                     ? (int?)Math.Round(Avg(g.Where(m => m.LaneGoldDiff10 is not null).Select(m => (double)m.LaneGoldDiff10!)))
                     : null,
                 DeathsPerGame = Math.Round(Avg(g.Select(m => (double)m.Deaths)), 2),
+                // Oldest-first so the dots read left-to-right like the header's form strip.
+                Last5 = g.OrderByDescending(m => m.GameEndUtc).Take(5).Reverse().Select(m => m.Win).ToList(),
                 // Real LP attributed to this split - the number ranked sites can only estimate.
                 LpTotal = hideLp ? (int?)null : g.Sum(m => m.LpChange ?? 0),
                 LpKnown = hideLp ? 0 : g.Count(m => m.LpChange is not null),
@@ -379,13 +393,22 @@ public static class Reports
                 Detail = withDetail
                     ? (object?)new
                     {
-                        AvgKills = Math.Round(Avg(g.Select(m => (double)m.Kills)), 1),
-                        AvgDeaths = Math.Round(Avg(g.Select(m => (double)m.Deaths)), 1),
-                        AvgAssists = Math.Round(Avg(g.Select(m => (double)m.Assists)), 1),
                         CsAt10 = Math.Round(Avg(g.Where(m => m.CsAt10 is not null).Select(m => (double)m.CsAt10!)), 1),
                         SoloKillsPerGame = Math.Round(Avg(g.Select(m => (double)m.SoloKills)), 2),
                         VisionPerMin = Math.Round(Avg(g.Select(m => m.VisionScore / DurMin(m))), 2),
                         SkillshotsDodgedPerGame = Math.Round(Avg(g.Where(m => m.SkillshotsDodged is not null).Select(m => (double)m.SkillshotsDodged!)), 1),
+                        AvgGameSec = (int)Math.Round(Avg(g.Select(m => m.DurationSec))),
+                        TotalGameSec = (int)Math.Round(g.Sum(m => m.DurationSec)),
+                        Triples = g.Sum(m => m.TripleKills),
+                        Quadras = g.Sum(m => m.QuadraKills),
+                        Pentas = g.Sum(m => m.PentaKills),
+                        // GetValueOrDefault: a match with no participant rows (partial
+                        // ingest) lands on neither side rather than polluting blue.
+                        Side = new
+                        {
+                            Blue = Bucket(g.Where(m => myTeamByMatch.GetValueOrDefault(m.Id) == 100).ToList()),
+                            Red = Bucket(g.Where(m => myTeamByMatch.GetValueOrDefault(m.Id) == 200).ToList()),
+                        },
                         // Every opponent faced, single-game ones included - the UI
                         // scrolls the full list and only tints win rate at 5+ games,
                         // so noisy 0/100% singletons never read as a verdict.
@@ -395,11 +418,17 @@ public static class Reports
                             {
                                 Opponent = x.Key,
                                 Games = x.Count(),
+                                Wins = x.Count(m => m.Win),
                                 WinRate = Math.Round(x.Count(m => m.Win) / (double)x.Count(), 3),
+                                AvgKills = Math.Round(Avg(x.Select(m => (double)m.Kills)), 1),
+                                AvgDeaths = Math.Round(Avg(x.Select(m => (double)m.Deaths)), 1),
+                                AvgAssists = Math.Round(Avg(x.Select(m => (double)m.Assists)), 1),
+                                Kp = Math.Round(Avg(x.Where(m => m.KillParticipation is not null).Select(m => m.KillParticipation!.Value)), 3),
                                 LaneGoldAt10 = x.Any(m => m.LaneGoldDiff10 is not null)
                                     ? (int?)Math.Round(Avg(x.Where(m => m.LaneGoldDiff10 is not null).Select(m => (double)m.LaneGoldDiff10!)))
                                     : null,
                                 Kda = Math.Round(Avg(x.Select(Kda)), 2),
+                                AvgGameSec = (int)Math.Round(Avg(x.Select(m => m.DurationSec))),
                             })
                             .OrderByDescending(x => x.Games).ThenBy(x => x.WinRate)
                             .Take(50).ToList(),
@@ -449,6 +478,9 @@ public static class Reports
         var overall = new
         {
             Kda = Math.Round(Avg(matches.Select(Kda)), 2),
+            AvgKills = Math.Round(Avg(matches.Select(m => (double)m.Kills)), 1),
+            AvgDeaths = Math.Round(Avg(matches.Select(m => (double)m.Deaths)), 1),
+            AvgAssists = Math.Round(Avg(matches.Select(m => (double)m.Assists)), 1),
             Kp = Math.Round(Avg(matches.Where(m => m.KillParticipation is not null).Select(m => m.KillParticipation!.Value)), 3),
             Dpm = Math.Round(Avg(matches.Select(m => m.DamageToChampions / DurMin(m))), 0),
             Gpm = Math.Round(Avg(matches.Select(m => m.Gold / DurMin(m))), 0),

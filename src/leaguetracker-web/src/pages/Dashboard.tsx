@@ -8,7 +8,7 @@ import ChampBadge from '../components/ChampBadge'
 import ProfileCard from '../components/ProfileCard'
 import ProfileHeader from '../components/ProfileHeader'
 import RoleIcon from '../components/RoleIcon'
-import { WinrateBar } from '../components/Stats'
+import { FormDots, WinrateBar } from '../components/Stats'
 
 const QUEUES = ['Solo/Duo', 'Flex'] as const
 
@@ -33,20 +33,56 @@ const kdaCls = (v: number) => (v >= 5 ? 'kda-5' : v >= 4 ? 'kda-4' : v >= 3 ? 'k
 // No LP column here on purpose: per-champion LP is only ever a PARTIAL sum
 // (games missed by live capture carry none), and a partial sum over a biased
 // subsample reads as a verdict the winrate column already gives honestly.
-type SortKey = 'key' | 'games' | 'winRate' | 'kda' | 'kp' | 'csPerMin' | 'laneGoldAt10' | 'deathsPerGame'
+type SortKey = 'key' | 'games' | 'winRate' | 'kda' | 'kp' | 'csPerMin' | 'laneGoldAt10' | 'dpm' | 'deathsPerGame'
+
+const fmtClock = (sec: number) => {
+  const s = Math.round(sec)
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+const fmtPlaytime = (sec: number) => {
+  const h = Math.floor(sec / 3600)
+  const m = Math.round((sec % 3600) / 60)
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
+function KdaCell({ kills, deaths, assists, ratio }: { kills: number; deaths: number; assists: number; ratio: number }) {
+  return (
+    <span className="kda-cell">
+      {kills.toFixed(1)} / <span className="kda-deaths">{deaths.toFixed(1)}</span> / {assists.toFixed(1)}
+      <span className={`kda-ratio ${kdaCls(ratio)}`}> ({ratio.toFixed(1)})</span>
+    </span>
+  )
+}
+
+const goldCls = (v: number | null) => (v !== null ? (v >= 0 ? 'win' : 'loss') : '')
 
 // The champion drill-down reads as its own mini-dashboard: a band of stat
-// tiles over a scrollable column of matchup widgets. Same tile/winrate-bar
-// vocabulary the KPI bands and champion rows already speak, so an expanded row
-// never looks like a different app grafted into the table.
-function MatchupDrill({ detail, dpm }: { detail: NonNullable<SplitRow['detail']>; dpm: number }) {
-  const tiles: { label: string; value: string | number }[] = [
-    { label: 'Avg K / D / A', value: `${detail.avgKills} / ${detail.avgDeaths} / ${detail.avgAssists}` },
+// tiles over a scrollable matchup table. Same tile/winrate-bar vocabulary the
+// KPI bands and champion rows already speak, so an expanded row never looks
+// like a different app grafted into the table.
+function MatchupDrill({ row }: { row: SplitRow }) {
+  const detail = row.detail!
+  const tiles: { label: string; value: string | number; sub?: string; cls?: string }[] = [
+    { label: 'KP', value: pct(row.kp) },
+    { label: 'DPM', value: Math.round(row.dpm) },
+    { label: 'Deaths/game', value: row.deathsPerGame },
     { label: 'CS@10', value: detail.csAt10 },
     { label: 'Solo kills/game', value: detail.soloKillsPerGame },
     { label: 'Vision/min', value: detail.visionPerMin },
     { label: 'Dodges/game', value: detail.skillshotsDodgedPerGame },
-    { label: 'DPM', value: Math.round(dpm) },
+    { label: 'Avg game', value: fmtClock(detail.avgGameSec) },
+    { label: 'Total played', value: fmtPlaytime(detail.totalGameSec) },
+    { label: 'Triple / Quadra / Penta', value: `${detail.triples} / ${detail.quadras} / ${detail.pentas}` },
+    {
+      label: 'Blue side WR', cls: 'side-blue',
+      value: detail.side.blue.games > 0 ? pct(detail.side.blue.winRate) : '—',
+      sub: `${detail.side.blue.games} games`,
+    },
+    {
+      label: 'Red side WR', cls: 'side-red',
+      value: detail.side.red.games > 0 ? pct(detail.side.red.winRate) : '—',
+      sub: `${detail.side.red.games} games`,
+    },
   ]
   const opponents = detail.matchups.length
 
@@ -54,9 +90,10 @@ function MatchupDrill({ detail, dpm }: { detail: NonNullable<SplitRow['detail']>
     <div className="champ-drill">
       <div className="drill-tiles">
         {tiles.map(t => (
-          <div key={t.label} className="mini-tile">
+          <div key={t.label} className={`mini-tile ${t.cls ?? ''}`}>
             <div className="label">{t.label}</div>
             <div className="value">{t.value}</div>
+            {t.sub && <div className="sub">{t.sub}</div>}
           </div>
         ))}
       </div>
@@ -68,18 +105,30 @@ function MatchupDrill({ detail, dpm }: { detail: NonNullable<SplitRow['detail']>
         </div>
         {opponents > 0 ? (
           <div className="matchup-scroll">
-            {detail.matchups.map(mu => {
-              const wins = Math.round(mu.winRate * mu.games)
-              return (
-                <div key={mu.opponent} className="matchup-row">
-                  <div className="mu-champ"><ChampBadge name={mu.opponent} small /></div>
-                  <span className="mu-games">{mu.games}G</span>
-                  <WinrateBar wins={wins} losses={mu.games - wins} />
-                  <span className="mu-metric">G@10<b className={mu.laneGoldAt10 !== null ? (mu.laneGoldAt10 >= 0 ? 'win' : 'loss') : ''}>{signed(mu.laneGoldAt10)}</b></span>
-                  <span className="mu-metric">KDA<b>{mu.kda}</b></span>
-                </div>
-              )
-            })}
+            <table className="data matchup-table">
+              <thead>
+                <tr>
+                  <th>Matchup</th><th className="num">Games</th><th>WR</th><th className="num">K / D / A</th>
+                  <th className="num col-extra">KP</th><th className="num">G@10</th><th className="num col-extra">Avg game</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.matchups.map(mu => (
+                  <tr key={mu.opponent}>
+                    <td><ChampBadge name={mu.opponent} small /></td>
+                    <td className="num">{mu.games}</td>
+                    <td className="wr-cell">
+                      <WinrateBar wins={mu.wins} losses={mu.games - mu.wins} />
+                      <span className="wr-rec">{mu.wins}W-{mu.games - mu.wins}L</span>
+                    </td>
+                    <td className="num"><KdaCell kills={mu.avgKills} deaths={mu.avgDeaths} assists={mu.avgAssists} ratio={mu.kda} /></td>
+                    <td className="num col-extra">{pct(mu.kp)}</td>
+                    <td className={`num ${goldCls(mu.laneGoldAt10)}`}>{signed(mu.laneGoldAt10)}</td>
+                    <td className="num col-extra">{fmtClock(mu.avgGameSec)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
           <div className="matchup-empty">No lane opponents identified in this window.</div>
@@ -89,19 +138,50 @@ function MatchupDrill({ detail, dpm }: { detail: NonNullable<SplitRow['detail']>
   )
 }
 
-function SplitTable({ title, rows, champIcons, compact }: { title: string; rows: SplitRow[]; champIcons?: boolean; compact?: boolean }) {
+interface SummaryRow {
+  games: number
+  wins: number
+  losses: number
+  kda: number
+  avgKills: number
+  avgDeaths: number
+  avgAssists: number
+  kp: number
+  csPerMin: number
+  laneGoldAt10: number | null
+  dpm: number
+  last5: boolean[]
+}
+
+const MIN_GAMES_STEPS = [
+  { min: 0, label: 'All' },
+  { min: 5, label: '5+ games' },
+  { min: 10, label: '10+ games' },
+] as const
+
+function SplitTable({ title, rows, champIcons, compact, summary }: {
+  title: string; rows: SplitRow[]; champIcons?: boolean; compact?: boolean; summary?: SummaryRow
+}) {
   const [open, setOpen] = useState<string | null>(null)
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'games', dir: -1 })
+  const [search, setSearch] = useState('')
+  const [minGames, setMinGames] = useState(0)
+
+  const query = search.trim().toLowerCase()
+  const filtered = useMemo(
+    () => rows.filter(r => r.games >= minGames && r.key.toLowerCase().includes(query)),
+    [rows, minGames, query],
+  )
 
   // Click a header to sort by it; same header again flips the direction.
   // Rows without a value (LP unknown, no lane opponent) always sink to the end.
-  const sorted = useMemo(() => [...rows].sort((a, b) => {
+  const sorted = useMemo(() => [...filtered].sort((a, b) => {
     if (sort.key === 'key') return sort.dir * a.key.localeCompare(b.key)
     const av = a[sort.key], bv = b[sort.key]
     if (av === null) return bv === null ? 0 : 1
     if (bv === null) return -1
     return sort.dir * (av - bv)
-  }), [rows, sort])
+  }), [filtered, sort])
 
   const Th = ({ k, label, num, extra }: { k: SortKey; label: string; num?: boolean; extra?: boolean }) => (
     <th className={`sortable ${num ? 'num' : ''} ${extra ? 'col-extra' : ''} ${sort.key === k ? 'sorted' : ''}`}
@@ -110,9 +190,30 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
     </th>
   )
 
+  const WrCell = ({ wins, losses, record }: { wins: number; losses: number; record?: boolean }) => (
+    <td className="wr-cell">
+      <WinrateBar wins={wins} losses={losses} />
+      {record && <span className="wr-rec">{wins}W-{losses}L</span>}
+    </td>
+  )
+
+  const columns = compact ? 5 : 9
+
   return (
     <div className="card">
       <h2>{title}{champIcons && <span className="mut" style={{ fontWeight: 400 }}> — click a row for matchups</span>}</h2>
+      {champIcons && rows.length > 0 && (
+        <div className="table-filters">
+          <input className="text search" type="search" placeholder="Find champion" aria-label="Find champion"
+            value={search} onChange={e => setSearch(e.target.value)} />
+          <div className="seg mini">
+            {MIN_GAMES_STEPS.map(s => (
+              <button key={s.min} className={minGames === s.min ? 'on' : ''} onClick={() => setMinGames(s.min)}>{s.label}</button>
+            ))}
+          </div>
+          {filtered.length !== rows.length && <span className="mut sm-text">{filtered.length} of {rows.length}</span>}
+        </div>
+      )}
       {rows.length === 0 ? <div className="empty">No games in this window.</div> : (
         <div className="table-scroll tall">
           <table className="data">
@@ -120,11 +221,29 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
               <tr>
                 <Th k="key" label={champIcons ? 'Champion' : 'Role'} /><Th k="games" label="Games" num /><Th k="winRate" label="WR" />
                 <Th k="kda" label="KDA" num />
-                {!compact && <><Th k="kp" label="KP" num extra /><Th k="csPerMin" label="CS/m" num extra /><Th k="laneGoldAt10" label="G@10" num extra /></>}
-                <Th k="deathsPerGame" label="Deaths" num extra />
+                {compact
+                  ? <Th k="deathsPerGame" label="Deaths" num extra />
+                  : <>
+                    <Th k="kp" label="KP" num extra /><Th k="csPerMin" label="CS/m" num extra />
+                    <Th k="laneGoldAt10" label="G@10" num extra /><Th k="dpm" label="DPM" num extra />
+                    <th className="last5-col">Last 5</th>
+                  </>}
               </tr>
             </thead>
             <tbody>
+              {summary && !compact && (
+                <tr className="all-row">
+                  <td><span className="champ sm"><span className="all-star">✳</span> <span className="champ-name">All champions</span></span></td>
+                  <td className="num">{summary.games}</td>
+                  <WrCell wins={summary.wins} losses={summary.losses} record />
+                  <td className="num"><KdaCell kills={summary.avgKills} deaths={summary.avgDeaths} assists={summary.avgAssists} ratio={summary.kda} /></td>
+                  <td className="num col-extra">{pct(summary.kp)}</td>
+                  <td className="num col-extra">{summary.csPerMin}</td>
+                  <td className={`num col-extra ${goldCls(summary.laneGoldAt10)}`}>{signed(summary.laneGoldAt10)}</td>
+                  <td className="num col-extra">{Math.round(summary.dpm)}</td>
+                  <td className="last5-col"><FormDots results={summary.last5} /></td>
+                </tr>
+              )}
               {sorted.map(r => (
                 <Fragment key={r.key}>
                   <tr onClick={() => r.detail && setOpen(open === r.key ? null : r.key)}
@@ -133,24 +252,30 @@ function SplitTable({ title, rows, champIcons, compact }: { title: string; rows:
                       ? <ChampBadge name={r.key} small />
                       : <span className="champ sm"><RoleIcon role={r.key} /> <span className="champ-name">{r.key}</span></span>}</td>
                     <td className="num">{r.games}</td>
-                    <td><WinrateBar wins={r.wins} losses={r.games - r.wins} /></td>
-                    <td className="num"><span className={`kda-ratio ${kdaCls(r.kda)}`} style={{ fontSize: 13 }}>{r.kda.toFixed(2)}</span></td>
-                    {!compact && <>
-                      <td className="num col-extra">{pct(r.kp)}</td>
-                      <td className="num col-extra">{r.csPerMin}</td>
-                      <td className="num col-extra">{signed(r.laneGoldAt10)}</td>
-                    </>}
-                    <td className="num col-extra">{r.deathsPerGame}</td>
+                    <WrCell wins={r.wins} losses={r.games - r.wins} record={!compact} />
+                    <td className="num"><KdaCell kills={r.avgKills} deaths={r.avgDeaths} assists={r.avgAssists} ratio={r.kda} /></td>
+                    {compact
+                      ? <td className="num col-extra">{r.deathsPerGame}</td>
+                      : <>
+                        <td className="num col-extra">{pct(r.kp)}</td>
+                        <td className="num col-extra">{r.csPerMin}</td>
+                        <td className={`num col-extra ${goldCls(r.laneGoldAt10)}`}>{signed(r.laneGoldAt10)}</td>
+                        <td className="num col-extra">{Math.round(r.dpm)}</td>
+                        <td className="last5-col"><FormDots results={r.last5} /></td>
+                      </>}
                   </tr>
                   {open === r.key && r.detail && (
                     <tr className="drill">
-                      <td colSpan={compact ? 6 : 8}>
-                        <MatchupDrill detail={r.detail} dpm={r.dpm} />
+                      <td colSpan={columns}>
+                        <MatchupDrill row={r} />
                       </td>
                     </tr>
                   )}
                 </Fragment>
               ))}
+              {sorted.length === 0 && (
+                <tr><td colSpan={columns} className="empty-cell">No champions match the filter.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -458,41 +583,49 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="grid two-col" style={{ marginBottom: 16 }}>
-            <SplitTable title="Champion performance" rows={stats.byChampion} champIcons />
-            <div className="grid" style={{ alignContent: 'start' }}>
-              <SplitTable title="Role performance" rows={stats.byRole} compact />
-              {deaths && deaths.games > 0 && (
-                <div className="card">
-                  <h2>Collapse profile <span className="mut" style={{ fontWeight: 400 }}>— last {deaths.games} ranked, {deaths.totalDeaths} deaths</span></h2>
-                  <div className="stat-list">
-                    <div className="stat-row">
-                      <span className="k">Collapse deaths<small>3+ enemies actually there · avg {deaths.avgEnemiesNearDeath ?? '—'} near each death</small></span>
-                      <span className="v">{deaths.collapseDeaths}</span>
-                    </div>
-                    <div className="stat-row">
-                      <span className="k">No ally in range<small>nearest ally avg {deaths.avgNearestAllyDistAtDeath ?? '—'} units away</small></span>
-                      <span className="v">{deaths.isolatedDeaths}</span>
-                    </div>
-                    <div className="stat-row">
-                      <span className="k">Right after an objective<small>within 90s of your team taking one</small></span>
-                      <span className="v">{deaths.postObjectiveDeaths}</span>
-                    </div>
-                    <div className="stat-row">
-                      <span className="k">Burst vs whittled<small>one source ≥70% of the damage vs ground down</small></span>
-                      <span className="v">{deaths.burstDeaths} / {deaths.totalDeaths - deaths.burstDeaths}</span>
-                    </div>
-                    <div className="stat-row">
-                      <span className="k">Time in enemy half<small>nearest ally all game: {deaths.avgNearestAllyDistOverall.toFixed(0)} units</small></span>
-                      <span className="v">{deaths.avgTimeInEnemyHalfPct.toFixed(0)}%</span>
-                    </div>
+          {/* Full-width so the dpm.lol-style column set (KDA line, DPM, form
+              dots) fits without horizontal scroll; role + collapse pair below. */}
+          <div style={{ marginBottom: 16 }}>
+            <SplitTable title="Champion performance" rows={stats.byChampion} champIcons
+              summary={{
+                games: s.games, wins: s.wins, losses: s.losses,
+                kda: o.kda, avgKills: o.avgKills, avgDeaths: o.avgDeaths, avgAssists: o.avgAssists,
+                kp: o.kp, csPerMin: o.csPerMin, laneGoldAt10: o.laneGoldAt10, dpm: o.dpm,
+                last5: stats.series.slice(-5).map(p => p.win),
+              }} />
+          </div>
+          <div className="grid two-col" style={{ marginBottom: 16, alignItems: 'start' }}>
+            <SplitTable title="Role performance" rows={stats.byRole} compact />
+            {deaths && deaths.games > 0 && (
+              <div className="card">
+                <h2>Collapse profile <span className="mut" style={{ fontWeight: 400 }}>— last {deaths.games} ranked, {deaths.totalDeaths} deaths</span></h2>
+                <div className="stat-list">
+                  <div className="stat-row">
+                    <span className="k">Collapse deaths<small>3+ enemies actually there · avg {deaths.avgEnemiesNearDeath ?? '—'} near each death</small></span>
+                    <span className="v">{deaths.collapseDeaths}</span>
                   </div>
-                  <p className="mut sm-text" style={{ margin: '10px 0 0' }}>
-                    Positions between the 60s frames are interpolated - estimates, not gospel.
-                  </p>
+                  <div className="stat-row">
+                    <span className="k">No ally in range<small>nearest ally avg {deaths.avgNearestAllyDistAtDeath ?? '—'} units away</small></span>
+                    <span className="v">{deaths.isolatedDeaths}</span>
+                  </div>
+                  <div className="stat-row">
+                    <span className="k">Right after an objective<small>within 90s of your team taking one</small></span>
+                    <span className="v">{deaths.postObjectiveDeaths}</span>
+                  </div>
+                  <div className="stat-row">
+                    <span className="k">Burst vs whittled<small>one source ≥70% of the damage vs ground down</small></span>
+                    <span className="v">{deaths.burstDeaths} / {deaths.totalDeaths - deaths.burstDeaths}</span>
+                  </div>
+                  <div className="stat-row">
+                    <span className="k">Time in enemy half<small>nearest ally all game: {deaths.avgNearestAllyDistOverall.toFixed(0)} units</small></span>
+                    <span className="v">{deaths.avgTimeInEnemyHalfPct.toFixed(0)}%</span>
+                  </div>
                 </div>
-              )}
-            </div>
+                <p className="mut sm-text" style={{ margin: '10px 0 0' }}>
+                  Positions between the 60s frames are interpolated - estimates, not gospel.
+                </p>
+              </div>
+            )}
           </div>
         </>
       )}
