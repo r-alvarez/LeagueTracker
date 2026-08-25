@@ -30,6 +30,9 @@ public sealed class RenderAgent(AgentConfig config)
     private int _orphanStrikes;
     private DateTime _lastClientLaunchAttempt = DateTime.MinValue;
     private bool _clientLaunchUnavailable;
+    // Consecutive launch windows where the hub never served its API - two in
+    // a row triggers the stranded-hub reset in MaybeLaunchClientAsync.
+    private int _hubLaunchFailures;
 
     /// Deploys ask the agent to stop by dropping this file next to the exe:
     /// the agent finishes (or cleanly postpones) what it is doing and exits,
@@ -393,6 +396,7 @@ public sealed class RenderAgent(AgentConfig config)
         // alike (both observed 2026-08-12); the exe only brings the hub up.
         if (await ClientLauncher.PressPlayAsync(ct))
         {
+            _hubLaunchFailures = 0;
             Log.Info($"{pending} render job(s) waiting - the Riot hub was already open, pressed Play through its API");
             return;
         }
@@ -417,11 +421,27 @@ public sealed class RenderAgent(AgentConfig config)
             await Task.Delay(TimeSpan.FromSeconds(5), ct);
             if (await ClientLauncher.PressPlayAsync(ct, quiet: true))
             {
+                _hubLaunchFailures = 0;
                 Log.Info("Riot hub is up - pressed Play through its API");
                 return;
             }
         }
-        Log.Warn("The Riot hub's API did not answer within 90s of starting it - retrying within 3 minutes");
+        // Name the reason, not just the timeout: which half is missing tells
+        // the log reader (and the recovery below) what actually happened.
+        Log.Warn($"The Riot hub's API did not answer within 90s of starting it - {ClientLauncher.Diagnose()} - retrying within 3 minutes");
+        // Two whole windows with no API is not a slow patch, it is a wreck
+        // blocking the road (a zombie hub or a stale lockfile - observed live
+        // 2026-08-23, six windows in a row). Clear it so the third try starts
+        // clean. League itself is closed on this path, so nothing of the
+        // player's is touched.
+        if (++_hubLaunchFailures >= 2)
+        {
+            _hubLaunchFailures = 0;
+            if (ClientLauncher.ResetStrandedHub())
+            {
+                Log.Warn("Cleared the stranded Riot hub (processes killed, stale lockfile removed) - the next launch starts clean");
+            }
+        }
     }
 
     private async Task<bool> ProcessJobAsync(TrackerClient tracker, RenderJob job, CancellationToken ct)
