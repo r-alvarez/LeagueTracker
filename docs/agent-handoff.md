@@ -1,7 +1,7 @@
 # Handing the tracker to another player
 
 One website - `league.rjav-tech.co.uk/{region}/{RiotId}/...` (op.gg style:
-`/euw/ImRA-87166/matches`, `/euw/TheCosmicPeach-TTV/data`) - one process hosting
+`/euw/ImRA-87166/matches`, `/euw/Friend-TAG/data`) - one process hosting
 every tracked account with its own data folder; one **recorder** agent on
 each player's gaming PC; one **renderer** agent on the dedicated replay box
 that serves every account. Nobody but the tracker owner touches credentials.
@@ -16,10 +16,10 @@ the outer wall for now (`Auth__PublicReads=false`), and is bypassed for
 `/api` because the API needs no help.
 
 ```
- Ben's PC ──recorder──┐                                         ┌─ /ImRA-87166
- Vanessa's PC ─recorder┼─▶ league.rjav-tech.co.uk (one process) ├─ /ImRA-5957
- Ruben's PC ──recorder─┘              ▲                         ├─ /TheCosmicPeach-TTV
-                                      │                         └─ /...
+ friend A's PC ─recorder┐                                        ┌─ /ImRA-87166
+ friend B's PC ─recorder┼─▶ league.rjav-tech.co.uk (one process) ├─ /ImRA-5957
+ Ruben's PC ───recorder─┘              ▲                         ├─ /Friend-TAG
+                                       │                         └─ /...
                       renderer (old PC) pulls replay jobs for every account
                                       │
                                       └──▶ YouTube (one shared channel; token on the NAS)
@@ -93,11 +93,13 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
    it with Riot (canonical casing, puuid), creates
    `/mnt/MediaPool/apps/leaguetracker/<GameName>-<TAG>/`, its database, and
    adds it to the poller's round; it lands you on their page
-   (`league.rjav-tech.co.uk/euw/<GameName>-<TAG>/`). Runtime-added accounts
-   are remembered in `/data/accounts.json` (survive redeploys); the three
-   original ones stay in the compose (`Accounts__List__N`) - both sources
-   are fine, config wins on a duplicate. `DELETE /api/accounts/{slug}`
-   untracks a runtime-added one (folder kept).
+   (`league.rjav-tech.co.uk/euw/<GameName>-<TAG>/`). Every account lives in
+   `/data/registry.db` (survives redeploys); the three original ones are
+   also asserted by the compose (`Accounts__List__N`, a friend's Riot ID
+   from the stack env) - config wins on a duplicate. `DELETE
+   /api/accounts/{slug}` untracks a site-added one (folder kept). Where the
+   rest of the state lives, and how to back it up and restore it:
+   `docs/operate.md`.
 2. Cloudflare Access: add their email to the site-wide `league.rjav-tech.co.uk`
    application (that is the outer wall - without it they never reach the
    login button). Auth0: create/invite their user with the same email.

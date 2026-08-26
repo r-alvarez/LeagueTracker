@@ -227,8 +227,9 @@ were the only ones heartbeating.
   the stopgap.
 - RSO: a second OIDC provider registered directly in the app when the
   production key + RSO arrive; the `UserLogin` table is ready for it.
-- `/import` only accepts folders under the account's data folder or the
-  `/imports` mount now (audit T-B6) — put backups there.
+- `/import` only accepts folders under the account's data folder or an
+  `/imports` mount (audit T-B6). No compose defines `/imports`: put a
+  restore source inside the account's own folder (`docs/operate.md`).
 - The stale-slug redirect is 308 (method-preserving), not 301.
 - Puuids are encrypted per API-key holder: if the key holder ever changes,
   set `Accounts__List__N__Puuid` or let the poller re-resolve; folders and ids
