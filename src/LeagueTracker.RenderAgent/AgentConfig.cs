@@ -89,10 +89,12 @@ public sealed class AgentConfig
     /// the small sidecars; on = a debugging machine that wants the files.
     public bool KeepRecordingsAfterPublish { get; set; }
 
-    /// Ceiling on what the recordings folder may hold in mp4s (GB). Above it
+    /// Ceiling on what this agent's own recordings may hold (GB). Above it
     /// the delivery pass evicts the oldest games - published ones first, then,
     /// loudly, unpublished ones - so a slow upload backlog can never fill a
-    /// friend's disk. 0 = no ceiling.
+    /// friend's disk. 0 = no ceiling; ignored when KeepRecordingsAfterPublish
+    /// is on (the files were asked for). Videos the agent did not make are
+    /// never counted or touched.
     public double MaxRecordingsGb { get; set; } = 20;
 
     /// Free space to leave on the recordings drive (GB): the eviction above
@@ -155,12 +157,13 @@ public sealed class AgentConfig
     /// unlisted (default), private, or public.
     public string YouTubeVisibility { get; set; } = "unlisted";
 
-    /// Open the finished game's review reel in the browser once it lands on
-    /// its tracker - but only when the next game isn't already being queued
-    /// for. On by default for every recording agent (the review is the point
-    /// of the recording); queueing up straight away skips it, and it never
-    /// runs on a renderer-only box.
-    public bool PostGameReview { get; set; } = true;
+    /// After a game, launch its replay through the person's League client
+    /// and drive the camera through the moments that mattered (ReplayReview)
+    /// - unless the next game is already being queued for. Off unless the
+    /// person turned it on in the setup window: it takes the screen, clicks
+    /// the replay UI and edits game.cfg, which nobody should meet by surprise
+    /// (audit G-N3). Never runs on a renderer-only box.
+    public bool PostGameReview { get; set; }
 
     /// How long to let the end-of-game screens settle before deciding whether
     /// a review is wanted. Long enough that hitting "play again" immediately
