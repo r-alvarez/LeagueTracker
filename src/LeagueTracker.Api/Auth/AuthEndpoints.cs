@@ -65,6 +65,10 @@ public static class AuthEndpoints
         });
     }
 
-    private static string SafeReturn(string? returnUrl) =>
-        returnUrl is { Length: > 0 } && returnUrl.StartsWith('/') && !returnUrl.StartsWith("//") ? returnUrl : "/";
+    // The shape of Url.IsLocalUrl: one leading slash and then neither another
+    // slash nor a backslash - browsers read "/\evil.com" as "//evil.com", so
+    // the old "not //" test still sent a signed-in person off-site (audit
+    // T-N3) - and nothing a Location header could be split on.
+    internal static string SafeReturn(string? returnUrl) =>
+        returnUrl is "/" or ['/', not ('/' or '\\'), ..] && !returnUrl.Any(char.IsControl) ? returnUrl : "/";
 }
