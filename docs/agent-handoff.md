@@ -1,7 +1,7 @@
 # Handing the tracker to another player
 
 One website - `league.rjav-tech.co.uk/{region}/{RiotId}/...` (op.gg style:
-`/euw/ImRA-87166/matches`, `/euw/TheCosmicPeach-TTV/data`) - one process hosting
+`/euw/ImRA-87166/matches`, `/euw/Friend-TAG/data`) - one process hosting
 every tracked account with its own data folder; one **recorder** agent on
 each player's gaming PC; one **renderer** agent on the dedicated replay box
 that serves every account. Nobody but the tracker owner touches credentials.
@@ -16,10 +16,10 @@ the outer wall for now (`Auth__PublicReads=false`), and is bypassed for
 `/api` because the API needs no help.
 
 ```
- Ben's PC ──recorder──┐                                         ┌─ /ImRA-87166
- Vanessa's PC ─recorder┼─▶ league.rjav-tech.co.uk (one process) ├─ /ImRA-5957
- Ruben's PC ──recorder─┘              ▲                         ├─ /TheCosmicPeach-TTV
-                                      │                         └─ /...
+ friend A's PC ─recorder┐                                        ┌─ /ImRA-87166
+ friend B's PC ─recorder┼─▶ league.rjav-tech.co.uk (one process) ├─ /ImRA-5957
+ Ruben's PC ───recorder─┘              ▲                         ├─ /Friend-TAG
+                                       │                         └─ /...
                       renderer (old PC) pulls replay jobs for every account
                                       │
                                       └──▶ YouTube (one shared channel; token on the NAS)

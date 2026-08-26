@@ -108,15 +108,19 @@ services:
       Accounts__List__1__DataDir: /data/alt
       Accounts__List__1__DisplayName: Ruben (alt)
       Accounts__List__1__Owner: ${OWNER_RUBEN:-}
-      Accounts__List__2__GameName: TheCosmicPeach
-      Accounts__List__2__TagLine: TTV
+      # A friend's Riot ID and name are theirs, not the public repo's: they
+      # come from the stack environment like the owner emails. All three
+      # unset = the entry is skipped (registry.db remembers the account from
+      # the boot that had them); a partial entry is refused at boot.
+      Accounts__List__2__GameName: ${ACCOUNT_2_GAMENAME:-}
+      Accounts__List__2__TagLine: ${ACCOUNT_2_TAGLINE:-}
       Accounts__List__2__DataDir: /data/ben
-      Accounts__List__2__DisplayName: Ben
+      Accounts__List__2__DisplayName: ${ACCOUNT_2_DISPLAYNAME:-}
       Accounts__List__2__Owner: ${OWNER_BEN:-}
-      # Accounts__List__3__GameName: <Vanessa's game name>
-      # Accounts__List__3__TagLine: <tag>
-      # Accounts__List__3__DataDir: /data/vanessa
-      # Accounts__List__3__DisplayName: Vanessa
+      # Accounts__List__3__GameName: ${ACCOUNT_3_GAMENAME:-}
+      # Accounts__List__3__TagLine: ${ACCOUNT_3_TAGLINE:-}
+      # Accounts__List__3__DataDir: /data/<folder>
+      # Accounts__List__3__DisplayName: ${ACCOUNT_3_DISPLAYNAME:-}
       Agent__ReleaseDir: /data/agent-releases
       Agent__SyncReleases: "true"
       Agent__Profile__RecordNamePrefix: Road to Platinum

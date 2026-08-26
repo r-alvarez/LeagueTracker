@@ -180,6 +180,14 @@ public sealed class AccountRegistry
     // creating a duplicate or moving a folder.
     private List<Account> ApplyConfig(RegistryDbContext db, List<Account> stored, Account configured)
     {
+        // An entry whose Riot ID comes from unset stack env vars (the public
+        // compose names nobody) is not a mistake: the registry already holds
+        // the account from an earlier boot, or the site adds it. Half an ID is.
+        if (configured.GameName is not { Length: > 0 } && configured.TagLine is not { Length: > 0 })
+        {
+            _log.LogInformation("Configured account with no Riot ID ({DataDir}) skipped - set its stack env vars or add it on the site", configured.DataDir);
+            return stored;
+        }
         if (configured.GameName is not { Length: > 0 } || configured.TagLine is not { Length: > 0 }) throw new InvalidOperationException("Every configured account needs GameName and TagLine");
         var dataDir = configured.DataDir is { Length: > 0 } dir ? Rooted(dir)
             : _root is not null ? Path.Combine(_root, configured.UrlSlug)
