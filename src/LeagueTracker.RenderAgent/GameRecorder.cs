@@ -866,14 +866,21 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// file's creation and last-write times bracket the game it captured; the
     /// owner's tracker knows which game that was. Exactly one candidate =
     /// adopt it: a minimal sidecar, and the normal delivery takes over.
+    private bool _foreignAnnounced;
+
     private async Task AdoptOrphansAsync(CancellationToken ct)
     {
         if (!Directory.Exists(RecordingsDir)) return;
         var settled = DateTime.UtcNow.AddMinutes(-15);
+        var foreign = 0;
         foreach (var f in new DirectoryInfo(RecordingsDir).GetFiles("*.mp4"))
         {
             if (f.Name.EndsWith(".part.mp4", StringComparison.OrdinalIgnoreCase) || f.LastWriteTimeUtc > settled) continue;
             var baseName = Path.GetFileNameWithoutExtension(f.Name);
+            // "Ours without a sidecar" can only be a crash before finalize;
+            // anything the ledger does not know is the person's own video,
+            // never probed, matched or published (audit G-N1).
+            if (!RecordingLedger.IsOurs(MetaDir, baseName)) { foreign++; continue; }
             string M(string ext) => Path.Combine(MetaDir, baseName + ext);
             if (File.Exists(M(".json"))) continue;
             // An .orphan verdict is a day's rest, not forever: the tracker may
@@ -938,6 +945,11 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             File.WriteAllText(M(".json"), sidecar);
             Log.Info($"Recording {f.Name} adopted as {found.Id} ({found.Champion}, {start:HH:mm}-{end:HH:mm} UTC) - delivery follows");
         }
+        if (foreign > 0 && !_foreignAnnounced)
+        {
+            _foreignAnnounced = true;
+            Log.Info($"{foreign} mp4(s) in {RecordingsDir} were not made by this agent - left alone");
+        }
     }
 
     /// Whether a game is already somewhere other than this disk: published
@@ -962,13 +974,19 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     /// said out loud on the Data page, not just in the log.
     private void EnforceDiskBudget()
     {
-        if (config.MaxRecordingsGb <= 0 && config.MinFreeGb <= 0) return;
+        // KeepRecordingsAfterPublish is the owner saying these files stay,
+        // so the ceiling is off for them; only the free-space floor remains,
+        // because a full disk kills the next recording (audit G-N2).
+        var ceilingGb = config.KeepRecordingsAfterPublish ? 0 : config.MaxRecordingsGb;
+        if (ceilingGb <= 0 && config.MinFreeGb <= 0) return;
         if (!Directory.Exists(RecordingsDir)) return;
+        // Only what this agent recorded counts, and only that is ever removed
+        // - the folder may be the person's own Videos (audit G-N1).
         var files = new DirectoryInfo(RecordingsDir).GetFiles("*.mp4")
-            .Where(f => !f.Name.EndsWith(".part.mp4", StringComparison.OrdinalIgnoreCase))
+            .Where(f => !f.Name.EndsWith(".part.mp4", StringComparison.OrdinalIgnoreCase) && RecordingLedger.IsOurs(MetaDir, Path.GetFileNameWithoutExtension(f.Name)))
             .OrderBy(f => f.LastWriteTimeUtc).ToList();
         var totalGb = files.Sum(f => f.Length) / 1024d / 1024 / 1024;
-        bool Over() => (config.MaxRecordingsGb > 0 && totalGb > config.MaxRecordingsGb)
+        bool Over() => (ceilingGb > 0 && totalGb > ceilingGb)
                     || (config.MinFreeGb > 0 && FreeGb(RecordingsDir) < config.MinFreeGb);
         if (!Over()) return;
 
@@ -996,7 +1014,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                     else
                     {
                         dropped++;
-                        Log.Warn($"Recording {baseName}.mp4 ({mb} MB) DROPPED UNPUBLISHED to stay within the disk budget ({config.MaxRecordingsGb:0} GB / {config.MinFreeGb:0} GB free) - uploads are not keeping up");
+                        Log.Warn($"Recording {baseName}.mp4 ({mb} MB) DROPPED UNPUBLISHED to stay within the disk budget ({ceilingGb:0} GB / {config.MinFreeGb:0} GB free) - uploads are not keeping up");
                     }
                 }
                 catch (Exception ex) { Log.Warn($"Could not remove {f.Name}: {ex.Message}"); }
