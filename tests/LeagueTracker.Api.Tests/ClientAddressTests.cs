@@ -1,5 +1,6 @@
 using System.Net;
 using LeagueTracker.Api.Services;
+using Microsoft.Extensions.Configuration;
 
 namespace LeagueTracker.Api.Tests;
 
@@ -37,6 +38,25 @@ public class ClientAddressTests
     public void A_header_that_is_not_an_address_is_ignored(string? header)
     {
         Assert.Null(ClientAddress.FromHeader(IPAddress.Parse("104.16.1.1"), header, Cloudflare));
+    }
+
+    [Fact]
+    public void A_configured_entry_is_added_to_the_cloudflare_ranges_and_blanks_are_ignored()
+    {
+        // Behind Traefik on the NAS every peer is the docker gateway, so the
+        // deployment names it in the compose - on top of Cloudflare's ranges,
+        // which the binder keeps because the option is a pre-filled list.
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Proxy:ClientIpHeaderFrom:0"] = "172.20.0.1/32",
+            ["Proxy:ClientIpHeaderFrom:1"] = "",
+        }).Build();
+        var options = new ProxyOptions();
+        config.GetSection("Proxy").Bind(options);
+        var trusted = ClientAddress.ParseNetworks(options.ClientIpHeaderFrom);
+        Assert.NotNull(ClientAddress.FromHeader(IPAddress.Parse("172.20.0.1"), "203.0.113.5", trusted));
+        Assert.NotNull(ClientAddress.FromHeader(IPAddress.Parse("104.16.1.1"), "203.0.113.5", trusted));
+        Assert.Null(ClientAddress.FromHeader(IPAddress.Parse("172.20.0.7"), "203.0.113.5", trusted));
     }
 
     [Fact]
