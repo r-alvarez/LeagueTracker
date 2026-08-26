@@ -15,6 +15,7 @@ public sealed class SetupForm : Form
     private readonly ComboBox _role = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly TextBox _recordings = new();
     private readonly TextBox _prefix = new() { Width = ContentWidth };
+    private readonly CheckBox _review = new() { Text = "Open a post-game review on this screen", AutoSize = true };
     private readonly Label _verdict = new() { AutoSize = true };
     private readonly Button _test = new() { Text = "Test connection" };
     private readonly Button _save = new() { Text = "Save", DialogResult = DialogResult.OK };
@@ -75,6 +76,9 @@ public sealed class SetupForm : Form
             : Array.FindIndex(Roles, r => r.Record == current.RecordGames && r.Render == current.RenderReplays) is >= 0 and var i ? i : 0;
         _recordings.Text = current.RecordingsDir;
         _prefix.Text = current.RecordNamePrefix;
+        _review.Checked = current.PostGameReview;
+        _review.ForeColor = Ink;
+        _review.Margin = new Padding(0, 6, 0, 0);
 
         foreach (var box in new[] { _server, _recordings, _prefix }) StyleField(box);
         _role.FlatStyle = FlatStyle.Flat;
@@ -103,7 +107,9 @@ public sealed class SetupForm : Form
             Fields(
                 ("Tracker URL", _server, "Your tracker's address, e.g. https://league.rjav-tech.co.uk (several: comma-separated)."))));
         root.Controls.Add(Card("This machine",
-            Fields(("Role", _role, "Recorder for a player's PC; Renderer for the box that cuts replay clips; Both for one machine doing everything."))));
+            Fields(
+                ("Role", _role, "Recorder for a player's PC; Renderer for the box that cuts replay clips; Both for one machine doing everything."),
+                ("After each game", _review, "On: about 30 seconds after a game ends (unless you have queued again), the agent opens the replay through your League client, takes the screen for a few minutes, follows your champion through the moments that mattered (F8-F12 to skip or pause) and closes it. Off: nothing opens - the review is on your match page instead."))));
         root.Controls.Add(Card("Recordings",
             Fields(
                 ("Recordings folder", RecordingsRow(), "Blank = Videos\\LeagueTracker. Games are 1.5-3 GB each at 1440p60 - pick a drive with room. Work in progress is kept on the system drive automatically."),
@@ -307,6 +313,7 @@ public sealed class SetupForm : Form
             RenderReplays = render,
             RecordingsDir = _recordings.Text.Trim(),
             RecordNamePrefix = _prefix.Text.Trim(),
+            PostGameReview = _review.Checked,
         };
     }
 
@@ -368,6 +375,7 @@ public sealed class SetupForm : Form
         Set("RecordGames", draft.RecordGames);
         Set("RenderReplays", draft.RenderReplays);
         Set("RecordingsDir", draft.RecordingsDir);
+        Set("PostGameReview", draft.PostGameReview);
         // Only when given: an empty prefix written locally would win over
         // the tracker's default (a written key beats the profile).
         if (draft.RecordNamePrefix is { Length: > 0 }) Set("RecordNamePrefix", draft.RecordNamePrefix);
