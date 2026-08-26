@@ -340,8 +340,12 @@ app.MapPost("/api/agent/enroll", (EnrollRequest request, HttpContext http, Agent
 {
     if (request.Key is not { Length: >= 32 } || request.Key.Length > 200) return Results.BadRequest(new { error = "key must be 32-200 characters" });
     var (record, created, refusal) = keys.Enroll(request.Key, request.Name ?? "", request.Machine ?? "unknown", http.Connection.RemoteIpAddress?.ToString(), request.Code);
-    if (refusal is not null) return Results.StatusCode(StatusCodes.Status429TooManyRequests);
-    return Results.Ok(new { record.Id, Status = record.Status.ToString().ToLowerInvariant(), Created = created });
+    return refusal switch
+    {
+        EnrolRefusal.JoinCodeRequired => Results.Json(new { error = "a join code from the owner's Data page is required" }, statusCode: StatusCodes.Status403Forbidden),
+        not null => Results.StatusCode(StatusCodes.Status429TooManyRequests),
+        null => Results.Ok(new { record!.Id, Status = record.Status.ToString().ToLowerInvariant(), Created = created }),
+    };
 });
 
 app.MapGet("/api/agent/enroll/status", (HttpContext http, AgentKeyStore keys) =>
