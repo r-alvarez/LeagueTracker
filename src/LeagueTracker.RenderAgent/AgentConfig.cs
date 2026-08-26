@@ -89,10 +89,12 @@ public sealed class AgentConfig
     /// the small sidecars; on = a debugging machine that wants the files.
     public bool KeepRecordingsAfterPublish { get; set; }
 
-    /// Ceiling on what the recordings folder may hold in mp4s (GB). Above it
+    /// Ceiling on what this agent's own recordings may hold (GB). Above it
     /// the delivery pass evicts the oldest games - published ones first, then,
     /// loudly, unpublished ones - so a slow upload backlog can never fill a
-    /// friend's disk. 0 = no ceiling.
+    /// friend's disk. 0 = no ceiling; ignored when KeepRecordingsAfterPublish
+    /// is on (the files were asked for). Videos the agent did not make are
+    /// never counted or touched.
     public double MaxRecordingsGb { get; set; } = 20;
 
     /// Free space to leave on the recordings drive (GB): the eviction above

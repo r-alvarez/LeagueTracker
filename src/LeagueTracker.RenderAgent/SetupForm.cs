@@ -188,7 +188,7 @@ public sealed class SetupForm : Form
         browse.Click += (_, _) =>
         {
             using var dialog = new FolderBrowserDialog { Description = "Where finished recordings go", SelectedPath = _recordings.Text };
-            if (dialog.ShowDialog(this) == DialogResult.OK) _recordings.Text = dialog.SelectedPath;
+            if (dialog.ShowDialog(this) == DialogResult.OK) _recordings.Text = RecordingLedger.OwnedFolder(dialog.SelectedPath);
         };
         row.Controls.Add(_recordings);
         row.Controls.Add(browse);
