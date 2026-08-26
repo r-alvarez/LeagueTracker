@@ -299,6 +299,10 @@ public sealed class KillEvent
     /// Assisting participant ids, comma-separated - fight involvement without
     /// the killing blow (the review's "opponent impact" needs it).
     public string AssistIds { get; set; } = "";
+    /// Champions on the victim's damage ledger - hit them or were hit by them
+    /// in their last seconds - comma-separated. The fight headcount's proof
+    /// of who was there, where positions between 60s frames could only guess.
+    public string DamagePids { get; set; } = "";
     public int X { get; set; }
     public int Y { get; set; }
 }

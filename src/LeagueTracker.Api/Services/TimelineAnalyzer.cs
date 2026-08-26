@@ -98,11 +98,10 @@ public static class TimelineAnalyzer
     private readonly record struct ItemLogEntry(int T, int Pid, string Kind, int ItemId, int BeforeId, int AfterId);
 
     // Fight clustering: kills chain into one fight while they stay within this
-    // window and range of the cluster's centroid; headcount comes from killers,
-    // assisters, victims and anyone interpolated near the centroid mid-fight.
+    // window and range of the cluster's centroid; headcount is the kill ledger
+    // - killers, assisters, victims and whoever traded blows with a victim.
     private const int FightChainSec = 15;
     private const int FightChainUnits = 3500;
-    private const int FightNearUnits = 2500;
     internal const int FightConversionSec = 45;
     // Covers a death timer at any game length plus the clip's pre-roll: a
     // fighter who died within this of the fight starting is either still on
@@ -527,29 +526,19 @@ public static class TimelineAnalyzer
     {
         var start = cluster[0].TimeSec;
         var end = cluster[^1].TimeSec;
-        var midSec = (start + end) / 2;
-        var cx = cluster.Average(c => c.X);
-        var cy = cluster.Average(c => c.Y);
 
-        // Fighters the kill ledger proves were there: killers, assisters and
-        // victims. The headcount adds anyone interpolated near the centroid on
-        // top - a guess between 60s frames, not evidence.
-        var fighters = new HashSet<int>();
+        // Who was there is the kill ledger's call: killers, assisters, victims
+        // and whoever traded blows with a victim in their last seconds. Padding
+        // this with positions interpolated between 60s frames made a 3-man
+        // collapse on one ally read as "teamfight 3v4" (1,696 of 4,541 local
+        // teamfights were skirmishes by the ledger).
+        var involved = new HashSet<int>();
         foreach (var k in cluster)
         {
-            if (k.KillerParticipantId > 0) fighters.Add(k.KillerParticipantId);
-            fighters.Add(k.VictimParticipantId);
-            fighters.UnionWith(AssistPids(k));
-        }
-        var involved = new HashSet<int>(fighters);
-        foreach (var pid in allyPids.Concat(enemyPids).Append(myPid))
-        {
-            if (involved.Contains(pid)) continue;
-            if (InterpolatedPosition(frames, pid, midSec) is { } pos
-                && Math.Sqrt(Math.Pow(pos.X - cx, 2) + Math.Pow(pos.Y - cy, 2)) <= FightNearUnits)
-            {
-                involved.Add(pid);
-            }
+            if (k.KillerParticipantId > 0) involved.Add(k.KillerParticipantId);
+            involved.Add(k.VictimParticipantId);
+            involved.UnionWith(Pids(k.AssistIds));
+            involved.UnionWith(Pids(k.DamagePids));
         }
 
         var allies = involved.Count(p => p == myPid || allyPids.Contains(p));
@@ -574,24 +563,20 @@ public static class TimelineAnalyzer
             _ => false,
         };
 
-        // The replay camera for this fight: a champion the kill ledger proves
-        // was in it. "Interpolated near the centroid" is not proof - a laner
-        // two screens away qualifies, "survives", wins on participant id and
-        // films an empty jungle - so bystanders are never the camera, not even
-        // ahead of the last victim to fall, who at least films the fight until
-        // they drop. Among proven fighters a survivor films the whole thing
-        // (a dead champion's camera parks at their fountain), so survivors
-        // first, ally POV preferred, busiest first. A survivor who died within
+        // The replay camera for this fight: a survivor films the whole thing (a
+        // dead champion's camera parks at their fountain), so survivors first,
+        // ally POV preferred, busiest first; the last victim to fall is the
+        // fallback and films until they drop. A survivor who died within
         // RecentDeathSec of the fight starting may still be on the respawn
         // timer when it does - camera at the fountain through the pre-roll
         // (EUW1_7936338594 w16 filmed 39s of aftermath) - so never-dead
         // survivors outrank them.
         var victims = cluster.Select(k => k.VictimParticipantId).ToHashSet();
         int KillsBy(int pid) => cluster.Count(k => k.KillerParticipantId == pid);
-        int AssistsBy(int pid) => cluster.Count(k => AssistPids(k).Contains(pid));
+        int AssistsBy(int pid) => cluster.Count(k => Pids(k.AssistIds).Contains(pid));
         bool RecentlyDead(int pid) => allKills.Any(k =>
             k.VictimParticipantId == pid && k.TimeSec < start && k.TimeSec >= start - RecentDeathSec);
-        int? Survivor(Func<int, bool> onSide, bool allowRecentlyDead) => fighters
+        int? Survivor(Func<int, bool> onSide, bool allowRecentlyDead) => involved
             .Where(p => onSide(p) && !victims.Contains(p) && (allowRecentlyDead || !RecentlyDead(p)))
             .OrderByDescending(KillsBy).ThenByDescending(AssistsBy).ThenBy(p => p).Cast<int?>().FirstOrDefault();
         bool Ally(int p) => p == myPid || allyPids.Contains(p);
@@ -604,8 +589,8 @@ public static class TimelineAnalyzer
         return new Fight(start, end, kind, result, participated, allies, enemies, allyKills, enemyKills, goldSwing, converted, cameraPid);
     }
 
-    private static IEnumerable<int> AssistPids(KillEvent kill) =>
-        kill.AssistIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(int.Parse);
+    private static IEnumerable<int> Pids(string csv) =>
+        csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(int.Parse);
 
     /// My team's total-gold lead at the last frame at or before the given second
     /// (clamped to the game's frames - the 60s cadence makes this approximate).
@@ -670,9 +655,31 @@ public static class TimelineAnalyzer
         AssistIds = ev.TryGetProperty("assistingParticipantIds", out var assists)
             ? string.Join(',', assists.EnumerateArray().Select(a => a.GetInt32()))
             : "",
+        DamagePids = string.Join(',', DamageLedgerPids(ev)),
         X = ev.TryGetProperty("position", out var p) ? p.GetProperty("x").GetInt32() : 0,
         Y = ev.TryGetProperty("position", out var p2) ? p2.GetProperty("y").GetInt32() : 0,
     };
+
+    // Both lists name the OTHER champion by participantId (minions, monsters
+    // and towers carry none); the victim's own id never appears but is
+    // excluded anyway so a self-damage quirk can't count them twice.
+    private static SortedSet<int> DamageLedgerPids(JsonElement kill)
+    {
+        var victim = kill.GetProperty("victimId").GetInt32();
+        var pids = new SortedSet<int>();
+        foreach (var list in new[] { "victimDamageDealt", "victimDamageReceived" })
+        {
+            if (!kill.TryGetProperty(list, out var entries) || entries.ValueKind is not JsonValueKind.Array) continue;
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (entry.TryGetProperty("participantId", out var pid) && pid.GetInt32() > 0 && pid.GetInt32() != victim)
+                {
+                    pids.Add(pid.GetInt32());
+                }
+            }
+        }
+        return pids;
+    }
 
     private static Death ParseDeath(JsonElement ev, JsonElement frame, MatchParticipantDto me, Dictionary<int, string> champByPid)
     {
