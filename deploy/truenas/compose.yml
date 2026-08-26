@@ -35,6 +35,10 @@ x-lt-agent-env: &lt-agent-env
   # chose at enrol - a name is anyone's to type. A block that names no key is
   # reported in the boot log. Replace the placeholders before merging.
   Agent__Profiles__79f4badd6236__KeepRecordingsAfterPublish: "true"
+  # Post-game review is off for a new install (it opens the replay on the
+  # player's screen); the two machines whose owners asked for it get it here.
+  Agent__Profiles__79f4badd6236__PostGameReview: "true"
+  Agent__Profiles__60250018a226__PostGameReview: "true"
   # Ben's agent uploads through its own Google Cloud project (own 10k-unit
   # daily quota - videos.insert costs 1,600, so one project is ~6 uploads a
   # day for everyone together) but still to the same channel: the refresh
