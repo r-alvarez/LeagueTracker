@@ -20,7 +20,9 @@ public static class MatchMetricRows
         {
             ["dpm"] = m.DamageToChampions / minutes,
             ["soloKills"] = m.SoloKills,
-            ["multiKills"] = m.TripleKills + m.QuadraKills + m.PentaKills,
+            // Riot's counters are inclusive - a penta also ticks quadraKills
+            // and tripleKills - so tripleKills alone is "triples and better".
+            ["multiKills"] = m.TripleKills,
             ["deaths"] = m.Deaths,
             ["followIns"] = m.FollowInDeaths,
             ["collapses"] = collapses,

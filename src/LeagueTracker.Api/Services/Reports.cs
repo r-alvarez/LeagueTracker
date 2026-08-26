@@ -307,7 +307,6 @@ public static class Reports
         static double Avg(IEnumerable<double> xs) { var l = xs.ToList(); return l is { Count: > 0 } ? l.Average() : 0; }
         double PerGame(int count) => matches is { Count: > 0 } ? Math.Round(count / (double)matches.Count, 2) : 0;
         double DurMin(Match m) => Math.Max(1.0, m.DurationSec / 60.0);
-        double Kda(Match m) => (m.Kills + m.Assists) / (double)Math.Max(1, m.Deaths);
         static object Bucket(List<Match> ms) => new
         {
             Games = ms.Count,
@@ -373,7 +372,7 @@ public static class Reports
                 Games = g.Count(),
                 Wins = g.Count(m => m.Win),
                 WinRate = Math.Round(g.Count(m => m.Win) / (double)g.Count(), 3),
-                Kda = Math.Round(Avg(g.Select(Kda)), 2),
+                Kda = AggregateKda(g),
                 AvgKills = Math.Round(Avg(g.Select(m => (double)m.Kills)), 1),
                 AvgDeaths = Math.Round(Avg(g.Select(m => (double)m.Deaths)), 1),
                 AvgAssists = Math.Round(Avg(g.Select(m => (double)m.Assists)), 1),
@@ -399,8 +398,8 @@ public static class Reports
                         SkillshotsDodgedPerGame = Math.Round(Avg(g.Where(m => m.SkillshotsDodged is not null).Select(m => (double)m.SkillshotsDodged!)), 1),
                         AvgGameSec = (int)Math.Round(Avg(g.Select(m => m.DurationSec))),
                         TotalGameSec = (int)Math.Round(g.Sum(m => m.DurationSec)),
-                        Triples = g.Sum(m => m.TripleKills),
-                        Quadras = g.Sum(m => m.QuadraKills),
+                        Triples = ExclusiveTriples(g),
+                        Quadras = ExclusiveQuadras(g),
                         Pentas = g.Sum(m => m.PentaKills),
                         // GetValueOrDefault: a match with no participant rows (partial
                         // ingest) lands on neither side rather than polluting blue.
@@ -427,7 +426,7 @@ public static class Reports
                                 LaneGoldAt10 = x.Any(m => m.LaneGoldDiff10 is not null)
                                     ? (int?)Math.Round(Avg(x.Where(m => m.LaneGoldDiff10 is not null).Select(m => (double)m.LaneGoldDiff10!)))
                                     : null,
-                                Kda = Math.Round(Avg(x.Select(Kda)), 2),
+                                Kda = AggregateKda(x),
                                 AvgGameSec = (int)Math.Round(Avg(x.Select(m => m.DurationSec))),
                             })
                             .OrderByDescending(x => x.Games).ThenBy(x => x.WinRate)
@@ -477,7 +476,7 @@ public static class Reports
 
         var overall = new
         {
-            Kda = Math.Round(Avg(matches.Select(Kda)), 2),
+            Kda = AggregateKda(matches),
             AvgKills = Math.Round(Avg(matches.Select(m => (double)m.Kills)), 1),
             AvgDeaths = Math.Round(Avg(matches.Select(m => (double)m.Deaths)), 1),
             AvgAssists = Math.Round(Avg(matches.Select(m => (double)m.Assists)), 1),
@@ -502,8 +501,8 @@ public static class Reports
             DpmMid = Math.Round(Avg(matches.Where(m => m.DpmMid is not null).Select(m => m.DpmMid!.Value)), 0),
             DpmLate = Math.Round(Avg(matches.Where(m => m.DpmLate is not null).Select(m => m.DpmLate!.Value)), 0),
             DamageTakenPerMin = Math.Round(Avg(matches.Where(m => m.DamageTakenPerMin is not null).Select(m => m.DamageTakenPerMin!.Value)), 0),
-            Triples = matches.Sum(m => m.TripleKills),
-            Quadras = matches.Sum(m => m.QuadraKills),
+            Triples = ExclusiveTriples(matches),
+            Quadras = ExclusiveQuadras(matches),
             Pentas = matches.Sum(m => m.PentaKills),
             SkillshotsHitPerGame = Math.Round(Avg(matches.Where(m => m.SkillshotsHit is not null).Select(m => (double)m.SkillshotsHit!)), 1),
             SkillshotsDodgedPerGame = Math.Round(Avg(matches.Where(m => m.SkillshotsDodged is not null).Select(m => (double)m.SkillshotsDodged!)), 1),
@@ -746,6 +745,22 @@ public static class Reports
     }
 
     /// Distinct game patches (major.minor) across stored matches, oldest first.
+    // The ratio of sums, which is what the K/D/A line beside it implies. A
+    // mean of per-game ratios reads 4.7 next to 7.5 / 4.7 / 7.4 - inflated
+    // by every zero-death game scoring its whole K+A (audit A-N1).
+    internal static double AggregateKda(IEnumerable<Match> matches)
+    {
+        int kills = 0, deaths = 0, assists = 0;
+        foreach (var m in matches) { kills += m.Kills; deaths += m.Deaths; assists += m.Assists; }
+        return Math.Round((kills + assists) / (double)Math.Max(1, deaths), 2);
+    }
+
+    // Riot's multikill counters are inclusive - a penta also ticks quadraKills
+    // and tripleKills - so a tier's own count is its total less the next
+    // tier's (audit A-N2: one penta read as "1 / 1 / 1").
+    internal static int ExclusiveTriples(IEnumerable<Match> matches) => matches.Sum(m => m.TripleKills - m.QuadraKills);
+    internal static int ExclusiveQuadras(IEnumerable<Match> matches) => matches.Sum(m => m.QuadraKills - m.PentaKills);
+
     public static async Task<List<string>> PatchesAsync(LeagueDbContext db, CancellationToken ct)
     {
         var versions = await db.Matches.AsNoTracking().Select(m => m.GameVersion).Distinct().ToListAsync(ct);
