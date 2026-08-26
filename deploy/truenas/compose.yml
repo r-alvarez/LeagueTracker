@@ -33,7 +33,7 @@ x-lt-agent-env: &lt-agent-env
   # Per-agent blocks are keyed by the KEY ID an admin sees on the Machines
   # page (the code beside the machine's name), never by the name the machine
   # chose at enrol - a name is anyone's to type. A block that names no key is
-  # reported in the boot log. Replace the placeholders before merging.
+  # reported in the boot log. The ids: GET /api/admin/agents, keys[].id.
   Agent__Profiles__79f4badd6236__KeepRecordingsAfterPublish: "true"
   # Post-game review is off for a new install (it opens the replay on the
   # player's screen); the two machines whose owners asked for it get it here.
