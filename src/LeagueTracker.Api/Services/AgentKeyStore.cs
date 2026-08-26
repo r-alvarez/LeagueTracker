@@ -39,6 +39,8 @@ public sealed class AgentKeyRecord
     public bool MayActFor(string accountId) => ActsFor.Contains(accountId);
 }
 
+public enum EnrolRefusal { JoinCodeRequired, TooManyPending, TooManyAttempts }
+
 public sealed class AgentsOptions
 {
     // Rollout switch, off since the 2026-08 cutover: an unbound key is refused
@@ -56,10 +58,15 @@ public sealed class AgentKeyStore
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true, Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } };
     private const int MaxPending = 20;
     private const int MaxPendingPerIp = 3;
+    // An unbound pending record whose machine has not re-announced for a day
+    // was never a friend's: it stops counting against the caps and goes.
+    private static readonly TimeSpan PendingLife = TimeSpan.FromHours(24);
+    private const int MaxAttemptsPerIpPerHour = 20;
     private static readonly TimeSpan JoinCodeLife = TimeSpan.FromMinutes(15);
 
     private readonly object _gate = new();
     private readonly List<AgentKeyRecord> _records;
+    private readonly List<(DateTime WhenUtc, string Ip)> _attempts = [];
     private readonly RegistryDatabase _registry;
     private readonly IOptions<AgentsOptions> _options;
     private readonly ILogger<AgentKeyStore> _log;
@@ -94,7 +101,7 @@ public sealed class AgentKeyStore
     // Enrol or re-announce. The same key always maps to the same record, so
     // an agent that restarts before approval just asks again. A valid join
     // code binds a new record (or an unbound old one) to the code's owner.
-    public (AgentKeyRecord Record, bool Created, string? Refusal) Enroll(string key, string name, string machine, string? ip, string? joinCode)
+    public (AgentKeyRecord? Record, bool Created, EnrolRefusal? Refusal) Enroll(string key, string name, string machine, string? ip, string? joinCode)
     {
         var hash = Hash(key);
         lock (_gate)
@@ -113,9 +120,23 @@ public sealed class AgentKeyStore
                 Persist(existing);
                 return (existing, false, null);
             }
-            var pending = _records.Where(r => r.Status is AgentKeyStatus.Pending).ToList();
-            if (pending.Count >= MaxPending) return (null!, false, "too many agents are waiting for approval - ask the owner to clear the list");
-            if (ip is not null && pending.Count(r => r.LastIp == ip) >= MaxPendingPerIp) return (null!, false, "too many pending enrolments from this address");
+            // Only a first announcement gets this far - a waiting machine
+            // re-announces every 20 s on the branch above - so the attempt
+            // budget is for strangers: code guessing and junk records.
+            if (ip is not null && !NoteAttempt(ip)) return (null, false, EnrolRefusal.TooManyAttempts);
+            // Without a join code nobody can approve the record, so it can
+            // only ever be junk - and twenty junk records used to lock every
+            // real enrolment out (audit M-H6). The rollout flag keeps the old
+            // door open; the caps only ever guard that door, because a valid
+            // code is an owner's hand, not a stranger's.
+            if (code is null)
+            {
+                if (!AllowUnbound) return (null, false, EnrolRefusal.JoinCodeRequired);
+                DropStalePending();
+                var pending = _records.Where(r => r.Status is AgentKeyStatus.Pending && !r.IsBound).ToList();
+                if (pending.Count >= MaxPending) return (null, false, EnrolRefusal.TooManyPending);
+                if (ip is not null && pending.Count(r => r.LastIp == ip) >= MaxPendingPerIp) return (null, false, EnrolRefusal.TooManyPending);
+            }
             var record = new AgentKeyRecord
             {
                 Id = Ids.New(),
@@ -135,6 +156,23 @@ public sealed class AgentKeyStore
             _log.LogInformation("Agent enrolment pending: {Name} ({Machine}) from {Ip}{Owner}", record.Name, record.Machine, ip, record.IsBound ? $" for user {record.OwnerUserId}" : " (unbound)");
             return (record, true, null);
         }
+    }
+
+    private bool NoteAttempt(string ip)
+    {
+        var windowStart = DateTime.UtcNow - TimeSpan.FromHours(1);
+        _attempts.RemoveAll(a => a.WhenUtc < windowStart);
+        if (_attempts.Count(a => a.Ip == ip) >= MaxAttemptsPerIpPerHour) return false;
+        _attempts.Add((DateTime.UtcNow, ip));
+        return true;
+    }
+
+    private void DropStalePending()
+    {
+        var stale = DateTime.UtcNow - PendingLife;
+        var gone = _records.Where(r => r.Status is AgentKeyStatus.Pending && !r.IsBound && r.LastSeenUtc < stale).Select(r => r.Id).ToList();
+        foreach (var id in gone) Delete(id);
+        if (gone is { Count: > 0 }) _log.LogInformation("Dropped {Count} unbound pending enrolment(s) not seen for a day", gone.Count);
     }
 
     public bool Decide(string id, AgentKeyStatus status, string? note = null)

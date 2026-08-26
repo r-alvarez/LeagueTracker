@@ -2,8 +2,6 @@ using LeagueTracker.Api.Accounts;
 using LeagueTracker.Api.Auth;
 using LeagueTracker.Api.Registry;
 using LeagueTracker.Api.Riot;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -16,7 +14,7 @@ public class UserStoreInviteTests : IDisposable
 
     private UserStore Store(bool inviteOnly = true)
     {
-        var registry = new RegistryDatabase(Options.Create(new AccountsOptions { DataRoot = _root }), Options.Create(new RiotOptions()), new Env(_root));
+        var registry = new RegistryDatabase(Options.Create(new AccountsOptions { DataRoot = _root }), Options.Create(new RiotOptions()), new TestEnv(_root));
         registry.EnsureCreated(NullLogger.Instance);
         return new UserStore(registry, Options.Create(new AuthOptions { InviteOnly = inviteOnly }), NullLogger<UserStore>.Instance);
     }
@@ -140,13 +138,4 @@ public class UserStoreInviteTests : IDisposable
         Assert.False(users.SetDisplayName("no-such-user", "Someone"));
     }
 
-    private sealed class Env(string root) : IWebHostEnvironment
-    {
-        public string ApplicationName { get; set; } = "tests";
-        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
-        public string ContentRootPath { get; set; } = root;
-        public string EnvironmentName { get; set; } = "Development";
-        public string WebRootPath { get; set; } = root;
-        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
-    }
 }
