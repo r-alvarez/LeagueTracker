@@ -312,6 +312,11 @@ export default function Machines() {
           The agent runs on the gaming PC - no admin rights needed. It records your games, renders the replay clips, publishes to
           YouTube, and updates itself from this site.
         </p>
+        <p className="mut sm-text" style={{ margin: '0 0 10px' }}>
+          It never opens anything on your screen unless you turn on <strong>post-game review</strong> in its setup window - then,
+          about 30 seconds after a game, it opens the replay through your League client, follows your champion through the moments
+          that mattered, and closes it again. Recordings go in their own folder; videos you made yourself are never touched.
+        </p>
         {release ? (
           <div className="filters" style={{ margin: 0 }}>
             {release.installer && (

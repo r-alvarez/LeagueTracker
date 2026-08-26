@@ -122,7 +122,12 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
 3. The installer ends in the setup window (later: Start → LeagueTracker Agent,
    or the tray's Settings…): paste the code (or the `lt2:` line), tracker
    URL `https://league.rjav-tech.co.uk`, role Recorder, optional recordings
-   folder and title prefix. **No token.** **Test connection** enrols the
+   folder and title prefix, and the **post-game review** checkbox - off
+   unless they want the replay opening on their screen after each game
+   (`Agent__Profiles__<key id>__PostGameReview: "true"` turns it on from
+   here for a machine whose owner asked). A folder that already holds
+   videos gets a `LeagueTracker` subfolder; the agent never counts, deletes
+   or publishes a video it did not make. **No token.** **Test connection** enrols the
    machine - it is the owner's from that moment - and says "waiting for
    approval"; **Save**.
 4. Owner: Data & sync → Machines → **Waiting for approval** → **Approve**.
