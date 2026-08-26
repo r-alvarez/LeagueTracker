@@ -113,6 +113,9 @@ public sealed class RenderAgent(AgentConfig config)
                     case "revoked":
                         if (!announcedPending) Log.Error($"{server.ServerUrl}: this machine has been revoked - re-approve it on the Data page (or delete agent.key to enrol as new)");
                         break;
+                    case { } refused when refused.StartsWith("refused:", StringComparison.Ordinal):
+                        if (!announcedPending) Log.Error($"{server.ServerUrl}: enrolment refused - {refused[8..]} (Settings... in the tray menu to enter one)");
+                        break;
                     default:
                         if (!announcedPending) Log.Warn($"{server.ServerUrl}: no enrolment answer - is this a LeagueTracker server?");
                         break;

@@ -343,6 +343,7 @@ public sealed class SetupForm : Form
                 "approved" => $"{url}: OK - this machine is approved{who}{youtube}",
                 "pending" => $"{url}: OK - reachable; this machine is waiting for approval on the site's Data page (Save now, it starts by itself once approved){who}",
                 "revoked" => $"{url}: reachable, but this machine was revoked - ask the owner to re-approve it",
+                { } refused when refused.StartsWith("refused:", StringComparison.Ordinal) => $"{url}: reachable, but it refused this machine - {refused[8..]}",
                 _ => $"{url}: reachable, but it offers no enrolment - is this a LeagueTracker server?",
             });
         }
