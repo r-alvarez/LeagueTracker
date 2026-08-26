@@ -39,7 +39,8 @@ services:
       - ./data-alt:/data
     restart: unless-stopped
 
-  # Third tracked account (TheCosmicPeach#TTV), same isolation rationale.
+  # Third tracked account (a friend's), same isolation rationale. The Riot ID
+  # is theirs, not this file's: ACCOUNT_2_* in .env.
   leaguetracker-ben:
     build: .
     container_name: leaguetracker-ben
@@ -49,8 +50,8 @@ services:
       - "5172:5170"
     environment:
       - TZ=Europe/London
-      - Riot__GameName=TheCosmicPeach
-      - Riot__TagLine=TTV
+      - Riot__GameName=${ACCOUNT_2_GAMENAME:-}
+      - Riot__TagLine=${ACCOUNT_2_TAGLINE:-}
     volumes:
       - ./data-ben:/data
     restart: unless-stopped

@@ -13,7 +13,7 @@ public class LiveGameSnapshotTests
           "gameId": 7954191662, "platformId": "EUW1", "gameQueueConfigId": 400,
           "gameStartTime": {{gameStartTime}}, "gameLength": -96,
           "participants": [
-            { "championId": 901, "teamId": 200, "riotId": "TheCosmicPeach#TTV", "puuid": "{{Me}}" },
+            { "championId": 901, "teamId": 200, "riotId": "Friend#TAG", "puuid": "{{Me}}" },
             { "championId": 10, "teamId": 100, "riotId": "Yunara#Ionia", "puuid": "other" }
           ]
         }
