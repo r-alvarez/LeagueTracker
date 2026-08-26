@@ -26,11 +26,19 @@ public sealed class MatchPollerService(
     /// end is noticed within half a minute rather than a whole poll interval.
     private static readonly TimeSpan LiveGameDelay = TimeSpan.FromSeconds(30);
 
+    // The loop looks up at least this often even when nothing is due: an
+    // account added from the admin page has no due time yet and should not
+    // wait out a whole idle interval before its first pass.
+    private static readonly TimeSpan MaxSleep = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan MinSleep = TimeSpan.FromSeconds(1);
+
     private readonly RiotOptions _options = options.Value;
-    // Per-account pass state: first pass and the retention sweep clock.
+    // Per-account pass state: first pass, the retention and alias clocks, and
+    // when each account is next due.
     private readonly HashSet<string> _passed = [];
     private readonly Dictionary<string, DateTime> _lastRetentionSweepUtc = [];
     private readonly Dictionary<string, DateTime> _lastAliasCheckUtc = [];
+    private readonly Dictionary<string, DateTime> _nextDueUtc = [];
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -39,16 +47,25 @@ public sealed class MatchPollerService(
 
         while (!ct.IsCancellationRequested)
         {
-            // Every account each pass, in turn - one Riot key, one limiter,
-            // so sequential is also the polite order.
+            // Every due account, in turn - one Riot key, one limiter, so
+            // sequential is also the polite order. The cadence is per account:
+            // only the one in a game polls every 30 s. With one shared delay,
+            // one friend's ranked game had every tracked account polled at
+            // that rate, which saturates the dev key at 11 accounts (audit R-N1).
             foreach (var account in accounts.All)
             {
+                if (_nextDueUtc.GetValueOrDefault(account.Id) > DateTime.UtcNow) continue;
+                var live = liveStates.For(account);
                 // A db that could not be opened is retried by the initializer on
                 // its own schedule; polling it would only fail on the first query.
-                if (!initializer.EnsureReady(account)) continue;
+                if (!initializer.EnsureReady(account))
+                {
+                    Reschedule(account, live);
+                    continue;
+                }
                 try
                 {
-                    await RunPassAsync(account, liveStates.For(account), ct);
+                    await RunPassAsync(account, live, ct);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -57,26 +74,47 @@ public sealed class MatchPollerService(
                 catch (RiotApiKeyMissingException)
                 {
                     logger.LogWarning("No Riot API key configured yet - poller idle. Set Riot:ApiKey, RIOT_API_KEY, or Riot:ApiKeyFile.");
+                    RescheduleAll();
                     break;
                 }
                 catch (RiotApiException ex) when (ex.IsAuthFailure)
                 {
                     logger.LogError("Riot API key rejected ({Status}). Refresh the key (personal keys: https://developer.riotgames.com).", ex.StatusCode);
+                    RescheduleAll();
                     break;
                 }
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "Poll pass failed for {Account}", account.Slug);
                 }
+                Reschedule(account, live);
             }
 
-            var anyFast = accounts.All.Any(a => liveStates.For(a).FastCapturePending);
-            var anyLive = accounts.All.Any(a => liveStates.For(a).Current is not null);
-            var delay = anyFast ? FastCaptureDelay
-                : anyLive ? LiveGameDelay
-                : TimeSpan.FromSeconds(Math.Max(30, _options.PollSeconds));
-            await Task.Delay(delay, ct);
+            await Task.Delay(SleepUntil(accounts.All.Select(a => _nextDueUtc.GetValueOrDefault(a.Id)), DateTime.UtcNow), ct);
         }
+    }
+
+    private void Reschedule(Account account, LiveGameState live) =>
+        _nextDueUtc[account.Id] = DateTime.UtcNow + Cadence(live, _options.PollSeconds);
+
+    // One key serves every account: when it is missing or rejected there is
+    // nothing to ask for anyone until the idle cadence comes round.
+    private void RescheduleAll()
+    {
+        foreach (var account in accounts.All) _nextDueUtc[account.Id] = DateTime.UtcNow + IdleDelay(_options.PollSeconds);
+    }
+
+    internal static TimeSpan Cadence(LiveGameState live, int pollSeconds) =>
+        live.FastCapturePending ? FastCaptureDelay
+        : live.Current is not null ? LiveGameDelay
+        : IdleDelay(pollSeconds);
+
+    private static TimeSpan IdleDelay(int pollSeconds) => TimeSpan.FromSeconds(Math.Max(30, pollSeconds));
+
+    internal static TimeSpan SleepUntil(IEnumerable<DateTime> dueUtc, DateTime nowUtc)
+    {
+        var wait = dueUtc.DefaultIfEmpty(nowUtc + MaxSleep).Min() - nowUtc;
+        return wait < MinSleep ? MinSleep : wait > MaxSleep ? MaxSleep : wait;
     }
 
     private async Task RefreshAliasAsync(Account account, string puuid, RiotApiClient riot, CancellationToken ct)
