@@ -897,7 +897,7 @@ render.MapPost("/render/next", async (AccountContext acct, ClipService clips, Fu
     {
         if (!archived.Contains(matchId) || leases.IsLeased($"full:{matchId}")) continue;
         var match = await db.Matches.AsNoTracking().FirstOrDefaultAsync(m => m.Id == matchId, ct);
-        if (match is null || !leases.TryClaim($"full:{matchId}", agent)) continue;
+        if (match is null || !leases.TryClaim($"full:{matchId}", agent, RenderLeaseService.FullGameLease(match.DurationSec))) continue;
         var (myName, myChampion) = await CameraTargetAsync(matchId);
         return Results.Ok(new
         {

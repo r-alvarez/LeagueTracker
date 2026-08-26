@@ -5,16 +5,24 @@ namespace LeagueTracker.Api.Services;
 /// because uploads overwrite by window index.
 public sealed class RenderLeaseService
 {
-    private static readonly TimeSpan LeaseDuration = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan ClipLease = TimeSpan.FromMinutes(30);
     private readonly object _gate = new();
     private readonly Dictionary<string, (DateTime ExpiresUtc, string Agent)> _leases = [];
 
-    public bool TryClaim(string matchId, string agent)
+    // A full-game render plays the replay at speed 1 and then uploads a
+    // multi-GB file, so a fixed 30 minutes ran out on any game past ~28
+    // minutes and the owner's second agent claimed the same job while the
+    // first was still rendering (audit M-N3). Twice the game plus a margin:
+    // a lease that is too long only delays the retry after a crash, and a
+    // restarting agent releases its own leases anyway.
+    public static TimeSpan FullGameLease(double durationSec) => TimeSpan.FromSeconds(durationSec * 2) + TimeSpan.FromMinutes(30);
+
+    public bool TryClaim(string matchId, string agent, TimeSpan? duration = null)
     {
         lock (_gate)
         {
             if (_leases.TryGetValue(matchId, out var lease) && lease.ExpiresUtc > DateTime.UtcNow) return false;
-            _leases[matchId] = (DateTime.UtcNow + LeaseDuration, agent);
+            _leases[matchId] = (DateTime.UtcNow + (duration ?? ClipLease), agent);
             return true;
         }
     }
