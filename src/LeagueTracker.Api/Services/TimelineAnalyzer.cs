@@ -99,7 +99,7 @@ public static class TimelineAnalyzer
 
     // Fight clustering: kills chain into one fight while they stay within this
     // window and range of the cluster's centroid; headcount comes from killers,
-    // victims and anyone interpolated near the centroid mid-fight.
+    // assisters, victims and anyone interpolated near the centroid mid-fight.
     private const int FightChainSec = 15;
     private const int FightChainUnits = 3500;
     private const int FightNearUnits = 2500;
@@ -531,12 +531,17 @@ public static class TimelineAnalyzer
         var cx = cluster.Average(c => c.X);
         var cy = cluster.Average(c => c.Y);
 
-        var involved = new HashSet<int>();
+        // Fighters the kill ledger proves were there: killers, assisters and
+        // victims. The headcount adds anyone interpolated near the centroid on
+        // top - a guess between 60s frames, not evidence.
+        var fighters = new HashSet<int>();
         foreach (var k in cluster)
         {
-            if (k.KillerParticipantId > 0) involved.Add(k.KillerParticipantId);
-            involved.Add(k.VictimParticipantId);
+            if (k.KillerParticipantId > 0) fighters.Add(k.KillerParticipantId);
+            fighters.Add(k.VictimParticipantId);
+            fighters.UnionWith(AssistPids(k));
         }
+        var involved = new HashSet<int>(fighters);
         foreach (var pid in allyPids.Concat(enemyPids).Append(myPid))
         {
             if (involved.Contains(pid)) continue;
@@ -569,33 +574,38 @@ public static class TimelineAnalyzer
             _ => false,
         };
 
-        // The replay camera for this fight: a fighter who outlives it films it
-        // best (a dead champion's camera parks at their fountain). Ally POV
-        // preferred, busiest fighter first; the last-dying victim is the
-        // fallback when nobody survives - an ace still films until the
-        // camera-holder drops. "Outlives it" alone is not enough: a corpse
-        // from the previous fight interpolates as "near the centroid" (dead
-        // bodies don't move) and ranks as a survivor, but its camera sits at
-        // the fountain until the respawn - past the whole fight for a mid-game
-        // death timer (EUW1_7936338594 w16 filmed 39s of aftermath). Fighters
-        // with no death on a possible respawn timer at fight start outrank
-        // recently-dead ones.
+        // The replay camera for this fight: a champion the kill ledger proves
+        // was in it. "Interpolated near the centroid" is not proof - a laner
+        // two screens away qualifies, "survives", wins on participant id and
+        // films an empty jungle - so bystanders are never the camera, not even
+        // ahead of the last victim to fall, who at least films the fight until
+        // they drop. Among proven fighters a survivor films the whole thing
+        // (a dead champion's camera parks at their fountain), so survivors
+        // first, ally POV preferred, busiest first. A survivor who died within
+        // RecentDeathSec of the fight starting may still be on the respawn
+        // timer when it does - camera at the fountain through the pre-roll
+        // (EUW1_7936338594 w16 filmed 39s of aftermath) - so never-dead
+        // survivors outrank them.
         var victims = cluster.Select(k => k.VictimParticipantId).ToHashSet();
         int KillsBy(int pid) => cluster.Count(k => k.KillerParticipantId == pid);
+        int AssistsBy(int pid) => cluster.Count(k => AssistPids(k).Contains(pid));
         bool RecentlyDead(int pid) => allKills.Any(k =>
             k.VictimParticipantId == pid && k.TimeSec < start && k.TimeSec >= start - RecentDeathSec);
-        int? Pick(Func<int, bool> onSide, bool allowRecentlyDead) => involved
+        int? Survivor(Func<int, bool> onSide, bool allowRecentlyDead) => fighters
             .Where(p => onSide(p) && !victims.Contains(p) && (allowRecentlyDead || !RecentlyDead(p)))
-            .OrderByDescending(KillsBy).ThenBy(p => p).Cast<int?>().FirstOrDefault();
+            .OrderByDescending(KillsBy).ThenByDescending(AssistsBy).ThenBy(p => p).Cast<int?>().FirstOrDefault();
         bool Ally(int p) => p == myPid || allyPids.Contains(p);
-        var cameraPid = Pick(Ally, allowRecentlyDead: false)
-            ?? Pick(enemyPids.Contains, allowRecentlyDead: false)
-            ?? Pick(Ally, allowRecentlyDead: true)
-            ?? Pick(enemyPids.Contains, allowRecentlyDead: true)
+        var cameraPid = Survivor(Ally, allowRecentlyDead: false)
+            ?? Survivor(enemyPids.Contains, allowRecentlyDead: false)
+            ?? Survivor(Ally, allowRecentlyDead: true)
+            ?? Survivor(enemyPids.Contains, allowRecentlyDead: true)
             ?? cluster[^1].VictimParticipantId;
 
         return new Fight(start, end, kind, result, participated, allies, enemies, allyKills, enemyKills, goldSwing, converted, cameraPid);
     }
+
+    private static IEnumerable<int> AssistPids(KillEvent kill) =>
+        kill.AssistIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(int.Parse);
 
     /// My team's total-gold lead at the last frame at or before the given second
     /// (clamped to the game's frames - the 60s cadence makes this approximate).

@@ -88,7 +88,8 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
     }
 
     /// The team's skirmishes/teamfights the player was NOT in, filmed from a
-    /// surviving fighter's POV (the analyzer picks who). The player's own
+    /// fighter's POV - a killer or assister who survived it, per the analyzer's
+    /// kill ledger; never a bystander. The player's own
     /// screen never showed these - a replay clip is the only footage of them.
     /// Duels elsewhere stay unclipped: solo trades are noise at review time.
     private async Task<List<ClipWindow>> FightWindowsAsync(Data.Match match, int myPid, int nextIndex, CancellationToken ct)
