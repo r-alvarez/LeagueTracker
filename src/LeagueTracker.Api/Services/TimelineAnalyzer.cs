@@ -103,7 +103,7 @@ public static class TimelineAnalyzer
     private const int FightChainSec = 15;
     private const int FightChainUnits = 3500;
     private const int FightNearUnits = 2500;
-    private const int FightConversionSec = 45;
+    internal const int FightConversionSec = 45;
     // Covers a death timer at any game length plus the clip's pre-roll: a
     // fighter who died within this of the fight starting is either still on
     // their respawn timer when it does, or walking back down a lane while the

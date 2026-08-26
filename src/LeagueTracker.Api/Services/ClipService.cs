@@ -30,6 +30,17 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
     private const int PostRollSec = 10;
     private const int ChainSec = 15;
     private const int ChainUnits = 3500;
+    // Fight clips get more room than the player's own moments: with 3+ a
+    // side the positioning and engage run well ahead of the first kill and
+    // the chase past the last one (2 in 5 teamfight clusters have every kill
+    // inside 5s), and a converted objective is the fight's payoff, so the
+    // clip runs to the take. Fight windows that then overlap fold into one
+    // clip: the analyzer's 15s kill-chain rule splits a long engagement -
+    // an objective fight with a lull, the pick before the teamfight - into
+    // fights that review as one.
+    private const int TeamfightPreRollSec = 30;
+    private const int TeamfightPostRollSec = 20;
+    private const int ObjectiveTailSec = 5;
 
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true, WriteIndented = true };
 
@@ -82,7 +93,7 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
             }
             windows.Add(ToWindow(windows.Count, group, myPid.Value, groupEnd, match.DurationSec));
         }
-        windows.AddRange(await FightWindowsAsync(match, myPid.Value, windows.Count, ct));
+        windows.AddRange(await FightWindowsAsync(match, windows.Count, ct));
 
         return windows is { Count: > 0 } ? new ClipPlan(matchId, match.GameVersion, match.DurationSec, windows) : null;
     }
@@ -92,7 +103,7 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
     /// kill ledger; never a bystander. The player's own
     /// screen never showed these - a replay clip is the only footage of them.
     /// Duels elsewhere stay unclipped: solo trades are noise at review time.
-    private async Task<List<ClipWindow>> FightWindowsAsync(Data.Match match, int myPid, int nextIndex, CancellationToken ct)
+    private async Task<List<ClipWindow>> FightWindowsAsync(Data.Match match, int nextIndex, CancellationToken ct)
     {
         if (match.FightsJson is not { Length: > 0 }) return [];
         List<TimelineAnalyzer.Fight>? fights;
@@ -104,30 +115,81 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         {
             return [];
         }
-        // Significance gate: teamfights always; skirmishes only when 2+ kills
-        // changed hands - a lone jungle gank elsewhere is a marker, not a clip.
-        var wanted = (fights ?? [])
-            .Where(f => !f.Participated && f.CameraParticipantId > 0
-                && (f.Kind is "teamfight" || (f.Kind is "skirmish" && f.AllyKills + f.EnemyKills >= 2)))
-            .ToList();
-        if (wanted is not { Count: > 0 }) return [];
+        if (fights is not { Count: > 0 }) return [];
 
         var fighters = await db.Participants.AsNoTracking()
             .Where(p => p.MatchId == match.Id)
-            .Select(p => new { p.ParticipantId, p.RiotId, p.Champion })
+            .Select(p => new Fighter(p.ParticipantId, p.RiotId, p.Champion))
             .ToListAsync(ct);
+        var objectives = await db.ObjectiveEvents.AsNoTracking()
+            .Where(o => o.MatchId == match.Id)
+            .OrderBy(o => o.TimeSec)
+            .Select(o => new ObjectiveTake(o.TimeSec, o.ByMyTeam))
+            .ToListAsync(ct);
+        return FightWindows(fights, fighters, objectives, match.DurationSec, nextIndex);
+    }
+
+    public sealed record Fighter(int ParticipantId, string RiotId, string Champion);
+
+    public sealed record ObjectiveTake(int TimeSec, bool ByMyTeam);
+
+    private sealed record FightSpan(TimelineAnalyzer.Fight Fight, int StartSec, int EndSec);
+
+    /// The planning half of FightWindowsAsync, free of the db so it can be
+    /// exercised directly. Objectives must be in time order.
+    public static List<ClipWindow> FightWindows(
+        List<TimelineAnalyzer.Fight> fights, List<Fighter> fighters, List<ObjectiveTake> objectives, double durationSec, int nextIndex)
+    {
+        FightSpan SpanOf(TimelineAnalyzer.Fight f)
+        {
+            var (pre, post) = f.Kind is "teamfight" ? (TeamfightPreRollSec, TeamfightPostRollSec) : (PreRollSec, PostRollSec);
+            var end = f.EndSec + post;
+            if (f.ConvertedObjective && objectives.FirstOrDefault(o =>
+                    o.ByMyTeam == (f.Result is "won") && o.TimeSec > f.EndSec
+                    && o.TimeSec <= f.EndSec + TimelineAnalyzer.FightConversionSec) is { } take)
+            {
+                end = Math.Max(end, take.TimeSec + ObjectiveTailSec);
+            }
+            return new FightSpan(f, Math.Max(0, f.StartSec - pre), (int)Math.Min(durationSec, end));
+        }
+
+        // Significance gate: teamfights always; skirmishes only when 2+ kills
+        // changed hands - a lone jungle gank elsewhere is a marker, not a clip.
+        var spans = fights
+            .Where(f => !f.Participated && f.CameraParticipantId > 0
+                && (f.Kind is "teamfight" || (f.Kind is "skirmish" && f.AllyKills + f.EnemyKills >= 2)))
+            .Select(SpanOf)
+            .OrderBy(s => s.StartSec)
+            .ToList();
+
+        var groups = new List<List<FightSpan>>();
+        foreach (var span in spans)
+        {
+            if (groups is { Count: > 0 } && span.StartSec <= groups[^1].Max(s => s.EndSec)) groups[^1].Add(span);
+            else groups.Add([span]);
+        }
 
         var windows = new List<ClipWindow>();
-        foreach (var f in wanted)
+        foreach (var group in groups)
         {
-            var camera = fighters.FirstOrDefault(p => p.ParticipantId == f.CameraParticipantId);
+            // One camera per clip: the biggest fight's, that being the footage the
+            // clip exists for; on a tie the later fight's, whose survivor the
+            // analyzer already vetted against the earlier fight's deaths.
+            var camera = group
+                .OrderByDescending(s => s.Fight.AllyKills + s.Fight.EnemyKills).ThenByDescending(s => s.Fight.StartSec)
+                .Select(s => fighters.FirstOrDefault(p => p.ParticipantId == s.Fight.CameraParticipantId))
+                .FirstOrDefault(p => p is not null);
             if (camera is null) continue;
+            var kind = group.Any(s => s.Fight.Kind is "teamfight") ? "teamfight" : "skirmish";
+            var allyKills = group.Sum(s => s.Fight.AllyKills);
+            var enemyKills = group.Sum(s => s.Fight.EnemyKills);
+            var result = allyKills > enemyKills ? "won" : allyKills < enemyKills ? "lost" : "draw";
             windows.Add(new ClipWindow(
                 nextIndex + windows.Count,
-                Math.Max(0, f.StartSec - PreRollSec),
-                (int)Math.Min(match.DurationSec, f.EndSec + PostRollSec),
-                $"{f.Kind} {f.Allies}v{f.Enemies} · {f.Result}",
-                [new ClipEvent("fight", f.StartSec)],
+                group.Min(s => s.StartSec),
+                group.Max(s => s.EndSec),
+                $"{kind} {group.Max(s => s.Fight.Allies)}v{group.Max(s => s.Fight.Enemies)} · {result}",
+                group.Select(s => new ClipEvent("fight", s.Fight.StartSec)).ToList(),
                 Kind: "fight",
                 CameraName: camera.RiotId is { Length: > 0 } riotId ? riotId.Split('#')[0] : null,
                 CameraChampion: camera.Champion));
