@@ -30,15 +30,19 @@ x-lt-agent-env: &lt-agent-env
   # shared value, and this is decided from here so a self-updating agent on a
   # machine nobody is sitting at never deletes anything by surprise.
   Agent__Profile__KeepRecordingsAfterPublish: "false"
-  Agent__Profiles__RUBEN__KeepRecordingsAfterPublish: "true"
+  # Per-agent blocks are keyed by the KEY ID an admin sees on the Machines
+  # page (the code beside the machine's name), never by the name the machine
+  # chose at enrol - a name is anyone's to type. A block that names no key is
+  # reported in the boot log. Replace the placeholders before merging.
+  Agent__Profiles__<ruben-key-id>__KeepRecordingsAfterPublish: "true"
   # Ben's agent uploads through its own Google Cloud project (own 10k-unit
   # daily quota - videos.insert costs 1,600, so one project is ~6 uploads a
   # day for everyone together) but still to the same channel: the refresh
   # token was minted for that channel with project B's client. Blank = falls
-  # back to the shared values above. Keyed by the agent's enrolled name.
-  Agent__Profiles__DESKTOP-7NMQL3C__YouTubeClientId: ${YT_BEN_CLIENT_ID:-}
-  Agent__Profiles__DESKTOP-7NMQL3C__YouTubeClientSecret: ${YT_BEN_CLIENT_SECRET:-}
-  Agent__Profiles__DESKTOP-7NMQL3C__YouTubeRefreshToken: ${YT_BEN_REFRESH_TOKEN:-}
+  # back to the shared values above.
+  Agent__Profiles__<ben-key-id>__YouTubeClientId: ${YT_BEN_CLIENT_ID:-}
+  Agent__Profiles__<ben-key-id>__YouTubeClientSecret: ${YT_BEN_CLIENT_SECRET:-}
+  Agent__Profiles__<ben-key-id>__YouTubeRefreshToken: ${YT_BEN_REFRESH_TOKEN:-}
   Agent__Profile__RecordQueues: ranked-solo,normal
   # Friends publish to YouTube and send only the small review sidecar; the
   # full multi-GB video is NOT pushed to the NAS (YouTube hosts it). Without

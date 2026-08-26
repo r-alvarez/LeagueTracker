@@ -149,7 +149,11 @@ foreach (var account in app.Services.GetRequiredService<AccountRegistry>().All) 
 app.Services.GetRequiredService<RegistryBootstrap>().Run();
 // Built now, not on the first agent request: its one-time agents.json import
 // belongs in the boot log next to the account import.
-app.Services.GetRequiredService<AgentKeyStore>();
+var agentKeys = app.Services.GetRequiredService<AgentKeyStore>();
+foreach (var orphan in app.Services.GetRequiredService<AgentRegistry>().OverridesForUnknownKeys(agentKeys))
+{
+    app.Logger.LogWarning("Agent__Profiles__{Name}__* matches no enrolled key - overrides are keyed by the key id shown on the Machines page, not by a machine's name", orphan);
+}
 
 // Whether invites can reach Auth0, said once at boot. Without this the only
 // symptom of a missing stack variable is a sentence on the People page after
@@ -390,9 +394,11 @@ app.MapGet("/api/agent/accounts", (AccountRegistry registry, Caller caller, Agen
 // no path prefix of the agent slice ever names a human route again.
 app.MapManagementEndpoints();
 
-// The key that authenticated names the agent, which selects the per-agent
-// overrides (Agent__Profiles__<name>__...).
-app.MapGet("/api/agent/profile", (Caller caller, AgentRegistry agents) => Results.Ok(agents.ProfileFor(caller.Agent!.Name))).RequireAuthorization(Policies.Agent);
+// The key that authenticated selects the per-agent overrides
+// (Agent__Profiles__<key id>__...) - by its id, never by the name it chose
+// at enrol: any user can mint a key and name it after another machine
+// (audit T-N1).
+app.MapGet("/api/agent/profile", (Caller caller, AgentRegistry agents) => Results.Ok(agents.ProfileFor(caller.Agent!.Id))).RequireAuthorization(Policies.Agent);
 
 // The agent's side of "sendlog": the tail of agent.log, filed under the key
 // that authenticated - only an approved agent writes here, only as itself.

@@ -14,17 +14,20 @@ public sealed class AgentOptions
 {
     public Dictionary<string, string> Profile { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// Per-agent overrides layered on Profile, keyed by the agent's enrolled
-    /// name: Agent__Profiles__<name>__YouTubeClientId=... gives one machine
-    /// its own YouTube OAuth client (own Google project = own daily quota)
-    /// while everything else stays shared. Blank values do not override.
+    /// Per-agent overrides layered on Profile, keyed by the agent's key id
+    /// (shown on the Machines page): Agent__Profiles__<id>__YouTubeClientId=...
+    /// gives one machine its own YouTube OAuth client (own Google project =
+    /// own daily quota) while everything else stays shared. Blank values do
+    /// not override. The id and not the enrolled name, because the name is
+    /// whatever the machine typed - any user could enrol a key under another
+    /// machine's name and be handed its credentials (audit T-N1).
     public Dictionary<string, Dictionary<string, string>> Profiles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// The shared profile with the named agent's overrides on top (blank
+    /// The shared profile with the keyed agent's overrides on top (blank
     /// overrides ignored: an unset stack env var must not blank a value).
-    public IReadOnlyDictionary<string, string> ProfileFor(string? agentName)
+    public IReadOnlyDictionary<string, string> ProfileFor(string? agentId)
     {
-        if (agentName is not { Length: > 0 } || !Profiles.TryGetValue(agentName, out var overrides)) return Profile;
+        if (agentId is not { Length: > 0 } || !Profiles.TryGetValue(agentId, out var overrides)) return Profile;
         var merged = new Dictionary<string, string>(Profile, StringComparer.OrdinalIgnoreCase);
         foreach (var (key, value) in overrides)
         {
@@ -82,7 +85,12 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
 
     public IReadOnlyDictionary<string, string> Profile => options.Value.Profile;
 
-    public IReadOnlyDictionary<string, string> ProfileFor(string? agentName) => options.Value.ProfileFor(agentName);
+    public IReadOnlyDictionary<string, string> ProfileFor(string? agentId) => options.Value.ProfileFor(agentId);
+
+    // Override blocks that name no key: a machine name left over from when
+    // overrides were keyed by name, or a typo - either way the operator
+    // wants to hear about it at boot, not when the quota runs out.
+    public IEnumerable<string> OverridesForUnknownKeys(AgentKeyStore keys) => options.Value.Profiles.Keys.Where(id => keys.ById(id) is null);
 
     public string ReleaseDir => options.Value.ReleaseDir is { Length: > 0 } dir ? dir : Path.Combine(DataRootDir, "agent-releases");
 
