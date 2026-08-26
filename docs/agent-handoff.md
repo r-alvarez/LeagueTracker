@@ -49,8 +49,9 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
    - Quota: 10,000 units/day **per Google Cloud project** = ~6 uploads/day
      across everyone sharing that project (`videos.insert` costs 1,600). Two
      ways out, in order: give a busy player's agent its own project via
-     per-agent overrides - `Agent__Profiles__<agent name>__YouTubeClientId /
-     ClientSecret / RefreshToken` on the tracker, blank = shared values; the
+     per-agent overrides - `Agent__Profiles__<key id>__YouTubeClientId /
+     ClientSecret / RefreshToken` on the tracker (the id an admin sees beside
+     the machine on the Machines page - never the name), blank = shared values; the
      refresh token is minted for the *same channel* with the new client
      (`--youtube-auth` with `LT_YOUTUBE_CLIENT_ID/SECRET` set) - and, for a
      product, Google's YouTube API quota-extension audit.
@@ -161,9 +162,9 @@ is up on that box; the gaming PCs are never used for rendering again.
   the end of game 2; if a player says otherwise, ask for their **Log** from
   the Agent access row (the "sendlog" command ships it within a minute).
 - **Recordings are deleted once safe** (YouTube processed + linked), per
-  the tracker profile: shared `KeepRecordingsAfterPublish=false`, `RUBEN`
+  the tracker profile: shared `KeepRecordingsAfterPublish=false`, Ruben's key
   overridden to `true`. A new agent that should keep files gets its own
-  `Agent__Profiles__<name>__KeepRecordingsAfterPublish: "true"` line.
+  `Agent__Profiles__<key id>__KeepRecordingsAfterPublish: "true"` line.
 
 - **Pause** stops new recordings/renders/reviews; an upload in flight
   finishes (it's invisible and stopping it only loses work).

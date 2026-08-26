@@ -176,6 +176,7 @@ export default function Machines() {
                         {k.machine && k.machine !== k.name && <span className="mut sm-text"> · {k.machine}</span>}
                         <span className="mut sm-text"> · {k.role}</span>
                         {k.actsForRiotIds?.length > 0 && <span className="mut sm-text"> · also {k.actsForRiotIds.join(', ')}</span>}
+                        {auth.isAdmin && <span className="mut sm-text" title="Key id - what Agent__Profiles__<id>__* overrides are keyed by"> · <code>{k.id}</code></span>}
                         {!k.bound && <span className="warn-text sm-text"> · not tied to anyone</span>}
                         {k.logs.length > 0 && (
                           <div className="sm-text">
