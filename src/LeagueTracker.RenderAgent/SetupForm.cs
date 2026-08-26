@@ -109,7 +109,7 @@ public sealed class SetupForm : Form
         root.Controls.Add(Card("This machine",
             Fields(
                 ("Role", _role, "Recorder for a player's PC; Renderer for the box that cuts replay clips; Both for one machine doing everything."),
-                ("After each game", _review, "On: about 30 seconds after a game ends (unless you have queued again), the agent opens the replay through your League client, takes the screen for a few minutes, follows your champion through the moments that mattered (F8-F12 to skip or pause) and closes it. Off: nothing opens - the review is on your match page instead."))));
+                ("After each game", _review, "On: about 30 seconds after a game ends (unless you have queued again), the agent opens the replay through your League client, takes the screen for a few minutes, follows your champion through the moments that mattered (F8-F12 to skip or pause) and closes it. Off: nothing opens unless the tracker's owner turned it on for this machine - the review is on your match page either way."))));
         root.Controls.Add(Card("Recordings",
             Fields(
                 ("Recordings folder", RecordingsRow(), "Blank = Videos\\LeagueTracker. Games are 1.5-3 GB each at 1440p60 - pick a drive with room. Work in progress is kept on the system drive automatically."),
@@ -376,7 +376,12 @@ public sealed class SetupForm : Form
         Set("RecordGames", draft.RecordGames);
         Set("RenderReplays", draft.RenderReplays);
         Set("RecordingsDir", draft.RecordingsDir);
-        Set("PostGameReview", draft.PostGameReview);
+        // Ticked is an explicit yes. Unticked leaves it to the tracker's
+        // profile, which is where an owner turns it on for a machine without
+        // touching it - and this window runs in its own process and never
+        // sees that profile, so a written "false" would silently beat it.
+        if (draft.PostGameReview) Set("PostGameReview", true);
+        else settings.Remove("PostGameReview");
         // Only when given: an empty prefix written locally would win over
         // the tracker's default (a written key beats the profile).
         if (draft.RecordNamePrefix is { Length: > 0 }) Set("RecordNamePrefix", draft.RecordNamePrefix);
