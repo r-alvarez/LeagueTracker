@@ -19,6 +19,7 @@ builder.Services.Configure<RiotOptions>(builder.Configuration.GetSection("Riot")
 builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection("Agent"));
 builder.Services.Configure<AccountsOptions>(builder.Configuration.GetSection("Accounts"));
 builder.Services.Configure<AgentsOptions>(builder.Configuration.GetSection("Agents"));
+builder.Services.Configure<ProxyOptions>(builder.Configuration.GetSection("Proxy"));
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth"));
 
 // The global registry: users, the accounts they own, the machines they
@@ -166,15 +167,24 @@ app.Services.GetRequiredService<AgentKeyStore>();
 }
 
 app.UseForwardedHeaders();
-app.Use((http, next) =>
 {
-    if (http.Request.Headers.TryGetValue("CF-Connecting-IP", out var cf)
-        && System.Net.IPAddress.TryParse(cf.FirstOrDefault(), out var client))
+    var trusted = ClientAddress.ParseNetworks(app.Services.GetRequiredService<IOptions<ProxyOptions>>().Value.ClientIpHeaderFrom);
+    var ignoredOnce = 0;
+    app.Use((http, next) =>
     {
-        http.Connection.RemoteIpAddress = client;
-    }
-    return next(http);
-});
+        if (http.Request.Headers.TryGetValue(ClientAddress.CloudflareHeader, out var header))
+        {
+            if (ClientAddress.FromHeader(http.Connection.RemoteIpAddress, header.FirstOrDefault(), trusted) is { } client)
+                http.Connection.RemoteIpAddress = client;
+            // Said once: if the proxy in front does not hand us Cloudflare's
+            // edge address, every enrolment shares the proxy's and the per-IP
+            // cap locks friends out after three - the bug D-H6 fixed.
+            else if (Interlocked.Exchange(ref ignoredOnce, 1) is 0)
+                app.Logger.LogWarning("{Header} from peer {Peer} ignored - not in Proxy:ClientIpHeaderFrom (Cloudflare's ranges by default)", ClientAddress.CloudflareHeader, http.Connection.RemoteIpAddress);
+        }
+        return next(http);
+    });
+}
 app.UseRouting();
 if (app.Environment.IsDevelopment()) app.UseCors();
 // Binding needs the route values (after routing) and must precede
