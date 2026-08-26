@@ -42,6 +42,7 @@ public sealed class AccountInitializer(AccountScopes scopes, ILogger<AccountInit
         ("Matches", "ContestedEpicsTaken", "INTEGER NOT NULL DEFAULT 0"),
         ("Deaths", "EnemyJunglerNear", "INTEGER NULL"),
         ("KillEvents", "AssistIds", "TEXT NOT NULL DEFAULT ''"),
+        ("KillEvents", "DamagePids", "TEXT NOT NULL DEFAULT ''"),
     ];
 
     private sealed class State

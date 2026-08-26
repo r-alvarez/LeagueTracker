@@ -153,11 +153,14 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
             return new FightSpan(f, Math.Max(0, f.StartSec - pre), (int)Math.Min(durationSec, end));
         }
 
-        // Significance gate: teamfights always; skirmishes only when 2+ kills
-        // changed hands - a lone jungle gank elsewhere is a marker, not a clip.
+        // Significance gate: teamfights always; skirmishes when 2+ kills changed
+        // hands or 4+ champions were on the ledger - a lone jungle gank
+        // elsewhere is a marker, not a clip, but a 3-man collapse on a teammate
+        // is footage the player's own screen never had.
         var spans = fights
             .Where(f => !f.Participated && f.CameraParticipantId > 0
-                && (f.Kind is "teamfight" || (f.Kind is "skirmish" && f.AllyKills + f.EnemyKills >= 2)))
+                && (f.Kind is "teamfight"
+                    || (f.Kind is "skirmish" && (f.AllyKills + f.EnemyKills >= 2 || f.Allies + f.Enemies >= 4))))
             .Select(SpanOf)
             .OrderBy(s => s.StartSec)
             .ToList();
