@@ -92,11 +92,13 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
    it with Riot (canonical casing, puuid), creates
    `/mnt/MediaPool/apps/leaguetracker/<GameName>-<TAG>/`, its database, and
    adds it to the poller's round; it lands you on their page
-   (`league.rjav-tech.co.uk/euw/<GameName>-<TAG>/`). Runtime-added accounts
-   are remembered in `/data/accounts.json` (survive redeploys); the three
-   original ones stay in the compose (`Accounts__List__N`) - both sources
-   are fine, config wins on a duplicate. `DELETE /api/accounts/{slug}`
-   untracks a runtime-added one (folder kept).
+   (`league.rjav-tech.co.uk/euw/<GameName>-<TAG>/`). Every account lives in
+   `/data/registry.db` (survives redeploys); the three original ones are
+   also asserted by the compose (`Accounts__List__N`, a friend's Riot ID
+   from the stack env) - config wins on a duplicate. `DELETE
+   /api/accounts/{slug}` untracks a site-added one (folder kept). Where the
+   rest of the state lives, and how to back it up and restore it:
+   `docs/operate.md`.
 2. Cloudflare Access: add their email to the site-wide `league.rjav-tech.co.uk`
    application (that is the outer wall - without it they never reach the
    login button). Auth0: create/invite their user with the same email.
