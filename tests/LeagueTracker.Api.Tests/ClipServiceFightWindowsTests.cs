@@ -85,16 +85,24 @@ public class ClipServiceFightWindowsTests
     }
 
     [Fact]
-    public void Gate_skips_the_players_own_fights_and_single_kill_skirmishes()
+    public void Gate_skips_the_players_own_fights_and_small_single_kill_skirmishes()
     {
         var windows = Plan(
         [
             Fight(300, 300, participated: true),
-            Fight(600, 600, kind: "skirmish", allies: 2, enemies: 2, allyKills: 0, enemyKills: 1),
+            Fight(600, 600, kind: "skirmish", allies: 2, enemies: 1, allyKills: 0, enemyKills: 1),
             Fight(900, 900, kind: "skirmish", allies: 2, enemies: 2, allyKills: 1, enemyKills: 1),
         ]);
 
         Assert.Equal(900, Assert.Single(windows).Events.Single().TimeSec);
+    }
+
+    [Fact]
+    public void Gate_keeps_a_single_kill_collapse_of_four_champions()
+    {
+        var windows = Plan([Fight(600, 600, kind: "skirmish", allies: 1, enemies: 3, allyKills: 0, enemyKills: 1)]);
+
+        Assert.Equal("skirmish 1v3 · lost", Assert.Single(windows).Label);
     }
 
     [Fact]
