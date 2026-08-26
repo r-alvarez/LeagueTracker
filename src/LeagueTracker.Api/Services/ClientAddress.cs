@@ -23,7 +23,10 @@ public static class ClientAddress
 {
     public const string CloudflareHeader = "CF-Connecting-IP";
 
-    public static IReadOnlyList<IPNetwork> ParseNetworks(IEnumerable<string> cidrs) => [.. cidrs.Select(IPNetwork.Parse)];
+    // Blank entries are skipped so a compose line like `${VAR:-}` can exist
+    // unset without taking the boot down.
+    public static IReadOnlyList<IPNetwork> ParseNetworks(IEnumerable<string> cidrs) =>
+        [.. cidrs.Where(cidr => cidr is { Length: > 0 }).Select(cidr => IPNetwork.Parse(cidr.Trim()))];
 
     // Cloudflare's header names the real client only when the request came
     // through Cloudflare. Believed from any peer, a client could choose its

@@ -103,6 +103,13 @@ services:
       # Every agent key belongs to a user; the pre-ownership grace period is
       # over. "true" only if a key ever has to work before it is assigned.
       Agents__AllowUnbound: "false"
+      # Every request reaches this container from Traefik on the frontend
+      # network, so the peer it sees is that network's gateway - never
+      # Cloudflare's edge. CF-Connecting-IP (the real client: the Machines
+      # page's FROM column, the per-address enrolment budget) is believed
+      # from there as well as from Cloudflare's own ranges. The residual
+      # trust is anything that can reach Traefik directly, i.e. the LAN.
+      Proxy__ClientIpHeaderFrom__0: 172.20.0.1/32
       AllowedHosts: league.rjav-tech.co.uk;league-alt.rjav-tech.co.uk;league-ben.rjav-tech.co.uk
       Accounts__DataRoot: /data
       Accounts__Default: ImRA-87166
