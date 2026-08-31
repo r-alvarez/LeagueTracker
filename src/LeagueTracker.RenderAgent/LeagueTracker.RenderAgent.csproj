@@ -35,7 +35,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="ScreenRecorderLib" Version="6.6.0" />
+    <PackageReference Include="ScreenRecorderLib" Version="7.0.0" />
   </ItemGroup>
 
   <!-- ScreenRecorderLib is a mixed-mode (C++/CLI) image: it cannot load out
