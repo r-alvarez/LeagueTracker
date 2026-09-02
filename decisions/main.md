@@ -1810,3 +1810,38 @@ alive?), and after two consecutive dead windows the agent clears the
 wreck - kills the Riot client processes and drops a stale lockfile - so
 the third launch starts clean. Only ever on the auto-launch path, where
 League is known closed and the user idle.
+
+## 2026-09-02 — The late checkpoint follows the length of the game
+
+Motivating game: 43m Viktor vs Vex, 14/4/10, 72k damage - and the contest
+folded to "split". Both "no" answers (lane duel, stewardship) read the lane
+gold diff at the last of the 20/25/30 checkpoints, so for any game past 30
+minutes the review judged minute 30 as the end state. Here 30:00 was the
+single worst point of the game (-2818, right after two 410g-bounty deaths);
+by 42:00 the diff was +381 and the scoreboard closed +1700. Stewardship
+said "deficit grew" about a deficit that was fully recovered.
+
+The analyzer has stored checkpoints every 3 minutes out to 90 since
+2026-07-09; the cap was a choice made when the questions were written a
+week later, with no recorded reason. Fix: the late checkpoint is the last
+one stored at or after minute 20 (LateFromMin). The floor keeps the old
+behaviour for short games: a 16-minute surrender still has no late state
+to judge, and ten minutes past the laning snapshot is not stewardship.
+Verdicts fold on read, so a deploy re-grades with no reprocess - and not
+only games past 30 minutes: the 3-minute checkpoints put the end at 21,
+24 or 27 where the old rule sat at 20 or 25, so most games past 21
+minutes move. Over the 523 stored games of the main account, stewardship
+changed on 61 (36 harsher, 25 kinder) and the lane duel on 8.
+
+Rejected: the final scoreboard gold as the end state. The last minute of a
+won game is the nexus push, where kills and buildings land at once; the
+Viktor game swings from +381 to +1700 in 84 seconds that way, and would
+have tipped the lane duel to "mixed" and the fold to "dominated". One
+minute moving the label three tiers is sensitivity, not signal.
+
+Checked against the same day's Ahri vs Veigar (29m, "lost the contest"):
+the change moves the end from 25 to 27 and the reading gets harsher
+(-1951 to -2758; scoreboard -3498). That game is graded on the whole game
+already - its verdicts come from three deaths to the laner, a flipped
+lead and three flagged deaths, not from a cap.
+
