@@ -66,7 +66,7 @@ public static class TimelineAnalyzer
 
     // Follow-in parameters: a teammate fell within this many seconds before me,
     // within this range of THEIR death spot; "traded" looks ahead this long.
-    private const int FollowWindowSec = 15;
+    internal const int FollowWindowSec = 15;
     private const int FollowNearUnits = 2500;
     private const int FollowTradeAfterSec = 10;
     /// Already this close to the falling teammate (or the fight spot) at the
@@ -391,9 +391,22 @@ public static class TimelineAnalyzer
         _ => pos is { Length: > 0 } ? pos : "?",
     };
 
-    /// Did I walk in right after a teammate fell? Trigger = the most recent ally
-    /// death inside the window; it counts when I died near THEIR death spot -
-    /// but only if I wasn't already standing with them when they fell.
+    // Payment is kills OR objectives: an enemy fell between the trigger and
+    // shortly after my death, or my team banked an epic/structure at the spot
+    // (the take itself may land seconds before the trigger - the collapse
+    // punishes it afterwards). Shared with the review's outnumbered-step
+    // check so "this death bought something" means one thing everywhere.
+    internal static bool DeathTraded(
+        int triggerSec, Death death, List<KillEvent> kills, List<ObjectiveEvent> objectives, Func<int, bool> isEnemy) =>
+        kills.Any(k => isEnemy(k.VictimParticipantId) && k.TimeSec >= triggerSec && k.TimeSec <= death.TimeSec + FollowTradeAfterSec)
+        || objectives.Any(o => o.ByMyTeam
+            && o.TimeSec >= triggerSec - FollowObjectiveBeforeSec
+            && o.TimeSec <= death.TimeSec + FollowTradeAfterSec
+            && Math.Sqrt(Math.Pow(o.X - death.X, 2) + Math.Pow(o.Y - death.Y, 2)) <= FollowObjectiveUnits);
+
+    // Did I walk in right after a teammate fell? Trigger = the most recent ally
+    // death inside the window; it counts when I died near THEIR death spot -
+    // but only if I wasn't already standing with them when they fell.
     private static void EnrichWithFollowIn(
         Death death, List<KillEvent> kills, List<Frame> frames, List<ObjectiveEvent> objectives, MatchParticipantDto me,
         Dictionary<int, string> champByPid, Dictionary<int, int> pidToTeam, Dictionary<int, string> pidToRole)
@@ -424,15 +437,8 @@ public static class TimelineAnalyzer
             if (withTeammate || atTheFight) return;
         }
 
-        // Payment is kills OR objectives: an enemy fell in the window, or my
-        // team banked an epic/structure at the fight (the take itself may land
-        // seconds before the trigger - the collapse punishes it afterwards).
-        var traded = kills.Any(k => pidToTeam.GetValueOrDefault(k.VictimParticipantId) != me.TeamId
-                && k.TimeSec >= trigger.TimeSec && k.TimeSec <= death.TimeSec + FollowTradeAfterSec)
-            || objectives.Any(o => o.ByMyTeam
-                && o.TimeSec >= trigger.TimeSec - FollowObjectiveBeforeSec
-                && o.TimeSec <= death.TimeSec + FollowTradeAfterSec
-                && Math.Sqrt(Math.Pow(o.X - death.X, 2) + Math.Pow(o.Y - death.Y, 2)) <= FollowObjectiveUnits);
+        var traded = DeathTraded(trigger.TimeSec, death, kills, objectives,
+            pid => pidToTeam.GetValueOrDefault(pid) != me.TeamId);
 
         death.FollowTeammate = champByPid.GetValueOrDefault(trigger.VictimParticipantId, "?");
         death.FollowTeammateRole = pidToRole.GetValueOrDefault(trigger.VictimParticipantId, "?");

@@ -1845,3 +1845,21 @@ the change moves the end from 25 to 27 and the reading gets harsher
 already - its verdicts come from three deaths to the laner, a flipped
 lead and three flagged deaths, not from a cap.
 
+## 2026-09-02 addendum — outnumbered steps get the follow-in payment test
+
+Same day, Ahri vs Veigar (29m): Discipline said "no" on three flagged
+deaths, one of them a 2v4 step under the enemy base at 21:33 - the base
+tower fell 13 seconds later and the inhibitor 18. A follow-in that pays
+(an enemy fell, or my team banked a building at the spot) has been "a
+trade, not a stepping error" since the follow-in column existed; an
+outnumbered step that paid got no such credit. Same test now, one shared
+predicate (TimelineAnalyzer.DeathTraded): the trigger is the step itself,
+taken as 15s before the death - the same width as a follow-in window.
+Traded outnumbered steps show on the card and stay out of the flagged
+count.
+
+Whether that game flips is not decidable from the export: the predicate
+needs the building position and the enemy kill events, and the 3500-unit
+reach covers the mid inhibitor tower from that spot but not the bot one.
+Even if it does, Discipline lands on "mixed" and the contest on "split" -
+the lead flip against Veigar is real.

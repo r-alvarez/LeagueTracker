@@ -633,6 +633,7 @@ export interface MatchReview {
       followInsTraded: number
       fogPicks: number
       outnumbered: number
+      outnumberedTraded: number
       withTeam: number
       flagged: number
       fightsStepped: number

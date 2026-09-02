@@ -156,6 +156,7 @@ export default function ReviewCard({ matchId }: { matchId: string }) {
                   {disc.detail.followInsTraded > 0 && <span>{disc.detail.followInsTraded} follow-in, traded · </span>}
                   {disc.detail.fogPicks > 0 && <span className="loss">{disc.detail.fogPicks} picked from fog · </span>}
                   {disc.detail.outnumbered > 0 && <span className="loss">{disc.detail.outnumbered} stepped outnumbered · </span>}
+                  {disc.detail.outnumberedTraded > 0 && <span>{disc.detail.outnumberedTraded} stepped outnumbered, traded · </span>}
                   {disc.detail.withTeam} with the team</>
               )}
             </li>
