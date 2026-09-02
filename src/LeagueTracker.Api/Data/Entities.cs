@@ -111,6 +111,8 @@ public sealed class Match
     public int? Level6LeadSec { get; set; }
     public int? Level11LeadSec { get; set; }
     public int? Level16LeadSec { get; set; }
+    // "0,45,98,..." = seconds at which I reached levels 1..n; empty until reprocessed.
+    public string LevelSecs { get; set; } = "";
     public int FriendlyEpicObjectives { get; set; }
     public int ObjectivesPresentFor { get; set; }
     /// Friendly epics taken with the enemy jungler within 2500 units - secures
