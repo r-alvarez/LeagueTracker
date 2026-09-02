@@ -3,13 +3,14 @@ import { account } from '../account'
 import { auth } from '../auth'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
-import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Participant, Perks, TeamObjectiveCounts, VodMoment, VodStatus } from '../types'
+import type { ClipInfo, DeathEvent, FullGameStatus, MapMoment, MatchDetail as Detail, MatchTrack, Participant, Perks, TeamObjectiveCounts, VodMoment, VodStatus } from '../types'
 import { sourceLabel, unitKind, useAbilityLabels, useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
 import { ItemIcon, PerkIcon, UnitGlyph } from '../components/GameIcons'
 import GameplanCard from '../components/GameplanCard'
 import ReviewCard from '../components/ReviewCard'
 import VodReview from '../components/VodReview'
+import MapReplay from '../components/MapReplay'
 import { RelTime, tierClass } from '../components/Stats'
 
 type Tab = 'general' | 'details' | 'runes' | 'timeline'
@@ -550,6 +551,8 @@ export default function MatchDetail() {
   const [clips, setClips] = useState<ClipInfo[]>([])
   const [fullGame, setFullGame] = useState<FullGameStatus | null>(null)
   const [vod, setVod] = useState<VodStatus | null>(null)
+  const [track, setTrack] = useState<MatchTrack | null>(null)
+  const [mapJump, setMapJump] = useState<MapMoment | null>(null)
   const canManage = auth.owns(account.current.id)
   const [recapAt, setRecapAt] = useState<number | null>(null)
   const clipRefs = useRef<Record<number, HTMLVideoElement | null>>({})
@@ -560,6 +563,7 @@ export default function MatchDetail() {
     api.clips(id).then(setClips).catch(() => setClips([]))
     api.fullGameStatus(id).then(setFullGame).catch(() => setFullGame(null))
     api.vodStatus(id).then(setVod).catch(() => setVod(null))
+    api.track(id).then(setTrack).catch(() => setTrack(null))
   }, [id])
 
   const playMoment = (timeSec: number) => {
@@ -603,6 +607,31 @@ export default function MatchDetail() {
         timeSec: f.startSec,
         label: `${f.kind} ${f.allies}v${f.enemies} · ${f.result}${f.convertedObjective ? ' · converted' : ''}${f.participated ? '' : ' · without you'}`,
         tone: (f.result === 'won' ? 'win' : f.result === 'lost' ? 'loss' : 'neutral') as VodMoment['tone'],
+      })),
+  ].sort((a, b) => a.timeSec - b.timeSec)
+  // The map's index: fights (the ones without the player flagged, not
+  // reordered), the player's kills and deaths, and the epic objectives.
+  // Towers stay out - a dozen "tower" chips would bury the fights.
+  const mapMoments: MapMoment[] = [
+    ...(detail.fights ?? [])
+      .filter(f => f.kind !== 'duel')
+      .map(f => ({
+        kind: 'fight' as const,
+        timeSec: f.startSec,
+        endSec: f.endSec,
+        label: `${f.kind} ${f.allies}v${f.enemies} · ${f.result}${f.convertedObjective ? ' · converted' : ''}`,
+        tone: (f.result === 'won' ? 'win' : f.result === 'lost' ? 'loss' : 'neutral') as MapMoment['tone'],
+        withoutMe: !f.participated,
+      })),
+    ...kills.map(k => ({ kind: 'kill' as const, timeSec: k.timeSec, label: `you killed ${k.victim ?? 'someone'}`, tone: 'win' as const })),
+    ...deaths.map(d => ({ kind: 'death' as const, timeSec: d.timeSec, label: `died to ${d.killedBy}`, tone: 'loss' as const })),
+    ...detail.objectives
+      .filter(o => o.kind !== 'TOWER' && o.kind !== 'INHIBITOR')
+      .map(o => ({
+        kind: 'objective' as const,
+        timeSec: o.timeSec,
+        label: `${objectiveLabel(o.kind, o.subKind)} · ${o.byMyTeam ? 'my team' : 'enemy'}`,
+        tone: (o.byMyTeam ? 'win' : 'loss') as MapMoment['tone'],
       })),
   ].sort((a, b) => a.timeSec - b.timeSec)
 
@@ -697,6 +726,15 @@ export default function MatchDetail() {
       )}
 
       <VodReview matchId={m.id} vod={vod} onChange={setVod} moments={vodMoments} deaths={deaths} />
+
+      {track && track.frames.length > 0 && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <h2>
+            Map <span className="mut" style={{ fontWeight: 400 }}>— where everyone was, from Riot's timeline; the fights your footage never saw are here too</span>
+          </h2>
+          <MapReplay track={track} moments={mapMoments} jumpTo={mapJump} />
+        </div>
+      )}
 
       {/* The replay re-render is the fallback for matches with no live
           recording (older games, other machines) - when recording data
@@ -877,6 +915,10 @@ export default function MatchDetail() {
                             <button className="action" style={{ marginLeft: 6, padding: '0 6px' }}
                               title="Watch this death" onClick={e => { e.stopPropagation(); playMoment(d.timeSec) }}>▶</button>
                           )}
+                          {track && (
+                            <button className="action" style={{ marginLeft: 6, padding: '0 6px' }} title="Show this death on the map"
+                              onClick={e => { e.stopPropagation(); setMapJump({ kind: 'death', timeSec: d.timeSec, label: `died to ${d.killedBy}`, tone: 'loss' }) }}>map</button>
+                          )}
                         </td>
                         <td className="mut">{d.zone || '—'}</td>
                         <td>
@@ -932,7 +974,13 @@ export default function MatchDetail() {
                   <tbody>
                     {detail.objectives.map(o => (
                       <tr key={`${o.timeSec}-${o.kind}`} className={o.byMyTeam ? 'obj-row-win' : 'obj-row-loss'}>
-                        <td style={{ whiteSpace: 'nowrap' }}>{o.gameTime}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          {o.gameTime}
+                          {track && o.kind !== 'TOWER' && o.kind !== 'INHIBITOR' && (
+                            <button className="action" style={{ marginLeft: 6, padding: '0 6px' }} title="Show this objective on the map"
+                              onClick={() => setMapJump({ kind: 'objective', timeSec: o.timeSec, label: objectiveLabel(o.kind, o.subKind), tone: o.byMyTeam ? 'win' : 'loss' })}>map</button>
+                          )}
+                        </td>
                         <td><span className={`obj-kind ${OBJ_KIND_CLASS[o.kind] ?? ''}`}>{objectiveLabel(o.kind, o.subKind)}</span></td>
                         <td className={o.byMyTeam ? 'win' : 'loss'}>{o.byMyTeam ? 'My team' : 'Enemy'}</td>
                         <td>{o.killer
