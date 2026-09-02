@@ -160,7 +160,7 @@ public sealed class ReviewService(LeagueDbContext db)
             result[m.Id] = new Review(
                 LaneDuel(m, me, opp, matchDeaths, matchKills, matchObjectives, fights, allyPids, matchPositions),
                 FightsVerdict(fights, matchDeaths, matchObjectives, me),
-                Discipline(matchDeaths, matchObjectives, matchPositions, allyPids, me, fights),
+                Discipline(matchDeaths, matchKills, matchObjectives, matchPositions, allyPids, me, fights),
                 Stewardship(m));
         }
         return result;
@@ -376,7 +376,7 @@ public sealed class ReviewService(LeagueDbContext db)
     // --- Q3: did I account for the enemy before I stepped? --------------------------
 
     private static Verdicted Discipline(
-        List<Death> deaths, List<ObjectiveEvent> objectives,
+        List<Death> deaths, List<KillEvent> kills, List<ObjectiveEvent> objectives,
         List<PositionSample> positions, HashSet<int> allyPids, MatchParticipant? me, List<FightDto> fights)
     {
         // A follow-in that paid (an enemy fell, or an objective was banked at
@@ -386,19 +386,27 @@ public sealed class ReviewService(LeagueDbContext db)
         // Fog picks (nobody visible near you, post-laning, outside a committed
         // fight) and outnumbered steps (they had you by 2+ bodies) both charge
         // here: whether the enemy was accounted for is exactly this question.
+        // An outnumbered step gets the same payment test as a follow-in, with
+        // the step itself as the trigger: dying 2v4 under the inhibitor your
+        // team then takes is a trade, not a blind step.
         var ganked = 0;
         var followIns = 0;
         var followInsTraded = 0;
         var fogPicks = 0;
         var outnumbered = 0;
+        var outnumberedTraded = 0;
         var withTeam = 0;
+        bool IsEnemy(int pid) => !allyPids.Contains(pid) && pid != me?.ParticipantId;
         foreach (var d in deaths)
         {
+            var steppedOutnumbered = d is { EnemiesNearDeath: { } e, AlliesNearDeath: { } a } && e >= a + 2;
             if (d.EnemyJunglerNear is true && d.TimeSec < LaneEndSec) ganked++;
             else if (d.FollowTeammate is not null && d.FollowPureLoss is false) followInsTraded++;
             else if (d.FollowTeammate is not null) followIns++;
             else if (d is { EnemiesNearDeath: 0 } && d.TimeSec >= LaneEndSec && !InCommittedFight(fights, d.TimeSec)) fogPicks++;
-            else if (d is { EnemiesNearDeath: { } e, AlliesNearDeath: { } a } && e >= a + 2) outnumbered++;
+            else if (steppedOutnumbered
+                && TimelineAnalyzer.DeathTraded(d.TimeSec - TimelineAnalyzer.FollowWindowSec, d, kills, objectives, IsEnemy)) outnumberedTraded++;
+            else if (steppedOutnumbered) outnumbered++;
             else withTeam++;
         }
 
@@ -450,6 +458,7 @@ public sealed class ReviewService(LeagueDbContext db)
             FollowInsTraded = followInsTraded,
             FogPicks = fogPicks,
             Outnumbered = outnumbered,
+            OutnumberedTraded = outnumberedTraded,
             WithTeam = withTeam,
             Flagged = bad,
             FightsStepped = fightsStepped,
