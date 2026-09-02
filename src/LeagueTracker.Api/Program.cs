@@ -63,6 +63,7 @@ builder.Services.AddScoped<ReplayArchiveService>();
 builder.Services.AddScoped<ClipService>();
 builder.Services.AddScoped<FullGameService>();
 builder.Services.AddScoped<TimelineSeriesService>();
+builder.Services.AddScoped<MatchTrackService>();
 builder.Services.AddScoped<LensService>();
 builder.Services.AddScoped<FundamentalsService>();
 builder.Services.AddScoped<ReviewService>();
@@ -1165,6 +1166,10 @@ read.MapGet("/analytics/summary", async (LeagueDbContext db, int lastN = 20, Can
 // Per-player cumulative curves from the raw timeline (gold/cs/damage/xp).
 read.MapGet("/matches/{id}/series", async (string id, TimelineSeriesService series, CancellationToken ct) =>
     await series.GetAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+
+// The map replay's data (positions per frame, kill and objective ledgers).
+read.MapGet("/matches/{id}/track", async (string id, MatchTrackService track, CancellationToken ct) =>
+    await track.GetAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent());
 
 // The Lens: coaching scores for the recent window vs the player's own history,
 // optionally scoped to one role (TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY).
