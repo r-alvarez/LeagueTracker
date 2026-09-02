@@ -268,6 +268,12 @@ export function useItemCatalog(): Array<{ id: number; name: string; gold: number
     : [], [assets])
 }
 
+// Summoner's Rift's minimap at the patch the icons come from.
+export function useMinimapUrl(): string | null {
+  const assets = useAssets()
+  return assets?.version ? `https://ddragon.leagueoflegends.com/cdn/${assets.version}/img/map/map11.png` : null
+}
+
 export function useLoadoutIcons(): {
   item: (id: number) => string | null
   itemInfo: (id: number) => ItemInfo | null

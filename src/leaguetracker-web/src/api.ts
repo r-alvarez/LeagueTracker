@@ -1,6 +1,6 @@
 import { account } from './account'
 import { csrfHeaders } from './auth'
-import type { AdminUsers, AgentKey, AnalyticsSummary, BuildVersion, ClaimInfo, InviteResult, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, Gameplan, GameplanAdherence, GameplanImportResult, GameplanSummary, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchGameplan, MatchPage, MatchReview, ReferencePoint, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
+import type { AdminUsers, AgentKey, AnalyticsSummary, BuildVersion, ClaimInfo, InviteResult, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, Gameplan, GameplanAdherence, GameplanImportResult, GameplanSummary, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchGameplan, MatchPage, MatchReview, MatchTrack, ReferencePoint, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
 
 /// Every API call goes through here: account-scoped URL rewriting, the
 /// session cookie, and the CSRF header on writes. Bare fetch() elsewhere is
@@ -46,6 +46,12 @@ export const api = {
   },
   matchFacets: () => get<MatchFacets>('/api/matches/facets'),
   match: (id: string) => get<MatchDetail>(`/api/matches/${id}`),
+  track: async (id: string): Promise<MatchTrack | null> => {
+    const r = await apiFetch(`/api/matches/${id}/track`)
+    if (r.status === 204) return null   // no position samples for this game
+    if (!r.ok) throw new Error(`/api/matches/${id}/track -> HTTP ${r.status}`)
+    return r.json()
+  },
   review: async (id: string): Promise<MatchReview | null> => {
     const r = await apiFetch(`/api/matches/${id}/review`)
     if (r.status === 204) return null   // no timeline for this game

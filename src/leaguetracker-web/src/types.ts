@@ -462,6 +462,33 @@ export interface VodMoment {
   tone?: 'win' | 'loss' | 'neutral'
 }
 
+/** A window the map replay can open: a fight spans its cluster, everything
+ *  else is one instant. withoutMe marks the fights the player's own footage
+ *  never saw - the map's reason to exist. */
+export interface MapMoment {
+  kind: 'fight' | 'kill' | 'death' | 'objective'
+  timeSec: number
+  endSec?: number
+  label: string
+  tone?: 'win' | 'loss' | 'neutral'
+  withoutMe?: boolean
+}
+
+export interface TrackParticipant { pid: number; champion: string; teamId: number; isMe: boolean; isAlly: boolean; position: string }
+/** p is indexed by participant id - 1; null where the frame had no sample. */
+export interface TrackFrame { t: number; p: ([number, number] | null)[] }
+export interface TrackKill { t: number; killer: number; victim: number; assists: number[]; damage: number[]; x: number; y: number }
+export interface TrackObjective { t: number; kind: string; subKind: string; byMyTeam: boolean; killer: number; x: number; y: number }
+export interface MatchTrack {
+  matchId: string
+  durationSec: number
+  myPid: number
+  participants: TrackParticipant[]
+  frames: TrackFrame[]
+  kills: TrackKill[]
+  objectives: TrackObjective[]
+}
+
 export interface ClipInfo {
   index: number
   label: string
