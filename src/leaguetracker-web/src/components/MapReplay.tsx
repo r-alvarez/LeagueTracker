@@ -37,8 +37,12 @@ export default function MapReplay({ track, moments, jumpTo }: { track: MatchTrac
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(SPEEDS[0])
   const root = useRef<HTMLDivElement>(null)
+  // Until someone plays or scrubs, the map is parked on the moment; the
+  // first Play then runs the approach, not the ten seconds after it.
+  const resting = useRef(true)
 
   const open = useCallback((idx: number) => {
+    resting.current = false
     setSelected(idx)
     setT(windowFor(moments[idx], track.durationSec).start)
     setPlaying(true)
@@ -131,12 +135,13 @@ export default function MapReplay({ track, moments, jumpTo }: { track: MatchTrac
 
         <div className="map-controls">
           <button type="button" className="action primary" onClick={() => {
-            if (!playing && t >= win.end - 0.01) setT(win.start)
+            if (!playing && (resting.current || t >= win.end - 0.01)) setT(win.start)
+            resting.current = false
             setPlaying(p => !p)
           }}>{playing ? 'Pause' : 'Play'}</button>
           <span className="map-clock">{clock(t)}</span>
           <input type="range" min={win.start} max={win.end} step={0.25} value={t} aria-label="Game clock"
-            onChange={e => { setPlaying(false); setT(Number(e.target.value)) }} />
+            onChange={e => { resting.current = false; setPlaying(false); setT(Number(e.target.value)) }} />
           <span className="map-speeds">
             {SPEEDS.map(s => (
               <button key={s} type="button" className={`action${speed === s ? ' primary' : ''}`} onClick={() => setSpeed(s)}>{s}×</button>
