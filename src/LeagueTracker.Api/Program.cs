@@ -449,7 +449,24 @@ app.MapGet("/api/agent/release/{file}", (string file, AgentRegistry agents) =>
         ? Results.File(path, file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? "application/vnd.microsoft.portable-executable" : "application/zip", file, enableRangeProcessing: true)
         : Results.NotFound());
 
-app.MapFallbackToFile("index.html", staticFiles);
+// Not MapFallbackToFile: it answered unknown /api paths and missing files
+// with index.html and a 200, so an API client got HTML and an old hashed
+// chunk reference was parsed as a script.
+var spaIndex = app.Environment.WebRootFileProvider.GetFileInfo("index.html");
+var assetExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+{
+    ".js", ".mjs", ".css", ".map", ".json", ".txt", ".xml", ".ico", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp",
+    ".woff", ".woff2", ".ttf", ".otf", ".webmanifest", ".mp4", ".webm", ".zip", ".exe",
+};
+app.MapFallback((HttpContext http) =>
+{
+    var path = http.Request.Path;
+    if (path.StartsWithSegments("/api")) return Results.Problem($"No API route at {path}", statusCode: 404, title: "Not found");
+    var looksLikeFile = Path.GetExtension(path.Value ?? "") is { Length: > 1 } extension && assetExtensions.Contains(extension);
+    if (looksLikeFile || spaIndex.PhysicalPath is null) return Results.NotFound();
+    http.Response.Headers.CacheControl = "no-cache";
+    return Results.File(spaIndex.PhysicalPath, "text/html");
+});
 
 app.Run();
 
