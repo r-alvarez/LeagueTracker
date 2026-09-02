@@ -40,6 +40,7 @@ public sealed class AccountInitializer(AccountScopes scopes, ILogger<AccountInit
         ("Matches", "TeamGoldDiff15", "INTEGER NULL"),
         ("Matches", "TeamGoldDiff20", "INTEGER NULL"),
         ("Matches", "ContestedEpicsTaken", "INTEGER NOT NULL DEFAULT 0"),
+        ("Matches", "LevelSecs", "TEXT NOT NULL DEFAULT ''"),
         ("Deaths", "EnemyJunglerNear", "INTEGER NULL"),
         ("KillEvents", "AssistIds", "TEXT NOT NULL DEFAULT ''"),
         ("KillEvents", "DamagePids", "TEXT NOT NULL DEFAULT ''"),

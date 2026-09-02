@@ -39,6 +39,8 @@ public sealed class TimelineAnalysis
     public int? Level6LeadSec { get; init; }
     public int? Level11LeadSec { get; init; }
     public int? Level16LeadSec { get; init; }
+    // "0,45,98,..." = seconds at which I reached levels 1..n.
+    public string LevelSecs { get; init; } = "";
     // Objective presence: friendly epic objectives I was actually near when taken.
     public int FriendlyEpicObjectives { get; init; }
     public int ObjectivesPresentFor { get; init; }
@@ -147,6 +149,7 @@ public static class TimelineAnalyzer
         var itemEvents = new List<ItemEvent>();
         var deaths = new List<Death>();
         var skillOrder = new List<int>();
+        (int Slot, long Ms)? lastSkillUp = null;
         var levelAt = new Dictionary<(int Pid, int Level), int>();   // when each player reached each level
         var itemLog = new List<ItemLogEntry>();        // mine + lane opponent's, for inventory replay
         var myWardSecs = new List<(int Sec, string Type)>();         // wards I placed
@@ -165,7 +168,10 @@ public static class TimelineAnalyzer
                         if (ev.TryGetProperty("participantId", out var sp) && sp.GetInt32() == me.ParticipantId
                             && ev.TryGetProperty("skillSlot", out var slot))
                         {
-                            skillOrder.Add(slot.GetInt32());
+                            // Exact duplicates since patch 15.17 (developer-relations #1100).
+                            var skillUp = (Slot: slot.GetInt32(), Ms: ev.GetProperty("timestamp").GetInt64());
+                            if (lastSkillUp != skillUp) skillOrder.Add(skillUp.Slot);
+                            lastSkillUp = skillUp;
                         }
                         break;
                     case "LEVEL_UP":
@@ -267,6 +273,13 @@ public static class TimelineAnalyzer
                 ? theirsSec - mineSec
                 : null;
         var firstToLevel2 = LevelLead(2) is { } l2 ? l2 > 0 : (bool?)null;
+
+        // Stops at the first level never reached, so the index is the level.
+        var myLevelSecs = new List<int> { 0 };
+        for (var level = 2; levelAt.TryGetValue((me.ParticipantId, level), out var reachedSec); level++)
+        {
+            myLevelSecs.Add(reachedSec);
+        }
 
         // Ward cadence (excludes the auto-undo/placed-then-replaced noise by just
         // taking earliest placements; blue trinket is a sweeper, not vision).
@@ -377,6 +390,7 @@ public static class TimelineAnalyzer
             Level6LeadSec = LevelLead(6),
             Level11LeadSec = LevelLead(11),
             Level16LeadSec = LevelLead(16),
+            LevelSecs = string.Join(',', myLevelSecs),
             FriendlyEpicObjectives = friendlyEpics.Count,
             ObjectivesPresentFor = objectivesPresentFor,
             ContestedEpicsTaken = contestedEpicsTaken,

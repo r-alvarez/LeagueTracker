@@ -167,6 +167,7 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
         match.Level6LeadSec = analysis.Level6LeadSec;
         match.Level11LeadSec = analysis.Level11LeadSec;
         match.Level16LeadSec = analysis.Level16LeadSec;
+        match.LevelSecs = analysis.LevelSecs;
         match.FriendlyEpicObjectives = analysis.FriendlyEpicObjectives;
         match.ObjectivesPresentFor = analysis.ObjectivesPresentFor;
         match.ContestedEpicsTaken = analysis.ContestedEpicsTaken;
