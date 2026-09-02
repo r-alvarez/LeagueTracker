@@ -12,6 +12,7 @@ import MatchDetail from './pages/MatchDetail'
 import DataPage from './pages/DataPage'
 import Coach from './pages/Coach'
 import Fundamentals from './pages/Fundamentals'
+import Gameplans from './pages/Gameplans'
 import Machines from './pages/Machines'
 import Admin from './pages/Admin'
 import LiveGameBanner from './components/LiveGameBanner'
@@ -64,6 +65,7 @@ export default function App() {
         <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>Dashboard</NavLink>
         <NavLink to="/coach" className={({ isActive }) => (isActive ? 'active' : '')}>Coach</NavLink>
         <NavLink to="/fundamentals" className={({ isActive }) => (isActive ? 'active' : '')}>Fundamentals</NavLink>
+        <NavLink to="/gameplans" className={({ isActive }) => (isActive ? 'active' : '')}>Gameplans</NavLink>
         <NavLink to="/matches" className={({ isActive }) => (isActive ? 'active' : '')}>Matches</NavLink>
         <NavLink to="/data" className={({ isActive }) => (isActive ? 'active' : '')}>Data & sync</NavLink>
       </nav>
@@ -81,6 +83,7 @@ export default function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/coach" element={<Coach />} />
         <Route path="/fundamentals" element={<Fundamentals />} />
+        <Route path="/gameplans" element={<Gameplans />} />
         <Route path="/matches" element={<Matches />} />
         <Route path="/matches/:id" element={<MatchDetail />} />
         <Route path="/data" element={<DataPage />} />

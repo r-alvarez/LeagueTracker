@@ -852,3 +852,58 @@ export interface StopLoss {
   sessionActive: boolean
   nextGame: Array<{ afterLosses: number; games: number; winRate: number | null }>
 }
+
+// --- Gameplans: per-champion reference points and how each game met them ---
+
+export type GameplanPhase = 'early' | 'mid' | 'late'
+/** met/missed/na come from the player or a rule; pending = row predates LevelSecs (reprocess); unrated = nobody has said. */
+export type PointStatus = 'met' | 'missed' | 'na' | 'pending' | 'unrated'
+export type SelfStatus = 'met' | 'missed' | 'na'
+
+export interface RuleSpec { kind: string; params: Record<string, number> }
+
+export interface ReferencePoint {
+  id: string
+  phase: GameplanPhase
+  text: string
+  rule: RuleSpec | null
+}
+
+export interface Gameplan {
+  champion: string
+  points: ReferencePoint[]
+  updatedUtc: string
+}
+
+export interface GameplanSummary { champion: string; points: number; updatedUtc: string }
+
+export interface PointRating { status: SelfStatus; note: string | null; ratedUtc: string }
+
+export interface PointEvaluation {
+  id: string
+  phase: GameplanPhase
+  text: string
+  rule: RuleSpec | null
+  auto: { status: PointStatus; detail: string } | null
+  self: PointRating | null
+  status: PointStatus
+}
+
+export interface MatchGameplan {
+  matchId: string
+  champion: string
+  hasPlan: boolean
+  points: PointEvaluation[]
+  summary: Partial<Record<PointStatus, number>>
+}
+
+export interface GameplanAdherence {
+  champion: string
+  games: Array<{ id: string; win: boolean; gameEndUtc: string; summary: Partial<Record<PointStatus, number>> }>
+  points: Array<ReferencePoint & {
+    met: number; missed: number; na: number; pending: number; unrated: number
+    /** Wins among the met / missed games - "does this point travel with winning?", context not verdict. */
+    winsWhenMet: number; winsWhenMissed: number
+    recent: Array<{ matchId: string; status: PointStatus }>
+  }>
+}

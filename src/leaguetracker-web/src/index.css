@@ -1682,8 +1682,9 @@ a.signin-cta { display: block; }
 .claim-box { display: flex; gap: 14px; align-items: flex-start; }
 .claim-icon { border-radius: 10px; border: 2px solid var(--accent); flex: 0 0 auto; }
 
-/* Compact per-row actions in any data table (machines, people, accounts). */
-table.data .sm-action { font-size: 12px; padding: 3px 9px; }
+/* Compact per-row actions: data tables (machines, people, accounts) and the
+   gameplan rows, which are cards, not tables. */
+.action.sm-action { font-size: 12px; padding: 3px 9px; }
 table.data td.actions { text-align: right; }
 table.data td.actions .action + .action { margin-left: 6px; }
 table.data .badge.tag { margin-left: 8px; font-size: 10px; padding: 1px 6px; text-transform: uppercase; letter-spacing: 0.04em; vertical-align: 1px; }
@@ -1700,3 +1701,85 @@ table.agent-access tr.agent-detail-row td { padding-top: 0; white-space: normal;
 .vod-pending { text-align: center; padding: 24px; line-height: 1.5; }
 .vod-pending strong { color: var(--ink); }
 table.agent-access tr.agent-detail-row:hover td { background: transparent; }
+
+/* ============================================================================
+   Gameplans: match card, editor, adherence. Status colours reuse the verdict
+   vocabulary; pending = amber (a reprocess fills it), unrated = dashed.
+   ========================================================================== */
+.gp-phase { margin-top: 12px; }
+.gp-phase-head { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px 2px; }
+.gp-phase-name { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-4); }
+.gp-phase-head .action { margin-left: auto; }
+
+.gp-row {
+  display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: start;
+  padding: 10px 12px; margin-bottom: 6px;
+  background: var(--surface-inset); border: 1px solid var(--border); border-radius: 12px;
+}
+.gp-row.met { box-shadow: inset 3px 0 var(--chart-green); }
+.gp-row.missed { box-shadow: inset 3px 0 var(--lp-loss); }
+.gp-row.pending { box-shadow: inset 3px 0 var(--warn); }
+.gp-num { font-size: 18px; font-weight: 800; color: var(--ink-4); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.gp-text { font-weight: 650; font-size: 13.5px; }
+.gp-rule { margin-top: 2px; }
+.gp-auto { display: flex; gap: 7px; align-items: baseline; margin-top: 5px; font-size: 12.5px; color: var(--ink-2); }
+.gp-auto.overruled { opacity: 0.7; }
+.gp-note { margin-top: 5px; font-size: 12.5px; font-style: italic; color: var(--ink-2); }
+.gp-note-form { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.gp-note-form input { flex: 1 1 240px; }
+.gp-rate { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.gp-buttons { display: flex; align-items: center; gap: 8px; }
+
+.gp-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; position: relative; top: 0; background: var(--panel-2); border: 1px solid var(--border-strong); }
+.gp-dot.met { background: var(--chart-green); border-color: var(--chart-green); }
+.gp-dot.missed { background: var(--lp-loss); border-color: var(--lp-loss); }
+.gp-dot.pending { background: var(--warn); border-color: var(--warn); }
+.gp-dot.na { background: transparent; }
+.gp-dot.unrated { background: transparent; border-style: dashed; }
+.gp-dot.lg { width: 14px; height: 14px; border-radius: 4px; }
+.gp-dots { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+
+.rv-badge.gp-status.met { color: var(--chart-green); border-color: color-mix(in srgb, var(--chart-green) 55%, var(--border)); }
+.rv-badge.gp-status.missed { color: var(--lp-loss); border-color: color-mix(in srgb, var(--lp-loss) 55%, var(--border)); }
+.rv-badge.gp-status.pending { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.rv-badge.gp-status.unrated { border-style: dashed; }
+
+.gp-summary { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.gp-chip { font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 7px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); }
+.gp-chip.met { color: var(--chart-green); }
+.gp-chip.missed { color: var(--lp-loss); }
+.gp-chip.pending { color: var(--warn); }
+
+
+.gp-edit-row { padding: 10px 12px; margin-bottom: 6px; background: var(--surface-inset); border: 1px solid var(--border); border-radius: 12px; }
+.gp-edit-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gp-edit-main .gp-text-in { flex: 1 1 320px; }
+.gp-edit-main .select { flex: 0 1 260px; }
+.gp-row-tools { display: inline-flex; gap: 6px; margin-left: auto; }
+.gp-edit-rule { display: flex; gap: 10px 18px; flex-wrap: wrap; margin: 10px 0 0 44px; align-items: flex-end; }
+.gp-param { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.gp-param .gp-unit { display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; }
+.gp-num-in { width: 84px; }
+.gp-clock { width: 76px; font-variant-numeric: tabular-nums; }
+.gp-clock.bad { border-color: var(--lp-loss); }
+.gp-item-pick { position: relative; display: inline-block; }
+.gp-item-pick input { min-width: 200px; }
+.gp-item-drop { top: 38px; width: 260px; }
+
+.gp-plan-list { display: flex; gap: 8px; flex-wrap: wrap; }
+.gp-plan-chip {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); color: var(--ink);
+  font: inherit; font-weight: 650; cursor: pointer;
+}
+.gp-plan-chip img { width: 26px; height: 26px; border-radius: 7px; }
+.gp-plan-chip.on { border-color: var(--accent); background: var(--accent-soft); }
+
+table.gp-adherence td { vertical-align: top; }
+.gp-adh-text { font-weight: 650; }
+
+@media (max-width: 720px) {
+  .gp-row { grid-template-columns: 30px minmax(0, 1fr); }
+  .gp-rate { grid-column: 2; flex-direction: row; align-items: center; justify-content: space-between; }
+  .gp-edit-rule { margin-left: 0; }
+}
