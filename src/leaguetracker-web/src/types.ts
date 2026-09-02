@@ -876,6 +876,8 @@ export interface Gameplan {
 
 export interface GameplanSummary { champion: string; points: number; updatedUtc: string }
 
+export interface GameplanImportResult { champion: string; points: number; error: string | null }
+
 export interface PointEvaluation {
   id: string
   phase: GameplanPhase

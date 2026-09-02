@@ -7,7 +7,7 @@ import { useChampionIcons, useItemCatalog } from '../champions'
 import ChampPicker from '../components/ChampPicker'
 import { PHASES, PHASE_HINT, PHASE_LABEL, RULE_KINDS, STATUS_LABEL, clock, parseClock, ruleMeta } from '../gameplans'
 import type { RuleParamMeta } from '../gameplans'
-import type { ChampionFacet, GameplanAdherence, GameplanPhase, GameplanSummary, PointStatus, ReferencePoint } from '../types'
+import type { ChampionFacet, GameplanAdherence, GameplanImportResult, GameplanPhase, GameplanSummary, PointStatus, ReferencePoint } from '../types'
 
 interface Draft { key: number; id?: string; phase: GameplanPhase; text: string; rule: { kind: string; params: Record<string, number> } }
 
@@ -293,11 +293,54 @@ function Adherence({ data }: { data: GameplanAdherence }) {
   )
 }
 
+/// Paste the JSON an Export (or the export bundle's gameplans.json) produced;
+/// each champion's plan lands or fails on its own.
+function ImportBox({ onDone }: { onDone: () => void }) {
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [results, setResults] = useState<GameplanImportResult[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const run = () => {
+    let bundle: unknown
+    try { bundle = JSON.parse(text) } catch { setError('That is not valid JSON.'); return }
+    setBusy(true)
+    setError(null)
+    api.importGameplans(bundle)
+      .then(r => { setResults(r); if (r.length > 0 && r.every(x => !x.error)) onDone() })
+      .catch(e => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div className="gp-import">
+      <textarea className="text" rows={6} spellCheck={false} placeholder='{"plans":[{"champion":"Ahri","points":[…]}]}'
+        value={text} onChange={e => setText(e.target.value)} />
+      <div className="gp-import-actions">
+        <button className="action primary sm-action" disabled={busy || text.trim().length === 0} onClick={run}>Import plans</button>
+        <span className="mut sm-text">Existing plans for the same champions are replaced.</span>
+      </div>
+      {error && <p className="loss sm-text" style={{ margin: '6px 0 0' }}>{error}</p>}
+      {results && (
+        <ul className="rv-evidence" style={{ marginTop: 6 }}>
+          {results.length === 0 && <li className="mut">Nothing to import - no plans in that JSON.</li>}
+          {results.map((r, i) => (
+            <li key={i} className={r.error ? 'loss' : 'win'}>
+              {r.champion || '(no champion)'}: {r.error ?? `${r.points} point${r.points === 1 ? '' : 's'} imported`}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export default function Gameplans() {
   const [params, setParams] = useSearchParams()
   const champion = params.get('champion') ?? ''
   const [plans, setPlans] = useState<GameplanSummary[]>([])
   const [facets, setFacets] = useState<ChampionFacet[]>([])
+  const [importing, setImporting] = useState(false)
   const icons = useChampionIcons()
   const canManage = auth.owns(account.current.id)
 
@@ -319,9 +362,12 @@ export default function Gameplans() {
             <span className="card-head-actions">
               <span className="mut sm-text">{plans.length === 0 ? 'Start one:' : 'New plan:'}</span>
               <ChampPicker placeholder="Champion" value="" options={options.filter(o => !plans.some(p => p.champion === o.name))} onChange={select} />
+              {plans.length > 0 && <a className="action sm-action" href={account.apiUrl('/api/gameplans/export')} download>Export</a>}
+              <button className={`action sm-action ${importing ? 'on' : ''}`} onClick={() => setImporting(v => !v)}>Import…</button>
             </span>
           )}
         </div>
+        {importing && canManage && <ImportBox onDone={() => { refresh(); setImporting(false) }} />}
         {plans.length === 0 && !canManage && <p className="mut" style={{ margin: 0 }}>No gameplans written yet.</p>}
         {plans.length > 0 && (
           <div className="gp-plan-list">

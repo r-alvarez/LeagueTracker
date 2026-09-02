@@ -16,6 +16,12 @@ public sealed record PointEvaluation(string Id, string Phase, string Text, RuleS
 public sealed record MatchGameplan(
     string MatchId, string Champion, bool HasPlan, List<PointEvaluation> Points, Dictionary<string, int> Summary);
 
+public sealed record GameplanBundlePlan(string? Champion, List<ReferencePointInput>? Points);
+
+public sealed record GameplanBundle(List<GameplanBundlePlan>? Plans, DateTime? ExportedUtc = null);
+
+public sealed record GameplanImportResult(string Champion, int Points, string? Error);
+
 // Plans are irreplaceable, so they are files and the db is never written;
 // rules run at read time so editing a plan never needs a reprocess. Every
 // point carries a rule: what the tracker cannot score is not in the plan.
@@ -83,6 +89,48 @@ public sealed class GameplanService(LeagueDbContext db, DataPaths paths)
         if (!File.Exists(path)) return false;
         File.Delete(path);
         return true;
+    }
+
+    // --- transfer ----------------------------------------------------------------------------
+
+    public GameplanBundle Export()
+    {
+        var plans = Directory.Exists(Root)
+            ? Directory.EnumerateFiles(Root, "*.json").Select(ReadPlan).Where(p => p is not null).OrderBy(p => p!.Champion)
+                .Select(p => new GameplanBundlePlan(p!.Champion,
+                    p.Points.Select(x => new ReferencePointInput(x.Id, x.Phase, x.Text, x.Rule)).ToList()))
+                .ToList()
+            : [];
+        return new GameplanBundle(plans, DateTime.UtcNow);
+    }
+
+    // Each plan lands or fails on its own; a typo in one champion's sheet must
+    // not hold the others back.
+    public List<GameplanImportResult> Import(GameplanBundle? bundle)
+    {
+        List<GameplanImportResult> results = [];
+        foreach (var plan in bundle?.Plans ?? [])
+        {
+            var champion = plan.Champion?.Trim() ?? "";
+            var (saved, error) = Save(champion, plan.Points);
+            results.Add(new GameplanImportResult(champion, saved?.Points.Count ?? 0, error));
+        }
+        return results;
+    }
+
+    public string? ImportFile(string path)
+    {
+        try
+        {
+            var bundle = JsonSerializer.Deserialize<GameplanBundle>(File.ReadAllText(path), Json);
+            var results = Import(bundle);
+            var failed = results.Where(r => r.Error is not null).ToList();
+            return failed is [] ? null : string.Join("; ", failed.Select(r => $"{r.Champion}: {r.Error}"));
+        }
+        catch (JsonException ex)
+        {
+            return ex.Message;
+        }
     }
 
     // --- evaluation --------------------------------------------------------------------------
