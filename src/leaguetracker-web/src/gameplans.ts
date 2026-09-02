@@ -6,7 +6,7 @@ export const PHASE_HINT: Record<GameplanPhase, string> = { early: 'to 14:00', mi
 
 export const STATUS_LABEL: Record<PointStatus, string> = { met: 'Met', missed: 'Missed', na: 'N/A', pending: 'Pending' }
 
-export type ParamUnit = 'clock' | 'units' | 'pct' | 'item' | 'level' | 'count' | 'toggle'
+export type ParamUnit = 'clock' | 'units' | 'pct' | 'item' | 'level' | 'count' | 'minute' | 'toggle'
 
 export interface RuleParamMeta { key: string; label: string; unit: ParamUnit }
 
@@ -35,6 +35,7 @@ export const RULE_KINDS: RuleKindMeta[] = [
       { key: 'leadSec', label: 'Be there this early', unit: 'clock' },
       { key: 'nearUnits', label: 'Within', unit: 'units' },
       { key: 'fromSec', label: 'Count objectives after', unit: 'clock' },
+      { key: 'toSec', label: 'Until (0:00 = end)', unit: 'clock' },
       { key: 'minPct', label: 'Met when early to at least', unit: 'pct' },
     ],
   },
@@ -95,6 +96,7 @@ export const RULE_KINDS: RuleKindMeta[] = [
     params: [
       { key: 'minFights', label: 'Fights wanted', unit: 'count' },
       { key: 'fromSec', label: 'Count fights after', unit: 'clock' },
+      { key: 'toSec', label: 'Until (0:00 = end)', unit: 'clock' },
       { key: 'movedUnits', label: 'Travelled at least', unit: 'units' },
     ],
   },
@@ -113,6 +115,15 @@ export const RULE_KINDS: RuleKindMeta[] = [
       { key: 'minPct', label: 'Met at', unit: 'pct' },
       { key: 'fromSec', label: 'Count fights after', unit: 'clock' },
       { key: 'minFights', label: 'Needs at least', unit: 'count' },
+    ],
+  },
+  {
+    kind: 'farm_rate', label: 'Keep farm up',
+    desc: 'Your CS per minute between two lane-diff checkpoints (3-minute steps plus 10 / 15 / 20 / 25 / 30). N/A when the game ended first or has no same-role opponent to checkpoint against. 8 is your mid-game median across Ahri and Viktor.',
+    params: [
+      { key: 'fromMin', label: 'From minute', unit: 'minute' },
+      { key: 'toMin', label: 'To minute', unit: 'minute' },
+      { key: 'minPerMin', label: 'CS per minute wanted', unit: 'count' },
     ],
   },
   {
@@ -144,7 +155,7 @@ export function describeRule(rule: RuleSpec, itemName: (id: number) => string | 
     case 'level_window_fight':
       return `at level ${p.level}, ${p.withJungler ? 'fight with the jungler' : 'take a fight'} within ${clock(p.windowSec)}`
     case 'objective_arrival':
-      return `within ${units(p.nearUnits)} of a contested neutral ${p.leadSec}s before it falls (${p.minPct}% of them)`
+      return `within ${units(p.nearUnits)} of a contested neutral ${p.leadSec}s before it falls (${p.minPct}% of them${p.toSec > 0 ? `, ${clock(p.fromSec)}–${clock(p.toSec)}` : p.fromSec > 0 ? `, after ${clock(p.fromSec)}` : ''})`
     case 'picks':
       return `${p.minPicks} isolated kill${p.minPicks === 1 ? '' : 's'} after ${clock(p.fromSec)}`
     case 'item_by':
@@ -156,7 +167,9 @@ export function describeRule(rule: RuleSpec, itemName: (id: number) => string | 
     case 'early_wards':
       return `${p.minWards} ward${p.minWards === 1 ? '' : 's'} before 10:00`
     case 'numbers_fights':
-      return `${p.minFights} fight${p.minFights === 1 ? '' : 's'} with numbers after ${clock(p.fromSec)}, arriving from ${units(p.movedUnits)}+`
+      return `${p.minFights} fight${p.minFights === 1 ? '' : 's'} with numbers ${p.toSec > 0 ? `${clock(p.fromSec)}–${clock(p.toSec)}` : `after ${clock(p.fromSec)}`}, arriving from ${units(p.movedUnits)}+`
+    case 'farm_rate':
+      return `${p.minPerMin} cs/min between ${p.fromMin}:00 and ${p.toMin}:00`
     case 'duels_taken':
       return `${p.minDuels} 1v1${p.minDuels === 1 ? '' : 's'} after ${clock(p.fromSec)}`
     case 'jungler_fights':

@@ -69,6 +69,7 @@ function ParamField({ meta, value, onChange }: { meta: RuleParamMeta; value: num
       {meta.unit === 'pct' && <span className="gp-unit">{num(0, 100, 5)} %</span>}
       {meta.unit === 'level' && num(2, 18)}
       {meta.unit === 'count' && num(1, 10)}
+      {meta.unit === 'minute' && num(1, 60)}
       {meta.unit === 'toggle' && <input type="checkbox" checked={value !== 0} onChange={e => onChange(e.target.checked ? 1 : 0)} />}
       {meta.unit === 'item' && <ItemPick value={value} onChange={onChange} />}
     </label>
