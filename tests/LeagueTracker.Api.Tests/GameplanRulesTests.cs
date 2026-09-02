@@ -238,20 +238,54 @@ public class GameplanRulesTests
     // --- phase gating in the service ----------------------------------------------------------
 
     [Fact]
-    public void A_phase_the_game_never_reached_answers_na_even_for_manual_points()
+    public void A_phase_the_game_never_reached_answers_na_before_the_rule_runs()
     {
         var plan = new Gameplan("C1", [
-            new ReferencePoint("a1", "early", "Trade off last hits", null),
-            new ReferencePoint("b2", "late", "Play off R", null),
+            new ReferencePoint("a1", "early", "Ward early", Rule("early_wards")),
+            new ReferencePoint("b2", "late", "Take 1v1s", Rule("duels_taken")),
         ], DateTime.UtcNow);
-        var checks = new MatchChecks("M", new() { ["a1"] = new PointRating("met", null, DateTime.UtcNow) });
 
-        var result = GameplanService.Evaluate(new Scenario().Duration(1000).Build(), plan, checks);
+        var result = GameplanService.Evaluate(new Scenario().Duration(1000).Wards(2).Build(), plan);
 
-        Assert.Equal("met", result.Points[0].Status);
-        Assert.Null(result.Points[0].Auto);
-        Assert.Equal("na", result.Points[1].Status);
+        Assert.Equal("met", result.Points[0].Result.Status);
+        Assert.Equal("na", result.Points[1].Result.Status);
+        Assert.Equal("Game ended before the late game.", result.Points[1].Result.Detail);
         Assert.Equal(1, result.Summary["met"]);
+    }
+
+    [Fact]
+    public void Numbers_fights_count_outnumbering_fights_i_travelled_to_after_laning()
+    {
+        var ctx = new Scenario()
+            .Kill(1000, killer: 1, victim: 6).Fight(1000, 1005, participated: true, allies: 3, enemies: 2)                  // from mid (7000,7000) to (7000,7000): no travel
+            .Kill(1300, killer: 1, victim: 7).At(1, 1260, 1500, 1500).Fight(1300, 1310, participated: true, allies: 3, enemies: 1)   // travelled ~7.8k
+            .Kill(1500, killer: 6, victim: 1).At(1, 1440, 1500, 1500).Fight(1500, 1502, participated: true, allies: 2, enemies: 3, result: "lost")   // outnumbered: no
+            .Build();
+
+        var one = GameplanRules.Evaluate(Rule("numbers_fights"), ctx);
+        Assert.Equal(GameplanRules.Missed, one.Status);
+        Assert.StartsWith("Joined 1 fight with numbers after 14:00 (wanted 2) — 21:40 skirmish 3v1 won (from 7.8k units away)", one.Detail);
+        Assert.Equal(GameplanRules.Met, GameplanRules.Evaluate(Rule("numbers_fights", ("minFights", 1)), ctx).Status);
+    }
+
+    [Fact]
+    public void Duels_and_jungler_fights_read_the_fight_list_after_the_start_time()
+    {
+        var ctx = new Scenario()
+            .Fight(700, 702, participated: true, allies: 1, enemies: 1, kind: "duel")                          // laning: ignored
+            .Fight(1000, 1002, participated: true, allies: 1, enemies: 1, kind: "duel", result: "lost")
+            .Kill(1200, killer: 2, victim: 6, assists: 1).Fight(1200, 1204, participated: true, allies: 2, enemies: 2)
+            .Build();
+
+        var duels = GameplanRules.Evaluate(Rule("duels_taken"), ctx);
+        Assert.Equal(GameplanRules.Met, duels.Status);
+        Assert.Equal("Took 1 1v1 after 14:00 — won 0, lost 1: 16:40 lost.", duels.Detail);
+
+        var jungler = GameplanRules.Evaluate(Rule("jungler_fights", ("minFights", 2), ("minPct", 50)), ctx);
+        Assert.Equal(GameplanRules.Met, jungler.Status);
+        Assert.StartsWith("1 of your 2 fights after 14:00 had C2 in them (50%, wanted 50%)", jungler.Detail);
+        Assert.Equal(GameplanRules.Missed, GameplanRules.Evaluate(Rule("jungler_fights", ("minFights", 2)), ctx).Status);
+        Assert.Equal(GameplanRules.NotApplicable, GameplanRules.Evaluate(Rule("jungler_fights"), ctx).Status);
     }
 
     private sealed class Scenario

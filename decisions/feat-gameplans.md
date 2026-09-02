@@ -28,11 +28,10 @@ Client events sample, League Director's api.py, developer-relations issues):
 - Decoding `.rofl` packets (maknee's 2025 write-up) - needs hooks into the
   game binary's decryption, breaks per patch, no released code, ToS grey zone.
 
-## 2026-09-02 — gameplans and self-ratings are files; auto-scores are read-time
+## 2026-09-02 — gameplans are files; auto-scores are read-time
 
-**Decision:** `{DataDir}/gameplans/{Champion}.json` holds the authored plan,
-`{DataDir}/gameplans/checks/{matchId}.json` the player's own ratings. Neither
-touches the db. The auto-rules run at request time over the stored rows
+**Decision:** `{DataDir}/gameplans/{Champion}.json` holds the authored plan
+and never touches the db. The auto-rules run at request time over the stored rows
 (kills, objectives, positions, items, `FightsJson`), the way `ReviewService`
 does, and are never persisted.
 
@@ -47,18 +46,43 @@ is my absolute level timing, so that alone becomes a column (`LevelSecs`,
 up to N matches per request. Rows per match are small (~300 positions, ~50
 kills) and N is capped, so it is the same cost class as `/reviews?ids=`.
 
-## 2026-09-02 — a self-rating outranks the auto-rule
+## 2026-09-02 — no manual points: scored by the tracker or not on the sheet
 
-**Decision:** the effective status of a point is the player's rating when one
-exists, else the rule's, else "unrated". Both stay visible on the card.
-**Why:** every rule is a proxy over 60s-frame interpolation; the player just
-watched the replay. The proxy's job is to pre-fill and to catch what memory
-smooths over, not to overrule the human.
+**Decision (reverses the self-rating design from earlier the same day):**
+every reference point carries a rule; there is no self-rating, no note, no
+"unrated" state, and `data/gameplans/checks` is gone. Ruben: "I don't see
+myself updating the manual fields consistently" - a checklist nobody ticks
+is noise on every match page.
+
+**What that dropped from the two sheets, and why each stays out:**
+- Ahri: trade off last hits, charm vs divers, strictly play off R CD - need
+  ability casts; return with agent phases 2/3. W to dodge skillshots, keep
+  wave neutral - no data source exists.
+- Viktor: small-wins mindset, poke not wave, pressure sponge, lull states,
+  call for hover - no honest observable. "Plan resets in advance" via
+  unspent gold was measured and rejected: max unspent gold <= 2k runs 39%
+  wins vs 68% above on Ahri (40% vs 77% Viktor) - sitting on gold is what
+  stomping looks like, so the rule would scold the games he won.
+
+**What was automated instead** (scratch `candidates.py`, games >= 16:40):
+- `numbers_fights` for "shove & move to create man advantages": fights
+  joined after 14:00 with allies > enemies, having moved >= 2.5k from the
+  last frame to the fight. 2+ ran 58% / 59% wins vs 35% / 33% below (Ahri /
+  Viktor). Default 2.
+- `duels_taken` for "don't be afraid to 1v1 in side": participated duels
+  after 14:00. No win signal either way (52/52, 48/55), and Viktor's side
+  duel record is 59 won of 134 - the sheet's premise is doubtful; the point
+  stays because it is honestly measurable and Ruben can delete it.
+- `jungler_fights` for "play off jungler": share of my fights after 14:00
+  with the jungler on the ledger or beside it, n/a under 3 fights. Replaces
+  the proximity proxy on Ahri (which ran against winning). At 50% it was met
+  in 89 of 100 Ahri games; default 60% (73 met / 21 missed, 55% vs 43%).
 
 ## 2026-09-02 — rule vocabulary is closed and each rule can decline to judge
 
-Eight kinds: `level_window_fight`, `objective_arrival`, `picks`, `item_by`,
-`level_by`, `jungler_proximity`, `early_wards`, `caught_out`, plus `manual`.
+Twelve kinds: `level_window_fight`, `objective_arrival`, `picks`, `item_by`,
+`level_by`, `jungler_proximity`, `jungler_fights`, `numbers_fights`,
+`duels_taken`, `early_wards`, `caught_out`, `early_skirmish_deaths`.
 The last two arrived with the Viktor sheet ("ward & lean", "everyone wants
 to kill you"): both read rows the Discipline verdict already computes
 (`WardsFirst10`/`FirstWardSec`, the fog-pick death test), so they cost a
@@ -86,8 +110,7 @@ frame before and the take, not the player; one minute is the finest honest
 mid laner who shoves and rotates rarely stands at the pit a minute early -
 which is the coaching point, not a bug; the knobs are on the point.
 
-**Kept:** the adherence table hides the percentage until three games are
-rated - one self-rated game read as "100% held".
+**Kept:** the adherence table hides the percentage under three judged games.
 
 ## 2026-09-02 — the level-6 window was a guess; it is now measured
 
@@ -101,7 +124,7 @@ about half. **Default window is 5:00.**
 Also: standing within 1.5k of the jungler in the window now reads *met*
 ("grouped ... no kill came of it"). A 2v2 the enemy walks away from leaves
 no kill to see, and the looking is what the point coaches; it is a minority
-path (7 of 41 met in the last 60 Ahri games) and the self-rating overrides.
+path (7 of 41 met in the last 60 Ahri games).
 The 3:43 invade kill in that game stays outside this rule on purpose - it
 is a level-4 play, and the sheet says "at 6".
 

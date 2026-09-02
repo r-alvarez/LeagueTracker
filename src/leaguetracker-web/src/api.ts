@@ -1,6 +1,6 @@
 import { account } from './account'
 import { csrfHeaders } from './auth'
-import type { AdminUsers, AgentKey, AnalyticsSummary, BuildVersion, ClaimInfo, InviteResult, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, Gameplan, GameplanAdherence, GameplanSummary, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchGameplan, MatchPage, MatchReview, ReferencePoint, RenderQueueRow, ReviewVerdicts, SelfStatus, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
+import type { AdminUsers, AgentKey, AnalyticsSummary, BuildVersion, ClaimInfo, InviteResult, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, Gameplan, GameplanAdherence, GameplanSummary, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchGameplan, MatchPage, MatchReview, ReferencePoint, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
 
 /// Every API call goes through here: account-scoped URL rewriting, the
 /// session cookie, and the CSRF header on writes. Bare fetch() elsewhere is
@@ -83,14 +83,6 @@ export const api = {
     const r = await apiFetch(`/api/matches/${id}/gameplan`)
     if (r.status === 204) return null   // no timeline for this game
     if (!r.ok) throw new Error(`/api/matches/${id}/gameplan -> HTTP ${r.status}`)
-    return r.json()
-  },
-  // status null clears the player's own rating for that point.
-  rateGameplanPoint: async (id: string, pointId: string, status: SelfStatus | null, note: string | null): Promise<MatchGameplan> => {
-    const r = await apiFetch(`/api/matches/${id}/gameplan/${pointId}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, note }),
-    })
-    if (!r.ok) throw new Error(await errorText(r))
     return r.json()
   },
   clips: (id: string) => get<ClipInfo[]>(`/api/matches/${id}/clips`),

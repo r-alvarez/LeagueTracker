@@ -118,16 +118,18 @@ unowned until claimed).
     totals only; the API has no per-event skillshot data)
 - **Gameplans** (`/gameplans`): per-champion reference points — the sheet a
   coach hands you, one sentence per point, grouped by lane / mid / late — that
-  every game of that champion is scored against on its match page. A point
-  can carry one of nine auto-rules read from the timeline (a fight with the
+  every game of that champion is scored against on its match page. Every
+  point carries one of twelve rules read from the timeline (a fight with the
   jungler in the window after a level, early arrival at contested neutrals,
-  isolated picks, an item or level by a clock, share of a window spent near
-  the jungler, wards before 10:00, not getting caught alone, outnumbered
-  deaths in early skirmishes); each rule declines with *n/a* when the game
-  gave no chance and *pending* until a reprocess fills the level clock. The
-  player's own rating after the replay always outranks the rule. Plans and
-  ratings are files under `data/gameplans` (irreplaceable, so never db-only);
-  the rules run at read time, so editing a plan never needs a reprocess.
+  isolated picks, an item or level by a clock, share of fights beside the
+  jungler, fights joined with numbers after moving, duels taken, wards before
+  10:00, not getting caught alone, outnumbered deaths in early skirmishes);
+  what the timeline cannot see is not on the sheet. Each rule declines with
+  *n/a* when the game gave no chance and *pending* until a reprocess fills
+  the level clock; thresholds were calibrated on the local history
+  (`decisions/feat-gameplans.md`). Plans are files under `data/gameplans`
+  (irreplaceable, so never db-only); the rules run at read time, so editing a
+  plan never needs a reprocess.
 
 ## CI / CD
 
@@ -160,9 +162,8 @@ truth**. The truth is the raw `{ matchId, match, timeline }` files in
 `data/games`. Any schema or derivation change: delete the db and re-import, or
 hit the reprocess endpoint — no Riot API calls needed. The exceptions are what
 only exists because someone was there: LP snapshots (mirrored to
-`data/lp-history.csv` so a rebuild restores them via import) and gameplans —
-`data/gameplans/*.json` (the plans) and `data/gameplans/checks/{matchId}.json`
-(the player's own ratings) — which are files from the start and never in the db.
+`data/lp-history.csv` so a rebuild restores them via import) and gameplans
+(`data/gameplans/*.json`), which are files from the start and never in the db.
 
 ## Endpoints
 

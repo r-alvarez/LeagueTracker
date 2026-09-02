@@ -55,6 +55,11 @@ public static class GameplanRules
             ["caught_out"] = new Dictionary<string, int> { ["maxDeaths"] = 0, ["fromSec"] = EarlyEndSec },
             // One allowed: 0 / 1 / 2+ ran 61% / 55% / 27% win rate over 167 Viktor games.
             ["early_skirmish_deaths"] = new Dictionary<string, int> { ["maxDeaths"] = 1, ["includeGanks"] = 1, ["untilSec"] = EarlyEndSec },
+            // Two: 2+ ran 58% / 59% win rate vs 35% / 33% below (Ahri / Viktor).
+            ["numbers_fights"] = new Dictionary<string, int> { ["minFights"] = 2, ["fromSec"] = EarlyEndSec, ["movedUnits"] = 2500 },
+            ["duels_taken"] = new Dictionary<string, int> { ["minDuels"] = 1, ["fromSec"] = EarlyEndSec },
+            // 60%: at 50% the point is met in 89 of 100 Ahri games and says nothing.
+            ["jungler_fights"] = new Dictionary<string, int> { ["minPct"] = 60, ["fromSec"] = EarlyEndSec, ["minFights"] = 3 },
         };
 
     public static RuleSpec? Normalize(RuleSpec? rule)
@@ -81,6 +86,9 @@ public static class GameplanRules
             "early_wards" => EarlyWards(ctx, P("minWards")),
             "caught_out" => CaughtOut(ctx, P("maxDeaths"), P("fromSec")),
             "early_skirmish_deaths" => EarlySkirmishDeaths(ctx, P("maxDeaths"), P("includeGanks") != 0, P("untilSec")),
+            "numbers_fights" => NumbersFights(ctx, P("minFights"), P("fromSec"), P("movedUnits")),
+            "duels_taken" => DuelsTaken(ctx, P("minDuels"), P("fromSec")),
+            "jungler_fights" => JunglerFights(ctx, P("minPct"), P("fromSec"), P("minFights")),
             _ => throw new ArgumentException($"unknown rule kind {spec.Kind}", nameof(rule)),
         };
     }
@@ -202,6 +210,58 @@ public static class GameplanRules
             : picks is { Count: > 0 }
                 ? new(Missed, $"{picks.Count} pick{(picks.Count == 1 ? "" : "s")} after {Clock(fromSec)} (wanted {minPicks}) — {string.Join("; ", picks)}.")
                 : new(Missed, $"No isolated kill after {Clock(fromSec)} — every kill you touched had enemy company within {Units(isolationUnits)}.");
+    }
+
+    // --- fights joined with numbers, having moved to create them ---------------------------
+
+    private static RuleResult NumbersFights(RuleContext ctx, int minFights, int fromSec, int movedUnits)
+    {
+        if (ctx.DurationSec < fromSec + 120) return new(NotApplicable, $"Game ended before {Clock(fromSec)}.");
+        var mine = ctx.PositionsOf(ctx.Me.ParticipantId);
+        List<string> joined = [];
+        foreach (var f in ctx.Fights.Where(f => f.Participated && f.StartSec >= fromSec && f.Allies > f.Enemies))
+        {
+            var kills = ctx.Kills.Where(k => k.TimeSec >= f.StartSec && k.TimeSec <= f.EndSec).ToList();
+            var frame = mine.LastOrDefault(p => p.TimeSec <= f.StartSec);
+            if (kills is not { Count: > 0 } || frame is null) continue;
+            var travelled = (int)Dist((frame.X, frame.Y), (int)kills.Average(k => k.X), (int)kills.Average(k => k.Y));
+            if (travelled >= movedUnits) joined.Add($"{Clock(f.StartSec)} {f.Kind} {f.Allies}v{f.Enemies} {f.Result} (from {Units(travelled)} away)");
+        }
+        return joined.Count >= minFights
+            ? new(Met, $"Joined {joined.Count} fight{(joined.Count == 1 ? "" : "s")} with numbers after {Clock(fromSec)} — {string.Join("; ", joined)}.")
+            : joined is { Count: > 0 }
+                ? new(Missed, $"Joined {joined.Count} fight{(joined.Count == 1 ? "" : "s")} with numbers after {Clock(fromSec)} (wanted {minFights}) — {string.Join("; ", joined)}.")
+                : new(Missed, $"No fight after {Clock(fromSec)} where you arrived from {Units(movedUnits)}+ away to outnumber them.");
+    }
+
+    // --- duels taken / fights beside the jungler after a time ------------------------------
+
+    private static RuleResult DuelsTaken(RuleContext ctx, int minDuels, int fromSec)
+    {
+        if (ctx.DurationSec < fromSec + 120) return new(NotApplicable, $"Game ended before {Clock(fromSec)}.");
+        var duels = ctx.Fights.Where(f => f is { Participated: true, Kind: "duel" } && f.StartSec >= fromSec).ToList();
+        var record = duels is { Count: > 0 }
+            ? $" — won {duels.Count(d => d.Result is "won")}, lost {duels.Count(d => d.Result is "lost")}: {string.Join(", ", duels.Select(d => $"{Clock(d.StartSec)} {d.Result}"))}"
+            : "";
+        return duels.Count >= minDuels
+            ? new(Met, $"Took {duels.Count} 1v1{(duels.Count == 1 ? "" : "s")} after {Clock(fromSec)}{record}.")
+            : new(Missed, duels is [] ? $"No 1v1 taken after {Clock(fromSec)}." : $"Took {duels.Count} 1v1 after {Clock(fromSec)} (wanted {minDuels}){record}.");
+    }
+
+    private static RuleResult JunglerFights(RuleContext ctx, int minPct, int fromSec, int minFights)
+    {
+        if (ctx.DurationSec < fromSec + 120) return new(NotApplicable, $"Game ended before {Clock(fromSec)}.");
+        if (ctx.AllyJungler is not { } jungler) return new(NotApplicable, "No ally jungler in this game.");
+        var junglerPositions = ctx.PositionsOf(jungler.ParticipantId);
+        var mine = ctx.Fights.Where(f => f.Participated && f.StartSec >= fromSec).ToList();
+        if (mine.Count < minFights) return new(NotApplicable, $"Only {mine.Count} fight{(mine.Count == 1 ? "" : "s")} of yours after {Clock(fromSec)} - too few to judge.");
+        var together = mine
+            .Where(f => JunglerInFight(ctx, f, jungler.ParticipantId, junglerPositions))
+            .Select(f => $"{Clock(f.StartSec)} {f.Kind} {f.Allies}v{f.Enemies} {f.Result}")
+            .ToList();
+        var pct = (int)Math.Round(100.0 * together.Count / mine.Count);
+        var lead = $"{together.Count} of your {mine.Count} fights after {Clock(fromSec)} had {jungler.Champion} in them ({pct}%, wanted {minPct}%)";
+        return new(pct >= minPct ? Met : Missed, together is { Count: > 0 } ? $"{lead} — {string.Join("; ", together)}." : $"{lead}.");
     }
 
     // --- item / level by a time --------------------------------------------------------

@@ -1207,11 +1207,6 @@ read.MapGet("/gameplans/{champion}/adherence", async (string champion, GameplanS
     await svc.AdherenceAsync(champion, last, ct) is { } result ? Results.Ok(result) : Results.NotFound());
 read.MapGet("/matches/{id}/gameplan", async (string id, GameplanService svc, CancellationToken ct) =>
     await svc.EvaluateAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent());
-owner.MapPut("/matches/{id}/gameplan/{pointId}", async (string id, string pointId, GameplanRatingRequest request, GameplanService svc, CancellationToken ct) =>
-{
-    if (svc.Rate(id, pointId, request.Status, request.Note) is { } error) return Results.BadRequest(new { error });
-    return await svc.EvaluateAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent();
-});
 
 // Verdict triples for a page of matches (the list rows' process chips).
 read.MapGet("/reviews", async (string ids, ReviewService svc, CancellationToken ct) =>
@@ -1506,5 +1501,3 @@ public sealed record AccountSettingsRequest(bool? MediaPublic, bool? HideLp, str
 public sealed record EnrollRequest(string Key, string? Name, string? Machine, string? Code);
 
 public sealed record GameplanSaveRequest(List<ReferencePointInput>? Points);
-
-public sealed record GameplanRatingRequest(string? Status, string? Note);
