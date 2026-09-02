@@ -1704,7 +1704,7 @@ table.agent-access tr.agent-detail-row:hover td { background: transparent; }
 
 /* ============================================================================
    Gameplans: match card, editor, adherence. Status colours reuse the verdict
-   vocabulary; pending = amber (a reprocess fills it), unrated = dashed.
+   vocabulary; pending = amber (a reprocess fills it).
    ========================================================================== */
 .gp-phase { margin-top: 12px; }
 .gp-phase-head { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px 2px; }
@@ -1723,26 +1723,18 @@ table.agent-access tr.agent-detail-row:hover td { background: transparent; }
 .gp-text { font-weight: 650; font-size: 13.5px; }
 .gp-rule { margin-top: 2px; }
 .gp-auto { display: flex; gap: 7px; align-items: baseline; margin-top: 5px; font-size: 12.5px; color: var(--ink-2); }
-.gp-auto.overruled { opacity: 0.7; }
-.gp-note { margin-top: 5px; font-size: 12.5px; font-style: italic; color: var(--ink-2); }
-.gp-note-form { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
-.gp-note-form input { flex: 1 1 240px; }
-.gp-rate { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-.gp-buttons { display: flex; align-items: center; gap: 8px; }
 
 .gp-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; position: relative; top: 0; background: var(--panel-2); border: 1px solid var(--border-strong); }
 .gp-dot.met { background: var(--chart-green); border-color: var(--chart-green); }
 .gp-dot.missed { background: var(--lp-loss); border-color: var(--lp-loss); }
 .gp-dot.pending { background: var(--warn); border-color: var(--warn); }
 .gp-dot.na { background: transparent; }
-.gp-dot.unrated { background: transparent; border-style: dashed; }
 .gp-dot.lg { width: 14px; height: 14px; border-radius: 4px; }
 .gp-dots { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 
 .rv-badge.gp-status.met { color: var(--chart-green); border-color: color-mix(in srgb, var(--chart-green) 55%, var(--border)); }
 .rv-badge.gp-status.missed { color: var(--lp-loss); border-color: color-mix(in srgb, var(--lp-loss) 55%, var(--border)); }
 .rv-badge.gp-status.pending { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
-.rv-badge.gp-status.unrated { border-style: dashed; }
 
 .gp-summary { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .gp-chip { font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 7px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); }
@@ -1780,6 +1772,6 @@ table.gp-adherence td { vertical-align: top; }
 
 @media (max-width: 720px) {
   .gp-row { grid-template-columns: 30px minmax(0, 1fr); }
-  .gp-rate { grid-column: 2; flex-direction: row; align-items: center; justify-content: space-between; }
+  .gp-row > .rv-badge { grid-column: 2; justify-self: start; }
   .gp-edit-rule { margin-left: 0; }
 }

@@ -9,14 +9,14 @@ import { PHASES, PHASE_HINT, PHASE_LABEL, RULE_KINDS, STATUS_LABEL, clock, parse
 import type { RuleParamMeta } from '../gameplans'
 import type { ChampionFacet, GameplanAdherence, GameplanPhase, GameplanSummary, PointStatus, ReferencePoint } from '../types'
 
-interface Draft { key: number; id?: string; phase: GameplanPhase; text: string; rule: { kind: string; params: Record<string, number> } | null }
+interface Draft { key: number; id?: string; phase: GameplanPhase; text: string; rule: { kind: string; params: Record<string, number> } }
 
 const ADHERENCE_GAMES = 100
 const DOTS = 30
 const MIN_SPLIT = 5
 
 let nextKey = 1
-const draftOf = (p: ReferencePoint): Draft => ({ key: nextKey++, id: p.id, phase: p.phase, text: p.text, rule: p.rule ? { kind: p.rule.kind, params: { ...p.rule.params } } : null })
+const draftOf = (p: ReferencePoint): Draft => ({ key: nextKey++, id: p.id, phase: p.phase, text: p.text, rule: { kind: p.rule.kind, params: { ...p.rule.params } } })
 
 /// Commits on blur / enter, so a half-typed clock never reaches the plan.
 function ClockInput({ value, onChange }: { value: number; onChange: (sec: number) => void }) {
@@ -101,9 +101,13 @@ function Editor({ champion, canManage, onSaved }: { champion: string; canManage:
 
   const update = (key: number, patch: Partial<Draft>) => setDrafts(ds => ds!.map(d => d.key === key ? { ...d, ...patch } : d))
   const setRuleKind = (d: Draft, kind: string) =>
-    update(d.key, { rule: kind ? { kind, params: { ...(defaults[kind] ?? {}) } } : null })
+    update(d.key, { rule: { kind, params: { ...(defaults[kind] ?? {}) } } })
   const setParam = (d: Draft, key: string, value: number) =>
-    update(d.key, { rule: d.rule ? { ...d.rule, params: { ...d.rule.params, [key]: value } } : null })
+    update(d.key, { rule: { ...d.rule, params: { ...d.rule.params, [key]: value } } })
+  const newPoint = (phase: GameplanPhase): Draft => {
+    const kind = RULE_KINDS[0].kind
+    return { key: nextKey++, phase, text: '', rule: { kind, params: { ...(defaults[kind] ?? {}) } } }
+  }
   const move = (index: number, dir: -1 | 1) => setDrafts(ds => {
     const next = [...ds!]
     const j = index + dir
@@ -129,7 +133,7 @@ function Editor({ champion, canManage, onSaved }: { champion: string; canManage:
   }
 
   const remove = () => {
-    if (!window.confirm(`Delete the ${champion} gameplan? Ratings you gave on past games stay on disk but stop showing.`)) return
+    if (!window.confirm(`Delete the ${champion} gameplan?`)) return
     setBusy(true)
     api.deleteGameplan(champion).then(() => { setDrafts([]); setSaved(JSON.stringify([])); setAdherence(null); onSaved() })
       .catch(e => setError(String(e))).finally(() => setBusy(false))
@@ -152,9 +156,8 @@ function Editor({ champion, canManage, onSaved }: { champion: string; canManage:
         </div>
         {drafts.length === 0 && (
           <p className="card-intro mut">
-            The sheet a coach would hand you for {champion}: one sentence per reference point, grouped by phase.
-            Give a point a rule and the tracker pre-fills it from the match timeline; leave it manual and you rate it
-            after the replay.
+            The sheet a coach would hand you for {champion}: one sentence per reference point, grouped by phase, each
+            with the rule the tracker scores it by. What the timeline cannot see does not go on the sheet.
           </p>
         )}
         {PHASES.map(ph => {
@@ -166,13 +169,13 @@ function Editor({ champion, canManage, onSaved }: { champion: string; canManage:
                 <span className="gp-phase-name">{PHASE_LABEL[ph]}</span>
                 <span className="mut sm-text">{PHASE_HINT[ph]}</span>
                 {canManage && (
-                  <button className="action sm-action" onClick={() => setDrafts([...drafts, { key: nextKey++, phase: ph, text: '', rule: null }])}>
+                  <button className="action sm-action" onClick={() => setDrafts([...drafts, newPoint(ph)])}>
                     + add point
                   </button>
                 )}
               </div>
               {rows.map(({ d, i }) => {
-                const meta = d.rule ? ruleMeta(d.rule.kind) : null
+                const meta = ruleMeta(d.rule.kind)
                 return (
                   <div key={d.key} className="gp-edit-row">
                     <div className="gp-edit-main">
@@ -183,8 +186,7 @@ function Editor({ champion, canManage, onSaved }: { champion: string; canManage:
                       ) : <span className="gp-text">{d.text}</span>}
                       {canManage && (
                         <>
-                          <select className="select" value={d.rule?.kind ?? ''} onChange={e => setRuleKind(d, e.target.value)} title="Auto-rule">
-                            <option value="">manual — rate it yourself</option>
+                          <select className="select" value={d.rule.kind} onChange={e => setRuleKind(d, e.target.value)} title="Rule">
                             {RULE_KINDS.map(r => <option key={r.kind} value={r.kind}>{r.label}</option>)}
                           </select>
                           <span className="gp-row-tools">
@@ -195,10 +197,10 @@ function Editor({ champion, canManage, onSaved }: { champion: string; canManage:
                         </>
                       )}
                     </div>
-                    {meta && d.rule && (
+                    {meta && (
                       <div className="gp-edit-rule">
                         {canManage && meta.params.map(pm => (
-                          <ParamField key={pm.key} meta={pm} value={d.rule!.params[pm.key] ?? 0} onChange={v => setParam(d, pm.key, v)} />
+                          <ParamField key={pm.key} meta={pm} value={d.rule.params[pm.key] ?? 0} onChange={v => setParam(d, pm.key, v)} />
                         ))}
                         <p className="mut sm-text" style={{ margin: '4px 0 0', flexBasis: '100%' }}>{meta.desc}</p>
                       </div>
@@ -246,12 +248,12 @@ function Adherence({ data }: { data: GameplanAdherence }) {
                 <tr key={p.id}>
                   <td>
                     <span className="gp-adh-text">{p.text}</span>
-                    <span className="mut sm-text"> · {PHASE_LABEL[p.phase].toLowerCase()}{p.rule ? '' : ' · manual'}</span>
+                    <span className="mut sm-text"> · {PHASE_LABEL[p.phase].toLowerCase()}</span>
                   </td>
                   <td className="wr-cell">
                     {pct !== null ? <strong className={pct >= 67 ? 'win' : pct <= 33 ? 'loss' : ''}>{pct}%</strong> : <span className="mut">—</span>}
                     <span className="wr-rec">
-                      {p.met} met · {p.missed} missed{p.na > 0 ? ` · ${p.na} n/a` : ''}{p.unrated > 0 ? ` · ${p.unrated} unrated` : ''}{p.pending > 0 ? ` · ${p.pending} pending` : ''}
+                      {p.met} met · {p.missed} missed{p.na > 0 ? ` · ${p.na} n/a` : ''}{p.pending > 0 ? ` · ${p.pending} pending` : ''}
                     </span>
                   </td>
                   <td className="wr-cell">

@@ -5,44 +5,33 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LeagueTracker.Api.Services;
 
-public sealed record ReferencePoint(string Id, string Phase, string Text, RuleSpec? Rule);
+public sealed record ReferencePoint(string Id, string Phase, string Text, RuleSpec Rule);
 
 public sealed record Gameplan(string Champion, List<ReferencePoint> Points, DateTime UpdatedUtc);
 
 public sealed record ReferencePointInput(string? Id, string? Phase, string? Text, RuleSpec? Rule);
 
-public sealed record PointRating(string Status, string? Note, DateTime RatedUtc);
-
-public sealed record MatchChecks(string MatchId, Dictionary<string, PointRating> Ratings);
-
-public sealed record PointEvaluation(
-    string Id, string Phase, string Text, RuleSpec? Rule, RuleResult? Auto, PointRating? Self, string Status);
+public sealed record PointEvaluation(string Id, string Phase, string Text, RuleSpec Rule, RuleResult Result);
 
 public sealed record MatchGameplan(
     string MatchId, string Champion, bool HasPlan, List<PointEvaluation> Points, Dictionary<string, int> Summary);
 
-// Plans and ratings are irreplaceable, so they are files and the db is never
-// written; rules run at read time so editing a plan never needs a reprocess.
+// Plans are irreplaceable, so they are files and the db is never written;
+// rules run at read time so editing a plan never needs a reprocess. Every
+// point carries a rule: what the tracker cannot score is not in the plan.
 public sealed class GameplanService(LeagueDbContext db, DataPaths paths)
 {
-    public const string Unrated = "unrated";
     public const int MaxPoints = 24;
     public const int MaxTextLength = 200;
-    public const int MaxNoteLength = 500;
     private const int MaxAdherenceGames = 200;
 
-    private static readonly string[] SelfStatuses = [GameplanRules.Met, GameplanRules.Missed, GameplanRules.NotApplicable];
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     private string Root => Path.Combine(paths.DataDir, "gameplans");
-    private string ChecksDir => Path.Combine(Root, "checks");
 
     // Riot champion names are plain ASCII; anything else never becomes a file name.
     private static string? ChampionKey(string? champion) =>
         champion is { Length: > 0 and <= 40 } && champion.All(char.IsAsciiLetterOrDigit) ? champion.ToLowerInvariant() : null;
-
-    private static string? MatchKey(string matchId) =>
-        matchId is { Length: > 0 and <= 40 } && matchId.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '_') ? matchId : null;
 
     // --- plans -------------------------------------------------------------------------------
 
@@ -76,9 +65,10 @@ public sealed class GameplanService(LeagueDbContext db, DataPaths paths)
             if (text.Length > MaxTextLength) return (null, $"Keep each reference point under {MaxTextLength} characters.");
             var phase = input.Phase?.Trim().ToLowerInvariant() ?? "";
             if (!GameplanRules.Phases.Contains(phase)) return (null, $"Phase must be one of {string.Join(", ", GameplanRules.Phases)}.");
-            // Ids survive edits so ratings stay attached; unknown ids are not trusted.
+            if (GameplanRules.Normalize(input.Rule) is not { } rule) return (null, $"\"{text}\" needs a rule - the tracker only keeps points it can score.");
+            // Ids survive edits so history stays comparable; unknown ids are not trusted.
             var id = input.Id is { Length: > 0 } && existingIds.Contains(input.Id) && seen.Add(input.Id) ? input.Id : NewId(seen);
-            cleaned.Add(new ReferencePoint(id, phase, text, GameplanRules.Normalize(input.Rule)));
+            cleaned.Add(new ReferencePoint(id, phase, text, rule));
         }
 
         var plan = new Gameplan(champion, cleaned, DateTime.UtcNow);
@@ -95,36 +85,12 @@ public sealed class GameplanService(LeagueDbContext db, DataPaths paths)
         return true;
     }
 
-    // --- the player's own ratings ----------------------------------------------------------------
-
-    public MatchChecks? Checks(string matchId) =>
-        MatchKey(matchId) is { } key ? Read<MatchChecks>(Path.Combine(ChecksDir, $"{key}.json")) : null;
-
-    public string? Rate(string matchId, string pointId, string? status, string? note)
-    {
-        if (MatchKey(matchId) is not { } key) return "Unknown match.";
-        if (pointId is not { Length: > 0 and <= 32 } || !pointId.All(char.IsAsciiLetterOrDigit)) return "Unknown reference point.";
-        if (status is not null && !SelfStatuses.Contains(status)) return $"A rating is one of {string.Join(", ", SelfStatuses)}.";
-        var trimmedNote = note?.Trim();
-        if (trimmedNote is { Length: > MaxNoteLength }) return $"Keep the note under {MaxNoteLength} characters.";
-
-        var checks = Checks(matchId) ?? new MatchChecks(matchId, []);
-        if (status is null) checks.Ratings.Remove(pointId);
-        else checks.Ratings[pointId] = new PointRating(status, trimmedNote is { Length: > 0 } ? trimmedNote : null, DateTime.UtcNow);
-
-        var path = Path.Combine(ChecksDir, $"{key}.json");
-        if (checks.Ratings is { Count: > 0 }) WriteAtomic(path, checks);
-        else if (File.Exists(path)) File.Delete(path);
-        return null;
-    }
-
     // --- evaluation --------------------------------------------------------------------------
 
     public async Task<MatchGameplan?> EvaluateAsync(string matchId, CancellationToken ct)
     {
         var contexts = await LoadContextsAsync([matchId], ct);
-        if (!contexts.TryGetValue(matchId, out var ctx)) return null;
-        return Evaluate(ctx, Get(ctx.Match.Champion), Checks(matchId));
+        return contexts.TryGetValue(matchId, out var ctx) ? Evaluate(ctx, Get(ctx.Match.Champion)) : null;
     }
 
     public async Task<object?> AdherenceAsync(string champion, int last, CancellationToken ct)
@@ -139,12 +105,12 @@ public sealed class GameplanService(LeagueDbContext db, DataPaths paths)
 
         var contexts = await LoadContextsAsync(ids, ct);
         var games = ids.Where(contexts.ContainsKey)
-            .Select(id => (Id: id, Result: Evaluate(contexts[id], plan, Checks(id))))
+            .Select(id => (Id: id, contexts[id].Match.Win, Result: Evaluate(contexts[id], plan)))
             .ToList();
 
         var points = plan.Points.Select(p =>
         {
-            var statuses = games.Select(g => (g.Id, g.Result.Points.First(e => e.Id == p.Id).Status, contexts[g.Id].Match.Win)).ToList();
+            var statuses = games.Select(g => (g.Id, g.Result.Points.First(e => e.Id == p.Id).Result.Status, g.Win)).ToList();
             return new
             {
                 p.Id, p.Phase, p.Text, p.Rule,
@@ -152,7 +118,6 @@ public sealed class GameplanService(LeagueDbContext db, DataPaths paths)
                 Missed = statuses.Count(s => s.Status is GameplanRules.Missed),
                 Na = statuses.Count(s => s.Status is GameplanRules.NotApplicable),
                 Pending = statuses.Count(s => s.Status is GameplanRules.Pending),
-                Unrated = statuses.Count(s => s.Status is Unrated),
                 // Outcome-conditioned: context for the player, never a verdict.
                 WinsWhenMet = statuses.Count(s => s.Status is GameplanRules.Met && s.Win),
                 WinsWhenMissed = statuses.Count(s => s.Status is GameplanRules.Missed && s.Win),
@@ -163,26 +128,24 @@ public sealed class GameplanService(LeagueDbContext db, DataPaths paths)
         return new
         {
             plan.Champion,
-            Games = games.Select(g => new { g.Id, contexts[g.Id].Match.Win, contexts[g.Id].Match.GameEndUtc, g.Result.Summary }),
+            Games = games.Select(g => new { g.Id, g.Win, contexts[g.Id].Match.GameEndUtc, g.Result.Summary }),
             Points = points,
         };
     }
 
-    internal static MatchGameplan Evaluate(RuleContext ctx, Gameplan? plan, MatchChecks? checks)
+    internal static MatchGameplan Evaluate(RuleContext ctx, Gameplan? plan)
     {
         List<PointEvaluation> points = [];
         foreach (var point in plan?.Points ?? [])
         {
-            // A phase the game never reached is nobody's miss, manual points included.
-            var auto = ctx.DurationSec < GameplanRules.PhaseStartSec(point.Phase)
+            // A phase the game never reached is nobody's miss.
+            var result = ctx.DurationSec < GameplanRules.PhaseStartSec(point.Phase)
                 ? new RuleResult(GameplanRules.NotApplicable, $"Game ended before the {point.Phase} game.")
-                : point.Rule is not null ? GameplanRules.Evaluate(point.Rule, ctx) : null;
-            var self = checks?.Ratings.GetValueOrDefault(point.Id);
-            var status = self?.Status ?? auto?.Status ?? Unrated;
-            points.Add(new PointEvaluation(point.Id, point.Phase, point.Text, point.Rule, auto, self, status));
+                : GameplanRules.Evaluate(point.Rule, ctx);
+            points.Add(new PointEvaluation(point.Id, point.Phase, point.Text, point.Rule, result));
         }
 
-        var summary = points.GroupBy(p => p.Status).ToDictionary(g => g.Key, g => g.Count());
+        var summary = points.GroupBy(p => p.Result.Status).ToDictionary(g => g.Key, g => g.Count());
         return new MatchGameplan(ctx.Match.Id, ctx.Match.Champion, plan is not null, points, summary);
     }
 
@@ -221,24 +184,30 @@ public sealed class GameplanService(LeagueDbContext db, DataPaths paths)
 
     // --- files -------------------------------------------------------------------------------
 
+    // Points whose rule this build cannot evaluate (a kind removed or never
+    // known) are dropped on read rather than shown unscored.
     private static Gameplan? ReadPlan(string path)
-    {
-        var plan = Read<Gameplan>(path);
-        return plan is null ? null : plan with { Points = plan.Points.Select(p => p with { Rule = GameplanRules.Normalize(p.Rule) }).ToList() };
-    }
-
-    private static T? Read<T>(string path) where T : class
     {
         if (!File.Exists(path)) return null;
         try
         {
-            return JsonSerializer.Deserialize<T>(File.ReadAllText(path), Json);
+            var raw = JsonSerializer.Deserialize<RawPlan>(File.ReadAllText(path), Json);
+            if (raw is null) return null;
+            var points = raw.Points
+                .Select(p => GameplanRules.Normalize(p.Rule) is { } rule ? new ReferencePoint(p.Id, p.Phase, p.Text, rule) : null)
+                .Where(p => p is not null)
+                .Cast<ReferencePoint>()
+                .ToList();
+            return new Gameplan(raw.Champion, points, raw.UpdatedUtc);
         }
         catch (JsonException)
         {
             return null;
         }
     }
+
+    private sealed record RawPoint(string Id, string Phase, string Text, RuleSpec? Rule);
+    private sealed record RawPlan(string Champion, List<RawPoint> Points, DateTime UpdatedUtc);
 
     private static void WriteAtomic<T>(string path, T value)
     {

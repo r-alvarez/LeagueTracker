@@ -4,9 +4,7 @@ export const PHASES: GameplanPhase[] = ['early', 'mid', 'late']
 export const PHASE_LABEL: Record<GameplanPhase, string> = { early: 'Lane phase', mid: 'Mid game', late: 'Late game' }
 export const PHASE_HINT: Record<GameplanPhase, string> = { early: 'to 14:00', mid: '14:00 – 25:00', late: 'after 25:00' }
 
-export const STATUS_LABEL: Record<PointStatus, string> = {
-  met: 'Met', missed: 'Missed', na: 'N/A', pending: 'Pending', unrated: 'Unrated',
-}
+export const STATUS_LABEL: Record<PointStatus, string> = { met: 'Met', missed: 'Missed', na: 'N/A', pending: 'Pending' }
 
 export type ParamUnit = 'clock' | 'units' | 'pct' | 'item' | 'level' | 'count' | 'toggle'
 
@@ -92,6 +90,32 @@ export const RULE_KINDS: RuleKindMeta[] = [
     ],
   },
   {
+    kind: 'numbers_fights', label: 'Create man advantages',
+    desc: 'Fights you joined after the start time where your side outnumbered theirs and you arrived from at least the travel distance away - the shove-and-move made visible. Two or more ran 58% / 59% wins vs 35% / 33% below on your Ahri / Viktor games.',
+    params: [
+      { key: 'minFights', label: 'Fights wanted', unit: 'count' },
+      { key: 'fromSec', label: 'Count fights after', unit: 'clock' },
+      { key: 'movedUnits', label: 'Travelled at least', unit: 'units' },
+    ],
+  },
+  {
+    kind: 'duels_taken', label: 'Take 1v1s',
+    desc: 'Duels (a fight with one on each side of the kill ledger) you were in after the start time, with the record as context. Willingness, not skill: the split carries no win signal on your games.',
+    params: [
+      { key: 'minDuels', label: 'Duels wanted', unit: 'count' },
+      { key: 'fromSec', label: 'Count duels after', unit: 'clock' },
+    ],
+  },
+  {
+    kind: 'jungler_fights', label: 'Fight beside the jungler',
+    desc: 'Share of the fights you were in after the start time that had your jungler on the kill ledger or beside it - playing off the jungler as fights, not as distance. N/A with fewer fights than the minimum.',
+    params: [
+      { key: 'minPct', label: 'Met at', unit: 'pct' },
+      { key: 'fromSec', label: 'Count fights after', unit: 'clock' },
+      { key: 'minFights', label: 'Needs at least', unit: 'count' },
+    ],
+  },
+  {
     kind: 'caught_out', label: 'Not caught alone',
     desc: 'Deaths after the start time with nobody interpolated near you and outside a fight the enemy committed three or more to - the same fog-pick test the Discipline verdict uses.',
     params: [
@@ -131,6 +155,12 @@ export function describeRule(rule: RuleSpec, itemName: (id: number) => string | 
       return `within ${units(p.nearUnits)} of the jungler ${p.minPct}% of ${clock(p.fromSec)}–${clock(p.toSec)}`
     case 'early_wards':
       return `${p.minWards} ward${p.minWards === 1 ? '' : 's'} before 10:00`
+    case 'numbers_fights':
+      return `${p.minFights} fight${p.minFights === 1 ? '' : 's'} with numbers after ${clock(p.fromSec)}, arriving from ${units(p.movedUnits)}+`
+    case 'duels_taken':
+      return `${p.minDuels} 1v1${p.minDuels === 1 ? '' : 's'} after ${clock(p.fromSec)}`
+    case 'jungler_fights':
+      return `${p.minPct}% of your fights after ${clock(p.fromSec)} beside the jungler`
     case 'early_skirmish_deaths':
       return `at most ${p.maxDeaths} outnumbered death${p.maxDeaths === 1 ? '' : 's'} before ${clock(p.untilSec)}${p.includeGanks ? ', ganks included' : ''}`
     case 'caught_out':
