@@ -258,6 +258,16 @@ export function useChampionNames(): (id: number) => string | null {
   return useMemo(() => (id: number) => assets?.champNames[id] ?? null, [assets])
 }
 
+export function useItemCatalog(): Array<{ id: number; name: string; gold: number }> {
+  const assets = useAssets()
+  return useMemo(() => assets
+    ? Object.entries(assets.items)
+        .map(([id, item]) => ({ id: parseInt(id, 10), name: item.name, gold: item.gold }))
+        .filter(i => i.gold > 0)
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : [], [assets])
+}
+
 export function useLoadoutIcons(): {
   item: (id: number) => string | null
   itemInfo: (id: number) => ItemInfo | null

@@ -1,6 +1,6 @@
 import { account } from './account'
 import { csrfHeaders } from './auth'
-import type { AdminUsers, AgentKey, AnalyticsSummary, BuildVersion, ClaimInfo, InviteResult, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchPage, MatchReview, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
+import type { AdminUsers, AgentKey, AnalyticsSummary, BuildVersion, ClaimInfo, InviteResult, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, Gameplan, GameplanAdherence, GameplanSummary, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchGameplan, MatchPage, MatchReview, ReferencePoint, RenderQueueRow, ReviewVerdicts, SelfStatus, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
 
 /// Every API call goes through here: account-scoped URL rewriting, the
 /// session cookie, and the CSRF header on writes. Bare fetch() elsewhere is
@@ -53,6 +53,46 @@ export const api = {
     return r.json()
   },
   reviews: (ids: string[]) => get<ReviewVerdicts>(`/api/reviews?ids=${ids.join(',')}`),
+  // Gameplans: the champion's reference points and how one game met them.
+  gameplans: () => get<GameplanSummary[]>('/api/gameplans'),
+  gameplanRuleDefaults: () => get<Record<string, Record<string, number>>>('/api/gameplans/rules/defaults'),
+  gameplan: async (champion: string): Promise<Gameplan | null> => {
+    const r = await apiFetch(`/api/gameplans/${encodeURIComponent(champion)}`)
+    if (r.status === 404) return null
+    if (!r.ok) throw new Error(`/api/gameplans/${champion} -> HTTP ${r.status}`)
+    return r.json()
+  },
+  saveGameplan: async (champion: string, points: Array<Pick<ReferencePoint, 'phase' | 'text' | 'rule'> & { id?: string }>): Promise<Gameplan> => {
+    const r = await apiFetch(`/api/gameplans/${encodeURIComponent(champion)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ points }),
+    })
+    if (!r.ok) throw new Error(await errorText(r))
+    return r.json()
+  },
+  deleteGameplan: async (champion: string) => {
+    const r = await apiFetch(`/api/gameplans/${encodeURIComponent(champion)}`, { method: 'DELETE' })
+    if (!r.ok && r.status !== 404) throw new Error(await errorText(r))
+  },
+  gameplanAdherence: async (champion: string, last = 20): Promise<GameplanAdherence | null> => {
+    const r = await apiFetch(`/api/gameplans/${encodeURIComponent(champion)}/adherence?last=${last}`)
+    if (r.status === 404) return null
+    if (!r.ok) throw new Error(`adherence -> HTTP ${r.status}`)
+    return r.json()
+  },
+  matchGameplan: async (id: string): Promise<MatchGameplan | null> => {
+    const r = await apiFetch(`/api/matches/${id}/gameplan`)
+    if (r.status === 204) return null   // no timeline for this game
+    if (!r.ok) throw new Error(`/api/matches/${id}/gameplan -> HTTP ${r.status}`)
+    return r.json()
+  },
+  // status null clears the player's own rating for that point.
+  rateGameplanPoint: async (id: string, pointId: string, status: SelfStatus | null, note: string | null): Promise<MatchGameplan> => {
+    const r = await apiFetch(`/api/matches/${id}/gameplan/${pointId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, note }),
+    })
+    if (!r.ok) throw new Error(await errorText(r))
+    return r.json()
+  },
   clips: (id: string) => get<ClipInfo[]>(`/api/matches/${id}/clips`),
   deleteClip: async (id: string, index: number) => { await apiFetch(`/api/matches/${id}/clips/${index}`, { method: 'DELETE' }) },
   renderQueue: () => get<RenderQueueRow[]>('/api/render/queue'),

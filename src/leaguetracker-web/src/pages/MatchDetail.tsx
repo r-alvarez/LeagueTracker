@@ -7,6 +7,7 @@ import type { ClipInfo, DeathEvent, FullGameStatus, MatchDetail as Detail, Parti
 import { sourceLabel, unitKind, useAbilityLabels, useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
 import { ItemIcon, PerkIcon, UnitGlyph } from '../components/GameIcons'
+import GameplanCard from '../components/GameplanCard'
 import ReviewCard from '../components/ReviewCard'
 import VodReview from '../components/VodReview'
 import { RelTime, tierClass } from '../components/Stats'
@@ -686,6 +687,12 @@ export default function MatchDetail() {
       {m.hasTimeline && !m.isRemake && (
         <div style={{ marginBottom: 14 }}>
           <ReviewCard matchId={m.id} />
+        </div>
+      )}
+
+      {m.hasTimeline && !m.isRemake && (
+        <div style={{ marginBottom: 14 }}>
+          <GameplanCard matchId={m.id} canManage={canManage} />
         </div>
       )}
 
