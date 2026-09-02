@@ -17,19 +17,26 @@ import Admin from './pages/Admin'
 import LiveGameBanner from './components/LiveGameBanner'
 import StopLossBanner from './components/StopLossBanner'
 import SignInScreen from './components/SignInScreen'
+import IndexScreen from './components/IndexScreen'
+import NotFound, { RouteNotFound } from './components/NotFound'
 import Footer from './components/Footer'
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null)
+  const resolution = account.resolution
 
   useEffect(() => {
-    if (!auth.canRead) return
+    if (!auth.canRead || resolution.kind !== 'account') return
     api.status().then(setStatus).catch(() => setStatus(null))
-  }, [])
+  }, [resolution.kind])
 
   // Signed out on a private tracker: not the shell with a wall in it, the
   // sign-in screen alone - no tabs, no account names, nothing to read.
   if (!auth.canRead) return <SignInScreen />
+  // The URL named no account: the front page, or a plain "nothing here" -
+  // never the shell around somebody else's dashboard.
+  if (resolution.kind === 'index') return <IndexScreen />
+  if (resolution.kind !== 'account') return <NotFound resolution={resolution} />
 
   // Month-level dates and a patch range keep the scope line one calm phrase;
   // the full patch list lives in the tooltip for anyone who wants it.
@@ -79,6 +86,7 @@ export default function App() {
         <Route path="/data" element={<DataPage />} />
         <Route path="/machines" element={<Machines />} />
         <Route path="/admin" element={<Admin />} />
+        <Route path="*" element={<RouteNotFound />} />
       </Routes>
 
       <Footer />
