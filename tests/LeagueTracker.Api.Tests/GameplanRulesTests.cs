@@ -59,14 +59,37 @@ public class GameplanRulesTests
     }
 
     [Fact]
-    public void Level_window_fight_is_missed_when_the_jungler_was_beside_me_and_nothing_happened()
+    public void Level_window_fight_counts_grouping_with_the_jungler_even_without_a_kill()
     {
         var ctx = new Scenario().Levels(0, 40, 90, 150, 220, 300, 400).At(2, 480, 7000, 7000).At(1, 480, 7200, 7100).Build();
 
         var result = GameplanRules.Evaluate(Rule("level_window_fight"), ctx);
 
+        Assert.Equal(GameplanRules.Met, result.Status);
+        Assert.Contains("grouped with C2 at 8:00", result.Detail);
+    }
+
+    [Fact]
+    public void Level_window_fight_is_missed_when_the_jungler_came_near_but_we_never_grouped()
+    {
+        var ctx = new Scenario().Levels(0, 40, 90, 150, 220, 300, 400).At(2, 480, 7000, 9500).Build();
+
+        var result = GameplanRules.Evaluate(Rule("level_window_fight"), ctx);
+
         Assert.Equal(GameplanRules.Missed, result.Status);
-        Assert.Contains("no fight together", result.Detail);
+        Assert.Contains("never grouped", result.Detail);
+    }
+
+    [Fact]
+    public void Level_window_fight_default_window_is_five_minutes()
+    {
+        var ctx = new Scenario().Levels(0, 40, 90, 150, 220, 300, 400)
+            .Kill(590, killer: 1, victim: 6, assists: 2)
+            .Fight(590, 592, participated: true, allies: 2, enemies: 2)
+            .Build();
+
+        Assert.Equal(GameplanRules.Met, GameplanRules.Evaluate(Rule("level_window_fight"), ctx).Status);
+        Assert.Equal(GameplanRules.NotApplicable, GameplanRules.Evaluate(Rule("level_window_fight", ("windowSec", 180)), ctx).Status);
     }
 
     [Fact]

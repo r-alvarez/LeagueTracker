@@ -37,12 +37,14 @@ public static class GameplanRules
     private const int ContestUnits = 2500;
     // Beyond this for the whole window, the jungler never came: n/a, not missed.
     private const int JunglerCameUnits = 4000;
+    private const int GroupedUnits = 1500;
     private const int TeamfightEnemies = 3;
 
     public static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> Defaults =
         new Dictionary<string, IReadOnlyDictionary<string, int>>
         {
-            ["level_window_fight"] = new Dictionary<string, int> { ["level"] = 6, ["windowSec"] = 180, ["withJungler"] = 1 },
+            // Median gap from 6 to the first fight beside the jungler is 4:53 (Ahri) / 4:54 (Viktor).
+            ["level_window_fight"] = new Dictionary<string, int> { ["level"] = 6, ["windowSec"] = 300, ["withJungler"] = 1 },
             // 60s frames cannot honestly resolve a lead shorter than a minute.
             ["objective_arrival"] = new Dictionary<string, int> { ["leadSec"] = 60, ["nearUnits"] = 4000, ["fromSec"] = EarlyEndSec, ["minPct"] = 67 },
             ["picks"] = new Dictionary<string, int> { ["minPicks"] = 1, ["fromSec"] = EarlyEndSec, ["isolationUnits"] = 2500 },
@@ -114,8 +116,13 @@ public static class GameplanRules
         {
             return new(NotApplicable, $"{lead} — {jungler!.Champion} never came within {Units(JunglerCameUnits)} in the next {Clock(windowSec)}.");
         }
+        // A 2v2 the enemy walks away from leaves no kill to see.
+        if (closest <= GroupedUnits)
+        {
+            return new(Met, $"{lead} — grouped with {jungler!.Champion} at {Clock(when)} ({Units(closest.Value)} apart); no kill came of it, the replay says what you looked for.");
+        }
         var alone = window is { Count: > 0 } ? $" You fought {window.Count} time{(window.Count == 1 ? "" : "s")} without them." : "";
-        return new(Missed, $"{lead} — {jungler!.Champion} was {Units(closest.Value)} from you at {Clock(when)} but no fight together followed.{alone}");
+        return new(Missed, $"{lead} — {jungler!.Champion} came as close as {closest.Value:N0} units at {Clock(when)} but you never grouped (within {GroupedUnits:N0}) and no fight together followed.{alone}");
     }
 
     private static bool JunglerInFight(RuleContext ctx, TimelineAnalyzer.Fight fight, int junglerPid, List<PositionSample> junglerPositions)

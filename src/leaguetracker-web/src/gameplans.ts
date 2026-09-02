@@ -23,7 +23,7 @@ export interface RuleKindMeta {
 export const RULE_KINDS: RuleKindMeta[] = [
   {
     kind: 'level_window_fight', label: 'At level N, fight with the jungler',
-    desc: 'Met when a fight you were in, with your jungler on its kill ledger or beside it, starts within the window after you hit the level. N/A when the jungler never came within 4k of you in that window.',
+    desc: 'Met when a fight you were in, with your jungler on its kill ledger or beside it, starts within the window after you hit the level - or when you two grouped (within 1.5k) in that window, since a 2v2 the enemy walks away from leaves no kill to see. N/A when the jungler never came within 4k. Default window 5:00: the median gap from 6 to the first such fight is ~4:53 over your history.',
     params: [
       { key: 'level', label: 'Level', unit: 'level' },
       { key: 'windowSec', label: 'Window after hitting it', unit: 'clock' },
