@@ -1194,6 +1194,10 @@ read.MapGet("/matches/{id}/reel", async (string id, ReviewReelService svc, Cance
 // Per-champion gameplans: reference points, and how each game measured up.
 read.MapGet("/gameplans", (GameplanService svc) => Results.Ok(svc.List()));
 read.MapGet("/gameplans/rules/defaults", () => Results.Ok(GameplanRules.Defaults));
+owner.MapGet("/gameplans/export", (GameplanService svc) =>
+    Results.File(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(svc.Export(), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web) { WriteIndented = true }),
+        "application/json", $"gameplans-{DateTime.Now:yyyyMMdd-HHmm}.json"));
+owner.MapPost("/gameplans/import", (GameplanBundle bundle, GameplanService svc) => Results.Ok(svc.Import(bundle)));
 read.MapGet("/gameplans/{champion}", (string champion, GameplanService svc) =>
     svc.Get(champion) is { } plan ? Results.Ok(plan) : Results.NotFound());
 owner.MapPut("/gameplans/{champion}", (string champion, GameplanSaveRequest request, GameplanService svc) =>
@@ -1407,7 +1411,7 @@ owner.MapGet("/export/objectives.csv", async (LeagueDbContext db, CancellationTo
 
 // Everything in one download: every CSV the screens are built from, plus the
 // dashboard aggregate over all games as machine-readable JSON.
-owner.MapGet("/export/all.zip", async (AccountContext acct, LeagueDbContext db, ReviewService reviews, LpService lp, TrackedPlayerService player, CancellationToken ct) =>
+owner.MapGet("/export/all.zip", async (AccountContext acct, LeagueDbContext db, ReviewService reviews, LpService lp, TrackedPlayerService player, GameplanService gameplans, CancellationToken ct) =>
 {
     var summary = new
     {
@@ -1428,6 +1432,7 @@ owner.MapGet("/export/all.zip", async (AccountContext acct, LeagueDbContext db, 
             "deaths.csv - every death: collapse, follow-in, damage, objective context",
             "objectives.csv - objective timeline per game",
             "lp-history.csv - LP snapshots over time",
+            "gameplans.json - every champion's reference points (paste into Gameplans > Import to restore)",
             "dashboard.json - the full dashboard aggregate over all ranked games",
         },
     };
@@ -1451,6 +1456,7 @@ owner.MapGet("/export/all.zip", async (AccountContext acct, LeagueDbContext db, 
         await AddAsync("deaths.csv", await Reports.DeathsCsvAsync(db, ct));
         await AddAsync("objectives.csv", await Reports.ObjectivesCsvAsync(db, ct));
         await AddAsync("lp-history.csv", await Reports.LpHistoryCsvAsync(db, acct.Current.HideLp, ct));
+        await AddAsync("gameplans.json", System.Text.Json.JsonSerializer.Serialize(gameplans.Export(), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web) { WriteIndented = true }));
         await AddAsync("dashboard.json", System.Text.Json.JsonSerializer.Serialize(dashboard, jsonOpts));
         await AddAsync("summary.json", System.Text.Json.JsonSerializer.Serialize(summary, jsonOpts));
     }

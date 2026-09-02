@@ -129,7 +129,9 @@ unowned until claimed).
   the level clock; thresholds were calibrated on the local history
   (`decisions/feat-gameplans.md`). Plans are files under `data/gameplans`
   (irreplaceable, so never db-only); the rules run at read time, so editing a
-  plan never needs a reprocess.
+  plan never needs a reprocess. The tab's Export / Import move plans between
+  instances as JSON, and `gameplans.json` rides in `export/all.zip` and is
+  restored by the folder import.
 
 ## CI / CD
 

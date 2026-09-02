@@ -16,6 +16,7 @@ public sealed class ImportService(
     TrackedPlayerService player,
     JobStatusService status,
     DataPaths paths,
+    GameplanService gameplans,
     ILogger<ImportService> logger)
 {
     public async Task ImportFolderAsync(string folder, CancellationToken ct)
@@ -60,8 +61,13 @@ public sealed class ImportService(
             var lpPerGame = Path.Combine(folder, "lp-per-game.csv");
             var lpApplied = File.Exists(lpPerGame) ? await ImportLpPerGameAsync(lpPerGame, ct) : 0;
 
+            var gameplansFile = Path.Combine(folder, "gameplans.json");
+            var gameplansNote = File.Exists(gameplansFile)
+                ? gameplans.ImportFile(gameplansFile) is { } problem ? $", gameplans: {problem}" : ", gameplans restored"
+                : "";
+
             await history.AttributeLpFromLedgerAsync(ct);
-            status.Finish($"done - {imported} games imported, {skipped} already present, {failed} failed, {ledgerImported} LP snapshots, {lpApplied} LP deltas applied");
+            status.Finish($"done - {imported} games imported, {skipped} already present, {failed} failed, {ledgerImported} LP snapshots, {lpApplied} LP deltas applied{gameplansNote}");
         }
         catch (Exception ex)
         {

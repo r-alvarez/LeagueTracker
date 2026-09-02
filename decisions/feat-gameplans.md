@@ -184,3 +184,17 @@ analyzer now skips an event identical (slot + timestamp) to the previous one
 for me. Risk accepted: two legitimate rank-ups of the same slot in the same
 millisecond do not happen in play (a double level-up still ranks in two
 clicks).
+
+## 2026-09-02 — plans move as JSON, and ride in the export bundle
+
+Ruben: "why aren't the plans part of the system? I have no access to the
+box from here." The plans I wrote while calibrating went through the local
+dev instance's API, so they sat in `D:\...\data\gameplans` and the deployed
+tracker never saw them. Plans are account data by design (his sheet, his
+account), so the fix is transfer, not seeding: `GET /gameplans/export`
+(one JSON for every champion), `POST /gameplans/import` (each plan lands or
+fails on its own), an Export link and a paste-to-import box on the tab,
+`gameplans.json` inside `export/all.zip`, and the folder import restoring
+it - the LP-ledger treatment the storage model already promised gameplans.
+Shipping the WTL sheets as repo defaults was rejected: the repo is public
+and the sheets are paid coaching material.
