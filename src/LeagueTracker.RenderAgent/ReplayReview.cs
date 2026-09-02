@@ -22,7 +22,13 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnl
     /// party), and sitting there is exactly when the review is wanted - it
     /// skipped every game of a party evening before this was seen.
     private static readonly string[] QueueingPhases =
-        ["Matchmaking", "ReadyCheck", "ChampSelect", "GameStart", "InProgress", "Reconnect"];
+        ["Matchmaking", "ReadyCheck", "ChampSelect"];
+
+    /// A game being up only counts as "moved on" when it is verifiably a
+    /// different game: the finished game's own phase lingers (and flickers)
+    /// through teardown, and reading that as the next game being queued
+    /// silently skipped reviews the player was sitting still for.
+    private static readonly string[] InGamePhases = ["GameStart", "InProgress", "Reconnect"];
 
     private static int _sessionActive;
 
@@ -57,6 +63,13 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnl
                     // The match id is only knowable while the session exists -
                     // once the game has ended the client has forgotten it.
                     lastMatchId ??= await MatchIdAsync(ct);
+                }
+                else if (phase is null)
+                {
+                    // An unreachable client says nothing about the game. A
+                    // blip here once read as "game over" while the phase was
+                    // still InProgress, which then read as the next game
+                    // being queued - wait for a real phase instead.
                 }
                 else if (wasInGame && RenderAgent.Paused)
                 {
@@ -122,7 +135,7 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnl
     /// correct outcome of a declined review.
     private async Task OfferReviewAsync(string matchId, CancellationToken ct)
     {
-        if (!await StillIdleAsync(TimeSpan.FromSeconds(config.PostGameReviewDelaySec), ct))
+        if (!await StillIdleAsync(matchId, TimeSpan.FromSeconds(config.PostGameReviewDelaySec), ct))
         {
             Log.Info($"Post-game review for {matchId} skipped - next game already being queued");
             return;
@@ -136,7 +149,7 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnl
                 // The reel doubles as the ownership probe: only the tracker
                 // whose account played the game can answer it.
                 if (await tracker.GetReelAsync(matchId, ct) is not { Moments.Count: > 0 } reel) continue;
-                if (await IsQueueingAsync(ct))
+                if (await IsQueueingAsync(matchId, ct))
                 {
                     Log.Info($"Post-game review for {matchId} skipped - next game already being queued");
                     return;
@@ -144,7 +157,7 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnl
                 await RunSessionAsync(tracker, reel, ct);
                 return;
             }
-            if (!await StillIdleAsync(TimeSpan.FromSeconds(20), ct))
+            if (!await StillIdleAsync(matchId, TimeSpan.FromSeconds(20), ct))
             {
                 Log.Info($"Post-game review for {matchId} skipped - next game already being queued");
                 return;
@@ -321,7 +334,7 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnl
         for (var i = 0; i < reel.Moments.Count && !ct.IsCancellationRequested; )
         {
             if (game.HasExited) { Log.Info("Post-game review: replay closed"); return; }
-            if (await IsQueueingAsync(ct)) { Log.Info("Post-game review: next game queued - closing the replay"); return; }
+            if (await IsQueueingAsync(reel.MatchId, ct)) { Log.Info("Post-game review: next game queued - closing the replay"); return; }
 
             var moment = reel.Moments[i];
             Log.Info($"Review {i + 1}/{reel.Moments.Count} · {Clock(moment.TimeSec)} · {moment.Title}" +
@@ -438,23 +451,29 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnl
     /// Waits out the given span, returning false as soon as the player starts
     /// queueing. Polls rather than sleeping through it so a 30s settle can't
     /// swallow a re-queue that happened at second one.
-    private async Task<bool> StillIdleAsync(TimeSpan span, CancellationToken ct)
+    private async Task<bool> StillIdleAsync(string reviewMatchId, TimeSpan span, CancellationToken ct)
     {
         var until = DateTime.UtcNow + span;
         while (DateTime.UtcNow < until)
         {
-            if (await IsQueueingAsync(ct)) return false;
+            if (await IsQueueingAsync(reviewMatchId, ct)) return false;
             var remaining = until - DateTime.UtcNow;
             if (remaining <= TimeSpan.Zero) break;
             await Task.Delay(remaining < TimeSpan.FromSeconds(3) ? remaining : TimeSpan.FromSeconds(3), ct);
         }
-        return !await IsQueueingAsync(ct);
+        return !await IsQueueingAsync(reviewMatchId, ct);
     }
 
     /// A client that has gone away (closed after the last game) reads as not
     /// queueing - which it isn't, and the review is still wanted.
-    private async Task<bool> IsQueueingAsync(CancellationToken ct) =>
-        await PhaseAsync(ct) is { } phase && QueueingPhases.Contains(phase);
+    private async Task<bool> IsQueueingAsync(string reviewMatchId, CancellationToken ct)
+    {
+        if (await PhaseAsync(ct) is not { } phase) return false;
+        if (QueueingPhases.Contains(phase)) return true;
+        return InGamePhases.Contains(phase)
+            && await MatchIdAsync(ct) is { Length: > 0 } liveId
+            && liveId != reviewMatchId;
+    }
 
     private async Task<string?> PhaseAsync(CancellationToken ct)
     {
