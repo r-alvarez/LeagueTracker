@@ -1,19 +1,17 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { account } from '../account'
 import { auth } from '../auth'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
-import type { ClipInfo, DeathEvent, FullGameStatus, MapMoment, MatchDetail as Detail, MatchTrack, Participant, Perks, TeamObjectiveCounts, VodMoment, VodStatus } from '../types'
+import type { ClipInfo, DeathEvent, FullGameStatus, MapMoment, MatchDetail as Detail, MatchTrack, Participant, Perks, TeamObjectiveCounts, VodStatus } from '../types'
 import { sourceLabel, unitKind, useAbilityLabels, useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
 import { ItemIcon, PerkIcon, UnitGlyph } from '../components/GameIcons'
-import GameplanCard from '../components/GameplanCard'
-import ReviewCard from '../components/ReviewCard'
-import VodReview from '../components/VodReview'
-import MapReplay from '../components/MapReplay'
+import VerdictStrip from '../components/VerdictStrip'
+import MatchStage, { type StageJump } from '../components/MatchStage'
 import { RelTime, tierClass } from '../components/Stats'
 
-type Tab = 'general' | 'details' | 'runes' | 'timeline'
+type Tab = 'scoreboard' | 'build' | 'timeline'
 
 // Carry score: each player's stats normalized against the game's
 // best, weighted toward damage and KDA. Purely relative within this one match.
@@ -537,25 +535,22 @@ function RunePage({ p }: { p: Participant }) {
   )
 }
 
-const fmtClock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
-
 export default function MatchDetail() {
   const { id } = useParams()
   const [detail, setDetail] = useState<Detail | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // ?tab=runes deep-links a specific tab (bookmarks, shared links).
+  // ?tab= deep-links a detail tab; the old tab names still land somewhere.
   const [tab, setTab] = useState<Tab>(() => {
     const t = new URLSearchParams(window.location.search).get('tab')
-    return t === 'details' || t === 'runes' || t === 'timeline' ? t : 'general'
+    return t === 'timeline' ? 'timeline' : t === 'build' || t === 'details' || t === 'runes' ? 'build' : 'scoreboard'
   })
   const [clips, setClips] = useState<ClipInfo[]>([])
   const [fullGame, setFullGame] = useState<FullGameStatus | null>(null)
   const [vod, setVod] = useState<VodStatus | null>(null)
   const [track, setTrack] = useState<MatchTrack | null>(null)
-  const [mapJump, setMapJump] = useState<MapMoment | null>(null)
+  const [jump, setJump] = useState<StageJump | null>(null)
   const canManage = auth.owns(account.current.id)
   const [recapAt, setRecapAt] = useState<number | null>(null)
-  const clipRefs = useRef<Record<number, HTMLVideoElement | null>>({})
 
   useEffect(() => {
     if (!id) return
@@ -566,16 +561,9 @@ export default function MatchDetail() {
     api.track(id).then(setTrack).catch(() => setTrack(null))
   }, [id])
 
-  const playMoment = (timeSec: number) => {
-    const clip = clips.find(c => c.ready && timeSec >= c.startSec && timeSec <= c.endSec)
-    const el = clip ? clipRefs.current[clip.index] : null
-    if (!el) return
-    el.currentTime = Math.max(0, timeSec - (clip?.startSec ?? 0) - 5)
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    void el.play()
-  }
-
-  const clipFor = (timeSec: number) => clips.find(c => c.ready && timeSec >= c.startSec && timeSec <= c.endSec)
+  // Every clock on the page goes through here; the nonce makes the same
+  // clock clickable twice.
+  const jumpTo = (timeSec: number) => setJump({ timeSec, nonce: Date.now() })
 
   if (error) return <div className="empty">Failed to load match: {error}</div>
   if (!detail) return <div className="empty">Loading…</div>
@@ -585,34 +573,12 @@ export default function MatchDetail() {
   const enemies = participants.filter(p => !p.isAlly)
   const maxDamage = Math.max(...participants.map(p => p.damageToChampions))
   const enemySide = detail.mySide === 'Blue' ? 'Red' : 'Blue'
-  // Recording data present = the VOD card owns the review slot; the replay
-  // tiles (full game + clips) only surface when there is nothing recorded.
-  const hasVodCard = !!(vod && (vod.exists || vod.youtubeUrl || vod.meta || vod.apm))
-  // With a VOD, my own kill/death clips are redundant (the real footage is a
-  // click away) - but fight clips show what the VOD's POV never could.
-  const visibleClips = hasVodCard ? clips.filter(c => c.kind === 'fight') : clips
-  // Moments come straight from the match timeline, not from the clip plan -
-  // clips may never render for a recorded game, and kills belong here too.
-  // Fights ride along so the parts of the game the player never touched
-  // (the team's 3v3 across the map) are still one click away; duels are
-  // left out - my own duels are already the kill/death markers, and other
-  // lanes' solo trades are noise at review time.
-  const vodMoments: VodMoment[] = [
-    ...kills.map(k => ({ kind: 'kill' as const, timeSec: k.timeSec })),
-    ...deaths.map(d => ({ kind: 'death' as const, timeSec: d.timeSec })),
-    ...(detail.fights ?? [])
-      .filter(f => f.kind !== 'duel')
-      .map(f => ({
-        kind: 'fight' as const,
-        timeSec: f.startSec,
-        label: `${f.kind} ${f.allies}v${f.enemies} · ${f.result}${f.convertedObjective ? ' · converted' : ''}${f.participated ? '' : ' · without you'}`,
-        tone: (f.result === 'won' ? 'win' : f.result === 'lost' ? 'loss' : 'neutral') as VodMoment['tone'],
-      })),
-  ].sort((a, b) => a.timeSec - b.timeSec)
-  // The map's index: fights (the ones without the player flagged, not
+  // The stage's index: fights (the ones without the player flagged, not
   // reordered), the player's kills and deaths, and the epic objectives.
-  // Towers stay out - a dozen "tower" chips would bury the fights.
-  const mapMoments: MapMoment[] = [
+  // Duels are out - my own duels are already the kill/death rows, and other
+  // lanes' solo trades are noise at review time. Towers are out too - a
+  // dozen "tower" rows would bury the fights.
+  const moments: MapMoment[] = [
     ...(detail.fights ?? [])
       .filter(f => f.kind !== 'duel')
       .map(f => ({
@@ -713,144 +679,24 @@ export default function MatchDetail() {
         )}
       </div>
 
-      {m.hasTimeline && !m.isRemake && (
-        <div style={{ marginBottom: 14 }}>
-          <ReviewCard matchId={m.id} />
-        </div>
-      )}
+      {m.hasTimeline && !m.isRemake && <VerdictStrip matchId={m.id} canManage={canManage} onJump={jumpTo} />}
 
-      {m.hasTimeline && !m.isRemake && (
-        <div style={{ marginBottom: 14 }}>
-          <GameplanCard matchId={m.id} canManage={canManage} />
-        </div>
-      )}
-
-      <VodReview matchId={m.id} vod={vod} onChange={setVod} moments={vodMoments} deaths={deaths} />
-
-      {track && track.frames.length > 0 && (
-        <div className="card" style={{ marginBottom: 14 }}>
-          <h2>
-            Map <span className="mut" style={{ fontWeight: 400 }}>— where everyone was, from Riot's timeline; the fights your footage never saw are here too</span>
-          </h2>
-          <MapReplay track={track} moments={mapMoments} jumpTo={mapJump} />
-        </div>
-      )}
-
-      {/* The replay re-render is the fallback for matches with no live
-          recording (older games, other machines) - when recording data
-          exists, the VOD card above owns this slot. */}
-      {!hasVodCard && fullGame && (fullGame.state !== 'none' || (m.hasReplay && canManage)) && (
-        <div className="card" style={{ marginBottom: 14 }}>
-          <h2>
-            Full game <span className="mut" style={{ fontWeight: 400 }}>— the whole match as one video, camera on you</span>
-          </h2>
-          {fullGame.state === 'done' && (
-            <>
-              <video src={account.apiUrl(`/api/matches/${id}/fullgame`)} controls preload="metadata"
-                style={{ width: '100%', maxWidth: 960, borderRadius: 8, background: '#000' }} />
-              <p className="mut sm-text" style={{ margin: '8px 0 0' }}>
-                {fullGame.sizeMb} MB{fullGame.renderedUtc && ` · rendered ${new Date(fullGame.renderedUtc).toLocaleDateString()}`}
-                {fullGame.keep ? ' · kept forever' : ' · auto-deleted after the retention window'}
-                {canManage && (<>
-                {' · '}
-                <button className="action" style={{ padding: '0 8px' }}
-                  onClick={() => id && api.toggleFullGameKeep(id).then(setFullGame)}>
-                  {fullGame.keep ? 'unkeep' : 'keep'}
-                </button>
-                {' '}
-                <button className="action" style={{ padding: '0 8px' }}
-                  onClick={() => { if (id && window.confirm('Delete this render? The replay may no longer be re-renderable on a newer patch.')) { void api.deleteFullGame(id).then(() => api.fullGameStatus(id).then(setFullGame)) } }}>
-                  delete
-                </button>
-                </>)}
-              </p>
-            </>
-          )}
-          {(fullGame.state === 'requested' || fullGame.state === 'rendering') && (
-            <p className="mut" style={{ margin: 0 }}>
-              {fullGame.state === 'requested' ? 'Queued — waiting for the render agent on the gaming PC.' : 'Rendering now on the gaming PC…'}
-            </p>
-          )}
-          {fullGame.state === 'failed' && (
-            <p style={{ margin: 0 }}>
-              <span className="loss">Render failed:</span> <span className="mut">{fullGame.error}</span>{' '}
-              {canManage && <button className="action" onClick={() => id && api.retryRender(id, 'full').then(() => api.fullGameStatus(id).then(setFullGame))}>Retry</button>}
-            </p>
-          )}
-          {fullGame.state === 'none' && canManage && (
-            <p className="mut" style={{ margin: 0 }}>
-              <button className="action" onClick={() => id && api.requestFullGame(id).then(setFullGame)}>Render full game</button>
-              {' '}~500 MB and a real-time render on the gaming PC — worth it for games you want to study start to finish.
-              Unkept renders are deleted automatically after the retention window; the clips below stay forever.
-              {' '}<strong>Just played this game on the gaming PC?</strong> Its recorded VOD card replaces this tile
-              within a few minutes — no render needed.
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Clips keep rendering and stay on disk as the backup copy, but once a
-          recording (or its YouTube link) exists, the VOD covers the same
-          moments - showing both would just be clutter. */}
-      {visibleClips.length > 0 && (
-        <div className="card" style={{ marginBottom: 14 }}>
-          <h2>
-            {hasVodCard
-              ? <>Team fights <span className="mut" style={{ fontWeight: 400 }}>— the fights you weren't in, rendered from the replay (your VOD never saw them)</span></>
-              : <>Clips <span className="mut" style={{ fontWeight: 400 }}>— your kills & deaths, rendered from the official replay</span></>}
-          </h2>
-          {visibleClips.every(c => !c.ready) ? (
-            <p className="mut" style={{ margin: 0 }}>
-              {visibleClips.length} fight window{visibleClips.length === 1 ? '' : 's'} planned — waiting for the render agent on the gaming PC.
-            </p>
-          ) : (
-            <div className="grid two-col">
-              {visibleClips.map(c => (
-                <div key={c.index}>
-                  <div className="sub-h" style={{ marginTop: 0 }}>
-                    {c.label} · {fmtClock(c.startSec)}–{fmtClock(c.endSec)}
-                    {c.kind === 'fight' && c.cameraChampion
-                      ? <span className="mut"> · from {c.cameraChampion}'s view</span>
-                      : <span className="mut"> · {c.events.map(e => `${e.kind} ${fmtClock(e.timeSec)}`).join(', ')}</span>}
-                    {c.ready && canManage && (
-                      <button className="action" style={{ padding: '0 8px', marginLeft: 8 }}
-                        title="Delete this clip and queue just this window for a fresh render on the gaming PC"
-                        onClick={() => {
-                          if (id && window.confirm('Delete this clip? The render agent will re-create it from the replay (needs the replay still playable on the current patch).')) {
-                            void api.deleteClip(id, c.index).then(() => api.clips(id).then(setClips))
-                          }
-                        }}>
-                        ✕ re-render
-                      </button>
-                    )}
-                  </div>
-                  {c.ready ? (
-                    <video
-                      ref={el => { clipRefs.current[c.index] = el }}
-                      src={c.url} controls preload="metadata"
-                      style={{ width: '100%', borderRadius: 8, background: '#000' }}
-                    />
-                  ) : (
-                    <div className="empty">queued for render</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      <MatchStage matchId={m.id} track={track && track.frames.length > 0 ? track : null} moments={moments}
+        durationSec={Math.round(m.durationMin * 60)}
+        vod={vod} onVodChange={setVod} fullGame={fullGame} onFullGameChange={setFullGame}
+        clips={clips} onClipsChange={setClips} canManage={canManage} jumpTo={jump} />
 
       <div className="filters">
-        <div className="seg" role="tablist" aria-label="Match view">
-          {(['general', 'details', 'runes', 'timeline'] as Tab[]).map(t => (
+        <div className="seg" role="tablist" aria-label="Match detail">
+          {(['scoreboard', 'build', 'timeline'] as Tab[]).map(t => (
             <button key={t} className={t === tab ? 'on' : ''} onClick={() => setTab(t)}>
-              {t === 'general' ? 'General' : t === 'details' ? 'Details' : t === 'runes' ? 'Runes' : 'Deaths & objectives'}
+              {t === 'scoreboard' ? 'Scoreboard' : t === 'build' ? 'Build & runes' : 'Deaths & objectives'}
             </button>
           ))}
         </div>
       </div>
 
-      {tab === 'general' && (() => {
+      {tab === 'scoreboard' && (() => {
         const scores = carryScores(participants)
         return (
           <>
@@ -862,10 +708,9 @@ export default function MatchDetail() {
         )
       })()}
 
-      {tab === 'details' && <DetailsTab detail={detail} />}
-
-      {tab === 'runes' && (
+      {tab === 'build' && (
         <>
+          <DetailsTab detail={detail} />
           <div className="card" style={{ marginBottom: 14 }}>
             <h2>
               <span className={m.isRemake ? 'mut' : allies[0]?.win ? 'win' : 'loss'}>{m.isRemake ? 'Remake' : allies[0]?.win ? 'Victory' : 'Defeat'}</span>{' '}
@@ -911,14 +756,8 @@ export default function MatchDetail() {
                         <td style={{ whiteSpace: 'nowrap' }}>
                           <span className="disclosure">{recapAt === d.timeSec ? '▾' : '▸'}</span>
                           {d.gameTime}
-                          {!hasVodCard && clipFor(d.timeSec) && (
-                            <button className="action" style={{ marginLeft: 6, padding: '0 6px' }}
-                              title="Watch this death" onClick={e => { e.stopPropagation(); playMoment(d.timeSec) }}>▶</button>
-                          )}
-                          {track && (
-                            <button className="action" style={{ marginLeft: 6, padding: '0 6px' }} title="Show this death on the map"
-                              onClick={e => { e.stopPropagation(); setMapJump({ kind: 'death', timeSec: d.timeSec, label: `died to ${d.killedBy}`, tone: 'loss' }) }}>map</button>
-                          )}
+                          <button className="action" style={{ marginLeft: 6, padding: '0 6px' }} title="Open this death on the stage"
+                            onClick={e => { e.stopPropagation(); jumpTo(d.timeSec) }}>open</button>
                         </td>
                         <td className="mut">{d.zone || '—'}</td>
                         <td>
@@ -976,10 +815,8 @@ export default function MatchDetail() {
                       <tr key={`${o.timeSec}-${o.kind}`} className={o.byMyTeam ? 'obj-row-win' : 'obj-row-loss'}>
                         <td style={{ whiteSpace: 'nowrap' }}>
                           {o.gameTime}
-                          {track && o.kind !== 'TOWER' && o.kind !== 'INHIBITOR' && (
-                            <button className="action" style={{ marginLeft: 6, padding: '0 6px' }} title="Show this objective on the map"
-                              onClick={() => setMapJump({ kind: 'objective', timeSec: o.timeSec, label: objectiveLabel(o.kind, o.subKind), tone: o.byMyTeam ? 'win' : 'loss' })}>map</button>
-                          )}
+                          <button className="action" style={{ marginLeft: 6, padding: '0 6px' }} title="Open this objective on the stage"
+                            onClick={() => jumpTo(o.timeSec)}>open</button>
                         </td>
                         <td><span className={`obj-kind ${OBJ_KIND_CLASS[o.kind] ?? ''}`}>{objectiveLabel(o.kind, o.subKind)}</span></td>
                         <td className={o.byMyTeam ? 'win' : 'loss'}>{o.byMyTeam ? 'My team' : 'Enemy'}</td>
