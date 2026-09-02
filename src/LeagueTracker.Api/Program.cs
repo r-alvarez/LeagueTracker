@@ -67,6 +67,7 @@ builder.Services.AddScoped<LensService>();
 builder.Services.AddScoped<FundamentalsService>();
 builder.Services.AddScoped<ReviewService>();
 builder.Services.AddScoped<ReviewReelService>();
+builder.Services.AddScoped<GameplanService>();
 builder.Services.AddPerAccount<RenderLeaseService>();
 builder.Services.AddSingleton<AgentRegistry>();
 builder.Services.AddSingleton<AgentKeyStore>();
@@ -1190,6 +1191,28 @@ read.MapGet("/matches/{id}/review", async (string id, ReviewService svc, Cancell
 read.MapGet("/matches/{id}/reel", async (string id, ReviewReelService svc, CancellationToken ct) =>
     await svc.GetAsync(id, ct) is { } reel ? Results.Ok(reel) : Results.NotFound());
 
+// Per-champion gameplans: reference points, and how each game measured up.
+read.MapGet("/gameplans", (GameplanService svc) => Results.Ok(svc.List()));
+read.MapGet("/gameplans/rules/defaults", () => Results.Ok(GameplanRules.Defaults));
+read.MapGet("/gameplans/{champion}", (string champion, GameplanService svc) =>
+    svc.Get(champion) is { } plan ? Results.Ok(plan) : Results.NotFound());
+owner.MapPut("/gameplans/{champion}", (string champion, GameplanSaveRequest request, GameplanService svc) =>
+{
+    var (plan, error) = svc.Save(champion, request.Points);
+    return error is null ? Results.Ok(plan) : Results.BadRequest(new { error });
+});
+owner.MapDelete("/gameplans/{champion}", (string champion, GameplanService svc) =>
+    svc.Delete(champion) ? Results.NoContent() : Results.NotFound());
+read.MapGet("/gameplans/{champion}/adherence", async (string champion, GameplanService svc, int last = 20, CancellationToken ct = default) =>
+    await svc.AdherenceAsync(champion, last, ct) is { } result ? Results.Ok(result) : Results.NotFound());
+read.MapGet("/matches/{id}/gameplan", async (string id, GameplanService svc, CancellationToken ct) =>
+    await svc.EvaluateAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+owner.MapPut("/matches/{id}/gameplan/{pointId}", async (string id, string pointId, GameplanRatingRequest request, GameplanService svc, CancellationToken ct) =>
+{
+    if (svc.Rate(id, pointId, request.Status, request.Note) is { } error) return Results.BadRequest(new { error });
+    return await svc.EvaluateAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent();
+});
+
 // Verdict triples for a page of matches (the list rows' process chips).
 read.MapGet("/reviews", async (string ids, ReviewService svc, CancellationToken ct) =>
     Results.Ok(await svc.VerdictsAsync(
@@ -1481,3 +1504,7 @@ public sealed record AddAccountRequest(string RiotId, string Region, string? Dis
 public sealed record AccountSettingsRequest(bool? MediaPublic, bool? HideLp, string? DisplayName);
 
 public sealed record EnrollRequest(string Key, string? Name, string? Machine, string? Code);
+
+public sealed record GameplanSaveRequest(List<ReferencePointInput>? Points);
+
+public sealed record GameplanRatingRequest(string? Status, string? Note);

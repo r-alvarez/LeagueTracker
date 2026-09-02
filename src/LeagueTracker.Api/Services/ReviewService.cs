@@ -478,7 +478,7 @@ public sealed class ReviewService(LeagueDbContext db)
 
     /// Linear interpolation over one participant's 60s samples - the same
     /// honest estimate the analyzer uses everywhere.
-    private static (int X, int Y)? InterpolatedAt(List<PositionSample> samples, int atSec)
+    internal static (int X, int Y)? InterpolatedAt(List<PositionSample> samples, int atSec)
     {
         if (samples is not { Count: > 0 }) return null;
         var before = samples.LastOrDefault(s => s.TimeSec <= atSec);
