@@ -89,6 +89,22 @@ which is the coaching point, not a bug; the knobs are on the point.
 **Kept:** the adherence table hides the percentage until three games are
 rated - one self-rated game read as "100% held".
 
+## 2026-09-02 — the level-6 window was a guess; it is now measured
+
+Ruben caught EUW1_7969770641 reading *missed*: level 6 at 5:38, grouped with
+Talon at 7:00, skirmish 3v2 won with Talon at 8:46 - eight seconds after my
+3:00 window closed. Scratch `level6_window.py` over the local history: the
+median gap from 6 to the first fight beside the jungler is 4:53 (Ahri, 216
+games) / 4:54 (Viktor, 163); a 3:00 window catches 29% / 25% of them, 5:00
+about half. **Default window is 5:00.**
+
+Also: standing within 1.5k of the jungler in the window now reads *met*
+("grouped ... no kill came of it"). A 2v2 the enemy walks away from leaves
+no kill to see, and the looking is what the point coaches; it is a minority
+path (7 of 41 met in the last 60 Ahri games) and the self-rating overrides.
+The 3:43 invade kill in that game stays outside this rule on purpose - it
+is a level-4 play, and the sheet says "at 6".
+
 ## 2026-09-02 — "careful in early skirmishes" is defined from the data, not guessed
 
 **Decision:** `early_skirmish_deaths` = my deaths before 14:00 where the
