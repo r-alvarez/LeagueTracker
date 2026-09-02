@@ -119,11 +119,12 @@ unowned until claimed).
 - **Gameplans** (`/gameplans`): per-champion reference points — the sheet a
   coach hands you, one sentence per point, grouped by lane / mid / late — that
   every game of that champion is scored against on its match page. Every
-  point carries one of twelve rules read from the timeline (a fight with the
+  point carries one of thirteen rules read from the timeline (a fight with the
   jungler in the window after a level, early arrival at contested neutrals,
   isolated picks, an item or level by a clock, share of fights beside the
-  jungler, fights joined with numbers after moving, duels taken, wards before
-  10:00, not getting caught alone, outnumbered deaths in early skirmishes);
+  jungler, fights joined with numbers after moving, duels taken, farm rate
+  between checkpoints, wards before 10:00, not getting caught alone,
+  outnumbered deaths in early skirmishes);
   what the timeline cannot see is not on the sheet. Each rule declines with
   *n/a* when the game gave no chance and *pending* until a reprocess fills
   the level clock; thresholds were calibrated on the local history

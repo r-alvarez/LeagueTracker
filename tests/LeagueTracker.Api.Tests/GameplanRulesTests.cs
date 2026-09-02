@@ -185,6 +185,7 @@ public class GameplanRulesTests
 
         Assert.Equal(GameplanRules.Met, result.Status);
         Assert.StartsWith("Early to 1 of 1 contested neutral — 20:00 dragon ✓", result.Detail);
+        Assert.Equal(GameplanRules.NotApplicable, GameplanRules.Evaluate(Rule("objective_arrival", ("toSec", 1140)), ctx).Status);
     }
 
     // --- wards / caught out -------------------------------------------------------------------
@@ -266,6 +267,23 @@ public class GameplanRulesTests
         Assert.Equal(GameplanRules.Missed, one.Status);
         Assert.StartsWith("Joined 1 fight with numbers after 14:00 (wanted 2) — 21:40 skirmish 3v1 won (from 7.8k units away)", one.Detail);
         Assert.Equal(GameplanRules.Met, GameplanRules.Evaluate(Rule("numbers_fights", ("minFights", 1)), ctx).Status);
+        // A window that closes before the travelled fight sees nothing.
+        var capped = GameplanRules.Evaluate(Rule("numbers_fights", ("minFights", 1), ("toSec", 1200)), ctx);
+        Assert.Equal(GameplanRules.Missed, capped.Status);
+        Assert.StartsWith("No fight between 14:00 and 20:00", capped.Detail);
+    }
+
+    [Fact]
+    public void Farm_rate_reads_the_cs_checkpoints()
+    {
+        var ctx = new Scenario().Checkpoints((15, 120), (25, 205)).Build();
+
+        var result = GameplanRules.Evaluate(Rule("farm_rate"), ctx);
+
+        Assert.Equal(GameplanRules.Met, result.Status);
+        Assert.Equal("8.5 cs/min between 15:00 and 25:00 (120 → 205), wanted 8.", result.Detail);
+        Assert.Equal(GameplanRules.Missed, GameplanRules.Evaluate(Rule("farm_rate", ("minPerMin", 9)), ctx).Status);
+        Assert.Equal(GameplanRules.NotApplicable, GameplanRules.Evaluate(Rule("farm_rate"), new Scenario().Duration(1200).Build()).Status);
     }
 
     [Fact]
@@ -300,10 +318,19 @@ public class GameplanRulesTests
         private int durationSec = 1800;
         private int wardsFirst10;
         private int? firstWardSec;
+        private string laneDiffsJson = "";
 
         public Scenario Duration(int sec) { durationSec = sec; return this; }
         public Scenario Levels(params int[] secs) { levelSecs = secs; return this; }
         public Scenario Wards(int first10, int? firstSec = null) { wardsFirst10 = first10; firstWardSec = firstSec; return this; }
+
+        public Scenario Checkpoints(params (int Min, int MyCs)[] points)
+        {
+            laneDiffsJson = System.Text.Json.JsonSerializer.Serialize(
+                points.Select(p => new TimelineAnalyzer.LaneDiffPoint(p.Min, 0, 0, 0, 0, p.MyCs, 0, 0, 0, [], [])).ToList(),
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+            return this;
+        }
 
         public Scenario Died(int sec, int enemiesNear, string killedBy, string zone = "", bool junglerNear = false)
         {
@@ -365,7 +392,7 @@ public class GameplanRulesTests
             var match = new Match
             {
                 Id = "M", Champion = "C1", DurationSec = durationSec, HasTimeline = true,
-                WardsFirst10 = wardsFirst10, FirstWardSec = firstWardSec,
+                WardsFirst10 = wardsFirst10, FirstWardSec = firstWardSec, LaneDiffsJson = laneDiffsJson,
             };
             return new RuleContext(match, participants[0], participants, kills, objectives, positions, items, fights, levelSecs, deaths);
         }

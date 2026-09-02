@@ -46,7 +46,7 @@ public static class GameplanRules
             // Median gap from 6 to the first fight beside the jungler is 4:53 (Ahri) / 4:54 (Viktor).
             ["level_window_fight"] = new Dictionary<string, int> { ["level"] = 6, ["windowSec"] = 300, ["withJungler"] = 1 },
             // 60s frames cannot honestly resolve a lead shorter than a minute.
-            ["objective_arrival"] = new Dictionary<string, int> { ["leadSec"] = 60, ["nearUnits"] = 4000, ["fromSec"] = EarlyEndSec, ["minPct"] = 67 },
+            ["objective_arrival"] = new Dictionary<string, int> { ["leadSec"] = 60, ["nearUnits"] = 4000, ["fromSec"] = EarlyEndSec, ["toSec"] = 0, ["minPct"] = 67 },
             ["picks"] = new Dictionary<string, int> { ["minPicks"] = 1, ["fromSec"] = EarlyEndSec, ["isolationUnits"] = 2500 },
             ["item_by"] = new Dictionary<string, int> { ["itemId"] = 0, ["bySec"] = 480 },
             ["level_by"] = new Dictionary<string, int> { ["level"] = 9, ["bySec"] = 600 },
@@ -56,10 +56,13 @@ public static class GameplanRules
             // One allowed: 0 / 1 / 2+ ran 61% / 55% / 27% win rate over 167 Viktor games.
             ["early_skirmish_deaths"] = new Dictionary<string, int> { ["maxDeaths"] = 1, ["includeGanks"] = 1, ["untilSec"] = EarlyEndSec },
             // Two: 2+ ran 58% / 59% win rate vs 35% / 33% below (Ahri / Viktor).
-            ["numbers_fights"] = new Dictionary<string, int> { ["minFights"] = 2, ["fromSec"] = EarlyEndSec, ["movedUnits"] = 2500 },
+            // toSec 0 = to the end of the game.
+            ["numbers_fights"] = new Dictionary<string, int> { ["minFights"] = 2, ["fromSec"] = EarlyEndSec, ["toSec"] = 0, ["movedUnits"] = 2500 },
             ["duels_taken"] = new Dictionary<string, int> { ["minDuels"] = 1, ["fromSec"] = EarlyEndSec },
             // 60%: at 50% the point is met in 89 of 100 Ahri games and says nothing.
             ["jungler_fights"] = new Dictionary<string, int> { ["minPct"] = 60, ["fromSec"] = EarlyEndSec, ["minFights"] = 3 },
+            // 8 is the local mid-game median (Ahri 8.1, Viktor 7.8); >= 8 ran 56% / 62% wins vs 46% / 49%.
+            ["farm_rate"] = new Dictionary<string, int> { ["fromMin"] = 15, ["toMin"] = 25, ["minPerMin"] = 8 },
         };
 
     public static RuleSpec? Normalize(RuleSpec? rule)
@@ -78,7 +81,7 @@ public static class GameplanRules
         return spec.Kind switch
         {
             "level_window_fight" => LevelWindowFight(ctx, P("level"), P("windowSec"), P("withJungler") != 0),
-            "objective_arrival" => ObjectiveArrival(ctx, P("leadSec"), P("nearUnits"), P("fromSec"), P("minPct")),
+            "objective_arrival" => ObjectiveArrival(ctx, P("leadSec"), P("nearUnits"), P("fromSec"), P("toSec"), P("minPct")),
             "picks" => Picks(ctx, P("minPicks"), P("fromSec"), P("isolationUnits")),
             "item_by" => ItemBy(ctx, P("itemId"), P("bySec")),
             "level_by" => LevelBy(ctx, P("level"), P("bySec")),
@@ -86,9 +89,10 @@ public static class GameplanRules
             "early_wards" => EarlyWards(ctx, P("minWards")),
             "caught_out" => CaughtOut(ctx, P("maxDeaths"), P("fromSec")),
             "early_skirmish_deaths" => EarlySkirmishDeaths(ctx, P("maxDeaths"), P("includeGanks") != 0, P("untilSec")),
-            "numbers_fights" => NumbersFights(ctx, P("minFights"), P("fromSec"), P("movedUnits")),
+            "numbers_fights" => NumbersFights(ctx, P("minFights"), P("fromSec"), P("toSec"), P("movedUnits")),
             "duels_taken" => DuelsTaken(ctx, P("minDuels"), P("fromSec")),
             "jungler_fights" => JunglerFights(ctx, P("minPct"), P("fromSec"), P("minFights")),
+            "farm_rate" => FarmRate(ctx, P("fromMin"), P("toMin"), P("minPerMin")),
             _ => throw new ArgumentException($"unknown rule kind {spec.Kind}", nameof(rule)),
         };
     }
@@ -145,10 +149,11 @@ public static class GameplanRules
 
     // --- get to contested neutrals early ------------------------------------------------
 
-    private static RuleResult ObjectiveArrival(RuleContext ctx, int leadSec, int nearUnits, int fromSec, int minPct)
+    private static RuleResult ObjectiveArrival(RuleContext ctx, int leadSec, int nearUnits, int fromSec, int toSec, int minPct)
     {
+        var until = toSec > 0 ? toSec : int.MaxValue;
         List<ObjectiveEvent> epics = [];
-        foreach (var o in ctx.Objectives.Where(o => EpicKinds.Contains(o.Kind) && o.TimeSec >= fromSec).OrderBy(o => o.TimeSec))
+        foreach (var o in ctx.Objectives.Where(o => EpicKinds.Contains(o.Kind) && o.TimeSec >= fromSec && o.TimeSec <= until).OrderBy(o => o.TimeSec))
         {
             if (epics.Any(e => e.Kind == o.Kind && o.TimeSec - e.TimeSec <= SameCampSec)) continue;
             epics.Add(o);
@@ -172,7 +177,10 @@ public static class GameplanRules
             contested.Add((epic, myDist, myDist is { } d && d <= nearUnits));
         }
 
-        if (contested is not { Count: > 0 }) return new(NotApplicable, "No contested neutral objective in this game.");
+        if (contested is not { Count: > 0 })
+        {
+            return new(NotApplicable, toSec > 0 ? $"No contested neutral objective between {Clock(fromSec)} and {Clock(toSec)}." : "No contested neutral objective in this game.");
+        }
         var early = contested.Count(c => c.Early);
         var pct = (int)Math.Round(100.0 * early / contested.Count);
         var list = string.Join(", ", contested.Select(c =>
@@ -214,12 +222,14 @@ public static class GameplanRules
 
     // --- fights joined with numbers, having moved to create them ---------------------------
 
-    private static RuleResult NumbersFights(RuleContext ctx, int minFights, int fromSec, int movedUnits)
+    private static RuleResult NumbersFights(RuleContext ctx, int minFights, int fromSec, int toSec, int movedUnits)
     {
         if (ctx.DurationSec < fromSec + 120) return new(NotApplicable, $"Game ended before {Clock(fromSec)}.");
+        var until = toSec > 0 ? toSec : int.MaxValue;
+        var window = toSec > 0 ? $"between {Clock(fromSec)} and {Clock(toSec)}" : $"after {Clock(fromSec)}";
         var mine = ctx.PositionsOf(ctx.Me.ParticipantId);
         List<string> joined = [];
-        foreach (var f in ctx.Fights.Where(f => f.Participated && f.StartSec >= fromSec && f.Allies > f.Enemies))
+        foreach (var f in ctx.Fights.Where(f => f.Participated && f.StartSec >= fromSec && f.StartSec <= until && f.Allies > f.Enemies))
         {
             var kills = ctx.Kills.Where(k => k.TimeSec >= f.StartSec && k.TimeSec <= f.EndSec).ToList();
             var frame = mine.LastOrDefault(p => p.TimeSec <= f.StartSec);
@@ -228,10 +238,31 @@ public static class GameplanRules
             if (travelled >= movedUnits) joined.Add($"{Clock(f.StartSec)} {f.Kind} {f.Allies}v{f.Enemies} {f.Result} (from {Units(travelled)} away)");
         }
         return joined.Count >= minFights
-            ? new(Met, $"Joined {joined.Count} fight{(joined.Count == 1 ? "" : "s")} with numbers after {Clock(fromSec)} — {string.Join("; ", joined)}.")
+            ? new(Met, $"Joined {joined.Count} fight{(joined.Count == 1 ? "" : "s")} with numbers {window} — {string.Join("; ", joined)}.")
             : joined is { Count: > 0 }
-                ? new(Missed, $"Joined {joined.Count} fight{(joined.Count == 1 ? "" : "s")} with numbers after {Clock(fromSec)} (wanted {minFights}) — {string.Join("; ", joined)}.")
-                : new(Missed, $"No fight after {Clock(fromSec)} where you arrived from {Units(movedUnits)}+ away to outnumber them.");
+                ? new(Missed, $"Joined {joined.Count} fight{(joined.Count == 1 ? "" : "s")} with numbers {window} (wanted {minFights}) — {string.Join("; ", joined)}.")
+                : new(Missed, $"No fight {window} where you arrived from {Units(movedUnits)}+ away to outnumber them.");
+    }
+
+    // --- farm rate between two checkpoints ----------------------------------------------------
+
+    private static RuleResult FarmRate(RuleContext ctx, int fromMin, int toMin, int minPerMin)
+    {
+        if (toMin <= fromMin) return new(NotApplicable, "The window ends before it starts.");
+        var checkpoints = ctx.Match.LaneDiffsJson is { Length: > 0 }
+            ? System.Text.Json.JsonSerializer.Deserialize<List<TimelineAnalyzer.LaneDiffPoint>>(ctx.Match.LaneDiffsJson, WebJson) ?? []
+            : [];
+        var start = checkpoints.FirstOrDefault(c => c.Min == fromMin);
+        var end = checkpoints.FirstOrDefault(c => c.Min == toMin);
+        if (start is null || end is null)
+        {
+            return ctx.DurationSec < toMin * 60
+                ? new(NotApplicable, $"Game ended before {toMin}:00.")
+                : new(NotApplicable, $"No {fromMin}:00 / {toMin}:00 checkpoints for this game.");
+        }
+        var rate = (end.MyCs - start.MyCs) / (double)(toMin - fromMin);
+        return new(rate >= minPerMin ? Met : Missed,
+            $"{rate:0.0} cs/min between {fromMin}:00 and {toMin}:00 ({start.MyCs} → {end.MyCs}), wanted {minPerMin}.");
     }
 
     // --- duels taken / fights beside the jungler after a time ------------------------------
@@ -402,6 +433,8 @@ public static class GameplanRules
     // LevelSecs is indexed from level 1 ("0,45,98" = levels 1, 2, 3).
     private static int? LevelSec(RuleContext ctx, int level) =>
         level >= 1 && level <= ctx.LevelSecs.Length ? ctx.LevelSecs[level - 1] : null;
+
+    private static readonly System.Text.Json.JsonSerializerOptions WebJson = new(System.Text.Json.JsonSerializerDefaults.Web);
 
     private static double Dist((int X, int Y) a, int x, int y) => Math.Sqrt(Math.Pow(a.X - x, 2) + Math.Pow(a.Y - y, 2));
 

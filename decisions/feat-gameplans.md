@@ -198,3 +198,20 @@ fails on its own), an Export link and a paste-to-import box on the tab,
 it - the LP-ledger treatment the storage model already promised gameplans.
 Shipping the WTL sheets as repo defaults was rejected: the repo is public
 and the sheets are paid coaching material.
+
+## 2026-09-02 — Syndra and Aurora sheets, two rule additions
+
+Two Syndra games and one Aurora game locally, so no per-champion
+calibration; the defaults stay the Ahri/Viktor ones. New: `farm_rate` (CS
+per minute between two lane-diff checkpoints; default 8 between 15 and 25 -
+the local mid-game median, and >= 8 ran 56% / 62% wins vs 46% / 49%) for
+"keep farm up high", and a `toSec` on `numbers_fights` and
+`objective_arrival` (0 = game end) so a lane-phase point can be scoped -
+Syndra's "plays first in river" was counting a 24:18 baron without it.
+
+Off the sheets for lack of an observable: Syndra - combo timing off last
+hits, E matchup mental stack, "posture aggressively post LC", lull states,
+E aggression by threat, and the 40-stacks half of the LC point (passive
+stacks are in no data source). Aurora - slow-push trade windows, enemy CC
+awareness, squishy identification, lull states; "every R must have value"
+returns with the cast data.
