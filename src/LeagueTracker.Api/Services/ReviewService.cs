@@ -41,6 +41,11 @@ public sealed class ReviewService(LeagueDbContext db)
     private const int PaidWindowSec = 60;
     private const int LaneGoldSwing = 300;
     private const int LateGoldSwing = 500;
+    // The late state is the game's last stored checkpoint, so a 43-minute
+    // comeback is judged at 42 and not at a fixed 30. A game that ends
+    // before this minute has no late state to judge - ten minutes past the
+    // laning snapshot is not stewardship - and the questions stay unanswered.
+    private const int LateFromMin = 20;
     /// Q3 stops demanding perfection once the game gave you this many fights
     /// to step into: one flagged death across a fight-heavy game is still the
     /// habit of accounting, not the absence of it.
@@ -243,10 +248,7 @@ public sealed class ReviewService(LeagueDbContext db)
         var myUnpaidAbsences = theirCashIns.Count(x => x.Where is "elsewhere" && !x.Paid);
         var theirUnpaidAbsences = myCashIns.Count(x => x.Where is "elsewhere" && !x.Paid);
 
-        var checkpoints = m.LaneDiffsJson is { Length: > 0 }
-            ? JsonSerializer.Deserialize<List<TimelineAnalyzer.LaneDiffPoint>>(m.LaneDiffsJson, Json) ?? []
-            : [];
-        var late = checkpoints.Where(c => c.Min is 20 or 25 or 30).OrderByDescending(c => c.Min).FirstOrDefault();
+        var late = LateCheckpoint(Checkpoints(m));
 
         // Transparent verdict: named components, each worth +/-1, summed.
         var components = new List<Component>();
@@ -339,11 +341,9 @@ public sealed class ReviewService(LeagueDbContext db)
 
     private static Verdicted? Stewardship(Match m)
     {
-        var checkpoints = m.LaneDiffsJson is { Length: > 0 }
-            ? JsonSerializer.Deserialize<List<TimelineAnalyzer.LaneDiffPoint>>(m.LaneDiffsJson, Json) ?? []
-            : [];
+        var checkpoints = Checkpoints(m);
         var start = checkpoints.FirstOrDefault(c => c.Min == 10);
-        var end = checkpoints.Where(c => c.Min is 20 or 25 or 30).OrderByDescending(c => c.Min).FirstOrDefault();
+        var end = LateCheckpoint(checkpoints);
         if (start is null || end is null) return null;
 
         var state = start.Gold >= LaneGoldSwing ? "ahead" : start.Gold <= -LaneGoldSwing ? "behind" : "even";
@@ -459,6 +459,13 @@ public sealed class ReviewService(LeagueDbContext db)
 
     private static bool AssistedBy(KillEvent k, int pid) =>
         k.AssistIds is { Length: > 0 } && k.AssistIds.Split(',').Contains(pid.ToString());
+
+    private static List<TimelineAnalyzer.LaneDiffPoint> Checkpoints(Match m) => m.LaneDiffsJson is { Length: > 0 }
+        ? JsonSerializer.Deserialize<List<TimelineAnalyzer.LaneDiffPoint>>(m.LaneDiffsJson, Json) ?? []
+        : [];
+
+    internal static TimelineAnalyzer.LaneDiffPoint? LateCheckpoint(List<TimelineAnalyzer.LaneDiffPoint> checkpoints) =>
+        checkpoints.Where(c => c.Min >= LateFromMin).MaxBy(c => c.Min);
 
     /// Linear interpolation over one participant's 60s samples - the same
     /// honest estimate the analyzer uses everywhere.
