@@ -1,4 +1,5 @@
 using LeagueTracker.Api.Accounts;
+using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Registry;
 using LeagueTracker.Api.Riot;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -8,21 +9,23 @@ namespace LeagueTracker.Api.Tests;
 
 // The public compose asserts a friend's account from stack env vars that may
 // be unset; that must read as "nothing to assert", not as a broken boot.
-public class AccountRegistryConfigTests : IDisposable
+[Collection(PostgresCollection.Name)]
+public class AccountRegistryConfigTests(PostgresFixture postgres) : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "lt-tests", Guid.NewGuid().ToString("N"));
+    private readonly DatabaseServer _server = postgres.NewServer();
 
     private AccountRegistry Registry(params Account[] configured)
     {
         var options = Options.Create(new AccountsOptions { DataRoot = _root, List = [.. configured] });
         var riot = Options.Create(new RiotOptions());
         var env = new TestEnv(_root);
-        return new AccountRegistry(options, riot, new RegistryDatabase(options, riot, env), env, NullLogger<AccountRegistry>.Instance);
+        return new AccountRegistry(options, riot, new RegistryDatabase(_server, options, riot, env), env, NullLogger<AccountRegistry>.Instance);
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, recursive: true); } catch { /* a locked WAL file on Windows; the temp folder is disposable */ }
+        try { Directory.Delete(_root, recursive: true); } catch { /* a disposable temp folder */ }
     }
 
     [Fact]

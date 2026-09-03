@@ -1,4 +1,5 @@
 using LeagueTracker.Api.Accounts;
+using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Registry;
 using LeagueTracker.Api.Riot;
 using LeagueTracker.Api.Services;
@@ -9,20 +10,22 @@ namespace LeagueTracker.Api.Tests;
 
 // Enrolment is the one anonymous write on the internet-facing api path, so
 // what it refuses matters more than what it accepts (audit M-H6).
-public class AgentKeyStoreEnrolTests : IDisposable
+[Collection(PostgresCollection.Name)]
+public class AgentKeyStoreEnrolTests(PostgresFixture postgres) : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "lt-tests", Guid.NewGuid().ToString("N"));
+    private readonly DatabaseServer _server = postgres.NewServer();
 
     private AgentKeyStore Store(bool allowUnbound = false)
     {
-        var registry = new RegistryDatabase(Options.Create(new AccountsOptions { DataRoot = _root }), Options.Create(new RiotOptions()), new TestEnv(_root));
-        registry.EnsureCreated(NullLogger.Instance);
+        var registry = new RegistryDatabase(_server, Options.Create(new AccountsOptions { DataRoot = _root }), Options.Create(new RiotOptions()), new TestEnv(_root));
+        registry.Migrate(NullLogger.Instance);
         return new AgentKeyStore(registry, Options.Create(new AgentsOptions { AllowUnbound = allowUnbound }), NullLogger<AgentKeyStore>.Instance);
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, recursive: true); } catch { /* a locked WAL file on Windows; the temp folder is disposable */ }
+        try { Directory.Delete(_root, recursive: true); } catch { /* a disposable temp folder */ }
     }
 
     private static string Key(int n) => $"key-{n:D3}-" + new string('x', 40);
