@@ -19,7 +19,7 @@ public sealed class Caller(IHttpContextAccessor http, AgentKeyStore keys, UserSt
     public string? DisplayName => IsUser ? Principal?.FindFirstValue(TrackerClaims.Name) : null;
     // Read from the registry, not the cookie: promoting (or demoting) someone
     // takes effect on their next request, not their next sign-in. One lookup
-    // per request, on a tiny SQLite.
+    // per request, on a tiny table.
     public bool IsAdmin => IsUser && (_admin ??= users.ById(UserId)?.IsAdmin ?? false);
 
     public bool IsAgent => Agent is not null;

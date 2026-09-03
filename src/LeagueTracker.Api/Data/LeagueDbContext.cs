@@ -33,5 +33,6 @@ public sealed class LeagueDbContext(DbContextOptions<LeagueDbContext> options) :
         modelBuilder.Entity<ObjectiveEvent>().HasIndex(o => o.MatchId);
         modelBuilder.Entity<ItemEvent>().HasIndex(i => i.MatchId);
         modelBuilder.Entity<LpSnapshot>().HasIndex(s => new { s.Queue, s.TimestampUtc });
+        UtcDateTimes.Apply(modelBuilder);
     }
 }

@@ -1,16 +1,15 @@
 using LeagueTracker.Api.Accounts;
+using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Riot;
 using LeagueTracker.Api.Services;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Microsoft.Extensions.Options;
 
 namespace LeagueTracker.Api.Registry;
 
-// The one global database: users, the accounts they own, the machines they
-// enrolled, and the short-lived codes/claims between them. Lives next to the
-// per-account folders (<DataRoot>/registry.db). Per-account SQLites stay
-// untouched - this replaces accounts.json and agents.json, nothing else.
+// The one global store: users, the accounts they own, the machines they
+// enrolled, and the short-lived codes/claims between them. Its own schema in
+// the shared database; the per-account schemas hold nothing of this.
 public sealed class RegistryDbContext(DbContextOptions<RegistryDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
@@ -39,84 +38,46 @@ public sealed class RegistryDbContext(DbContextOptions<RegistryDbContext> option
         b.Entity<OwnershipClaim>().Property(c => c.State).HasConversion<string>();
         b.Entity<OwnershipClaim>().HasIndex(c => c.AccountId);
 
-        // Every timestamp here is UTC; SQLite hands them back with Kind
-        // Unspecified, which serializes without the Z and lands in a browser
-        // as local time (an expiry an hour off is a claim that looks dead).
-        var utc = new ValueConverter<DateTime, DateTime>(v => v, v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
-        var utcNullable = new ValueConverter<DateTime?, DateTime?>(v => v, v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v);
-        foreach (var entity in b.Model.GetEntityTypes())
-        {
-            foreach (var property in entity.GetProperties())
-            {
-                if (property.ClrType == typeof(DateTime)) property.SetValueConverter(utc);
-                else if (property.ClrType == typeof(DateTime?)) property.SetValueConverter(utcNullable);
-            }
-        }
+        UtcDateTimes.Apply(b);
     }
 }
 
-// Where registry.db lives and that it exists with the current schema before
-// anything reads it. Same PRAGMA-driven upgrade rule as the account databases:
-// only the ALTERs a table lacks, a current db runs nothing.
+// Where the registry lives (its schema, and the data root the SQLite era kept
+// it in - still the parent of the account folders, the keys and agents.json)
+// and that its schema is current before anything reads it.
 public sealed class RegistryDatabase
 {
-    private static readonly (string Table, string Column, string Definition)[] Upgrades =
-    [
-        ("Users", "InvitedUtc", "TEXT NULL"),
-        ("Users", "InvitedByUserId", "TEXT NULL"),
-        ("Users", "InviteSentUtc", "TEXT NULL"),
-        ("Users", "ProviderUserId", "TEXT NULL"),
-        ("AgentKeys", "ActsForAccountIds", "TEXT NULL"),
-    ];
+    private const string LegacyFileName = "registry.db";
 
-    public string Path { get; }
+    private readonly DatabaseServer _server;
+
     public string Root { get; }
+    public string LegacyPath { get; }
+    public DbContextOptions<RegistryDbContext> Options { get; }
 
-    public RegistryDatabase(IOptions<AccountsOptions> accounts, IOptions<RiotOptions> riot, IWebHostEnvironment env)
+    public RegistryDatabase(DatabaseServer server, IOptions<AccountsOptions> accounts, IOptions<RiotOptions> riot, IWebHostEnvironment env)
     {
+        _server = server;
         var configured = accounts.Value.DataRoot is { Length: > 0 } r ? r
             : accounts.Value.List.FirstOrDefault()?.DataDir is { Length: > 0 } first ? first
             : riot.Value.DataDir;
-        Root = System.IO.Path.IsPathRooted(configured) ? configured : System.IO.Path.Combine(env.ContentRootPath, configured);
-        Path = System.IO.Path.Combine(Root, "registry.db");
+        Root = Path.IsPathRooted(configured) ? configured : Path.Combine(env.ContentRootPath, configured);
+        LegacyPath = Path.Combine(Root, LegacyFileName);
+        Options = new DbContextOptionsBuilder<RegistryDbContext>().UseNpgsql(server.ForSchema(DatabaseServer.RegistrySchema)).Options;
     }
-
-    public DbContextOptions<RegistryDbContext> Options =>
-        new DbContextOptionsBuilder<RegistryDbContext>().UseSqlite($"Data Source={Path}").Options;
 
     public RegistryDbContext Open() => new(Options);
 
-    public void EnsureCreated(ILogger log)
+    // Boot: migrate, then bring the SQLite era's registry.db across once. A
+    // failure here stops the boot on purpose - starting with an empty registry
+    // would mint new account ids from configuration and orphan every schema.
+    public void Migrate(ILogger log)
     {
         Directory.CreateDirectory(Root);
+        _server.EnsureSchema(DatabaseServer.RegistrySchema);
         using var db = Open();
-        db.Database.EnsureCreated();
-        db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL");
-        var connection = db.Database.GetDbConnection();
-        db.Database.OpenConnection();
-        try
-        {
-            foreach (var (table, column, definition) in Upgrades)
-            {
-                using var pragma = connection.CreateCommand();
-                pragma.CommandText = $"PRAGMA table_info({table})";
-                using var reader = pragma.ExecuteReader();
-                var present = false;
-                while (reader.Read()) present |= string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase);
-                if (present) continue;
-                // Same raw command path as the PRAGMA: identifiers come from the
-                // Upgrades table above, never from input, and DDL cannot be
-                // parameterised anyway.
-                using var alter = connection.CreateCommand();
-                alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
-                alter.ExecuteNonQuery();
-                log.LogInformation("registry.db: added column {Table}.{Column}", table, column);
-            }
-        }
-        finally
-        {
-            db.Database.CloseConnection();
-        }
+        db.Database.Migrate();
+        SqliteImport.ImportIfPending(db, LegacyPath, "registry", log);
     }
 }
 

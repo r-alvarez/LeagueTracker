@@ -22,23 +22,23 @@ builder.Services.Configure<AgentsOptions>(builder.Configuration.GetSection("Agen
 builder.Services.Configure<ProxyOptions>(builder.Configuration.GetSection("Proxy"));
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth"));
 
-// The global registry: users, the accounts they own, the machines they
-// enrolled. One SQLite next to the account folders; the per-account
-// databases stay what they were.
+// One PostgreSQL database: the registry (users, the accounts they own, the
+// machines they enrolled) in its own schema, every tracked account in its own.
+builder.Services.AddSingleton<DatabaseServer>();
 builder.Services.AddSingleton<RegistryDatabase>();
 builder.Services.AddSingleton<UserStore>();
 builder.Services.AddSingleton<RegistryBootstrap>();
 builder.Services.AddSingleton<ClaimService>();
 
 // One process, many tracked accounts: each request/job is bound to one
-// (AccountContext) and everything account-shaped - data folder, SQLite,
+// (AccountContext) and everything account-shaped - data folder, schema,
 // Riot routing, live game, running job, render leases - resolves through it.
 builder.Services.AddSingleton<AccountRegistry>();
 builder.Services.AddScoped<AccountContext>();
 builder.Services.AddSingleton<AccountScopes>();
 builder.Services.AddSingleton<AccountInitializer>();
 builder.Services.AddDbContext<LeagueDbContext>((sp, o) =>
-    o.UseSqlite($"Data Source={Path.Combine(sp.GetRequiredService<AccountContext>().DataDir, "leaguetracker.db")}"));
+    o.UseNpgsql(sp.GetRequiredService<DatabaseServer>().ForSchema(DatabaseServer.AccountSchema(sp.GetRequiredService<AccountContext>().Current))));
 
 builder.Services.AddSingleton<RiotRateLimiter>();
 builder.Services.AddSingleton<IRiotKeyProvider, RiotKeyProvider>();
@@ -845,7 +845,7 @@ owner.MapDelete("/matches/{id}/fullgame", (string id, FullGameService full) =>
 });
 
 // Disk usage per artifact family - keeps the storage cost of renders visible.
-owner.MapGet("/storage", (DataPaths paths) =>
+owner.MapGet("/storage", async (DataPaths paths, LeagueDbContext db, CancellationToken ct) =>
 {
     static double DirMb(string dir) => Directory.Exists(dir)
         ? Math.Round(Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length) / 1024.0 / 1024.0, 1)
@@ -857,9 +857,7 @@ owner.MapGet("/storage", (DataPaths paths) =>
         ClipsMb = DirMb(Path.Combine(paths.DataDir, "clips")),
         FullGamesMb = DirMb(Path.Combine(paths.DataDir, "fullgames")),
         VodsMb = DirMb(Path.Combine(paths.DataDir, "vods")),
-        DatabaseMb = File.Exists(Path.Combine(paths.DataDir, "leaguetracker.db"))
-            ? Math.Round(new FileInfo(Path.Combine(paths.DataDir, "leaguetracker.db")).Length / 1024.0 / 1024.0, 1)
-            : 0,
+        DatabaseMb = Math.Round(await db.Database.SqlQueryRaw<long>(DatabaseServer.SchemaBytesSql).SingleAsync(ct) / 1024.0 / 1024.0, 1),
     });
 });
 
