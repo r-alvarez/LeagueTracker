@@ -160,13 +160,24 @@ unowned until claimed).
 
 ## Storage model
 
-SQLite (`data/leaguetracker.db`; never committed) is an **index, not the
-truth**. The truth is the raw `{ matchId, match, timeline }` files in
-`data/games`. Any schema or derivation change: delete the db and re-import, or
-hit the reprocess endpoint — no Riot API calls needed. The exceptions are what
-only exists because someone was there: LP snapshots (mirrored to
-`data/lp-history.csv` so a rebuild restores them via import) and gameplans
+PostgreSQL (one database; the registry in its own schema, every tracked
+account in an `acct_<id>` schema) is an **index, not the truth**. The truth is
+the raw `{ matchId, match, timeline }` files in `data/games`. Any derivation
+change: hit the reprocess endpoint, or drop the account's schema and re-import
+the folder — no Riot API calls needed. Schema changes are EF migrations
+(`dotnet ef migrations add <Name> --context LeagueDbContext --output-dir
+Data/Migrations`, or `RegistryDbContext` / `Registry/Migrations`), applied to
+every schema at boot. The exceptions are what only exists because someone was
+there: LP snapshots (mirrored to `data/lp-history.csv` so a rebuild restores
+them via import), the ranks captured at game time, and gameplans
 (`data/gameplans/*.json`), which are files from the start and never in the db.
+
+A host run needs the database from `docker compose up -d postgres`
+(localhost:5432, credentials in `appsettings.json`); the tests start their own
+in Testcontainers. A data folder from the SQLite era is brought across on the
+first boot: each `leaguetracker.db` and `registry.db` is copied row for row
+into its schema, verified against the file, and kept as `*.imported` — see
+`docs/operate.md`.
 
 ## Endpoints
 
