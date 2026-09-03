@@ -190,7 +190,9 @@ services:
 
   # A nightly pg_dump into /data/backups (14 kept): the copy that restores on
   # any host with one pg_restore, next to the crash-consistent snapshot of the
-  # cluster folder above.
+  # cluster folder above. Docker creates a missing bind-mount folder as root,
+  # which 568 cannot write to: `mkdir` + `chown 568:568` the backups folder
+  # on the NAS before the first deploy (docs/operate.md §6).
   pg-backup:
     build:
       context: ./pg-backup
