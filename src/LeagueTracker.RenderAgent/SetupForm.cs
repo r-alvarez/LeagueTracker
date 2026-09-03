@@ -260,9 +260,11 @@ public sealed class SetupForm : Form
     /// code in the box; a bare eight-letter code just stays as typed.
     private void ApplyJoinCode(string text)
     {
-        var code = text.Trim();
-        var pasted = code.StartsWith("lt2:", StringComparison.OrdinalIgnoreCase) || code.StartsWith("lt1:", StringComparison.OrdinalIgnoreCase);
-        if (!pasted) return;
+        // Whitespace anywhere, not just at the ends: a one-line paste that
+        // travelled through mail or chat comes back wrapped, and a blob with a
+        // newline in the middle of it is not base64 any more.
+        var code = new string([.. text.Where(c => !char.IsWhiteSpace(c))]);
+        if (!IsPaste(code)) return;
         try
         {
             var b64 = code[4..].Replace('-', '+').Replace('_', '/');
@@ -278,11 +280,16 @@ public sealed class SetupForm : Form
             }
             if (Get("prefix") is { } prefix) _prefix.Text = prefix;
             if (Get("recordings") is { Length: > 0 } rec) _recordings.Text = rec;
-            _verdict.ForeColor = Good;
-            _verdict.Text = "Join code applied - press Test connection, then Save.";
             // Leave the bare code in the box (TextChanged re-enters and returns
-            // at once - a bare code is not a paste).
-            if (Get("code") is { Length: > 0 } joinCode) _join.Text = joinCode;
+            // at once - a bare code is not a paste). The box visibly shrinking
+            // to eight letters reads as a half-finished paste, so the verdict
+            // says out loud that the rest was unpacked, not lost.
+            var kept = Get("code") is { Length: > 0 } joinCode ? joinCode : null;
+            if (kept is not null) _join.Text = kept;
+            _verdict.ForeColor = Good;
+            _verdict.Text = kept is not null
+                ? $"Join code {Pretty(kept)} and the tracker address came out of that paste - press Test connection, then Save."
+                : "Tracker address applied - type the join code as well, then press Test connection.";
         }
         catch (Exception ex) when (ex is FormatException or JsonException)
         {
@@ -290,6 +297,14 @@ public sealed class SetupForm : Form
             _verdict.Text = "That join code is not readable - ask for it again.";
         }
     }
+
+    /// The two shapes the Data page hands out, and the only text the code box
+    /// unpacks instead of sending as a code.
+    private static bool IsPaste(string text) =>
+        text.StartsWith("lt2:", StringComparison.OrdinalIgnoreCase) || text.StartsWith("lt1:", StringComparison.OrdinalIgnoreCase);
+
+    /// K7Q29DFM -> K7Q2-9DFM, the way the Data page shows it.
+    private static string Pretty(string code) => code.Length == 8 ? $"{code[..4]}-{code[4..]}" : code;
 
     private bool Validate(out string problem)
     {
@@ -308,7 +323,7 @@ public sealed class SetupForm : Form
         return new AgentConfig
         {
             ServerUrl = string.Join(",", _server.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)),
-            JoinCode = _join.Text.Trim().StartsWith("lt", StringComparison.OrdinalIgnoreCase) ? "" : _join.Text.Trim().Replace("-", ""),
+            JoinCode = IsPaste(_join.Text.Trim()) ? "" : _join.Text.Trim().Replace("-", ""),
             RecordGames = record,
             RenderReplays = render,
             RecordingsDir = _recordings.Text.Trim(),
