@@ -50,7 +50,7 @@ public class AgentKeyStoreEnrolTests(PostgresFixture postgres) : IDisposable
         Assert.True(created);
         Assert.Equal("user-1", record!.OwnerUserId);
         Assert.Equal(AgentKeyStatus.Pending, record.Status);
-        Assert.Equal(EnrolRefusal.JoinCodeRequired, keys.Enroll(Key(2), "other", "PC", "203.0.113.5", code.Code).Refusal);
+        Assert.Equal(EnrolRefusal.JoinCodeUnusable, keys.Enroll(Key(2), "other", "PC", "203.0.113.5", code.Code).Refusal);
     }
 
     [Fact]
@@ -108,12 +108,44 @@ public class AgentKeyStoreEnrolTests(PostgresFixture postgres) : IDisposable
     }
 
     [Fact]
-    public void An_address_gets_twenty_first_announcements_an_hour()
+    public void An_address_gets_twenty_distinct_guesses_an_hour()
     {
         var keys = Store();
-        for (var i = 0; i < 20; i++) Assert.Equal(EnrolRefusal.JoinCodeRequired, keys.Enroll(Key(i), "guess", "PC", "203.0.113.5", "WRONGCODE").Refusal);
+        for (var i = 0; i < 20; i++) Assert.Equal(EnrolRefusal.JoinCodeUnusable, keys.Enroll(Key(i), "guess", "PC", "203.0.113.5", $"WRONGCOD{i:D2}").Refusal);
         Assert.Equal(EnrolRefusal.TooManyAttempts, keys.Enroll(Key(21), "guess", "PC", "203.0.113.5", "WRONGCODE").Refusal);
         var code = keys.MintJoinCode("user-1", AgentRole.Recorder);
         Assert.Null(keys.Enroll(Key(22), "friend", "PC", "198.51.100.7", code.Code).Refusal);
+    }
+
+    // Ben, 3 Sept: a code that had expired, one Test press after another,
+    // until his own address was refused and the window blamed the server.
+    [Fact]
+    public void Re_presenting_one_dead_code_never_exhausts_the_budget()
+    {
+        var keys = Store();
+        for (var i = 0; i < 50; i++)
+            Assert.Equal(EnrolRefusal.JoinCodeUnusable, keys.Enroll(Key(1), "friend", "PC", "203.0.113.5", "K7Q2-9DFM").Refusal);
+        // Case and dashes are the same code, not three more guesses.
+        Assert.Equal(EnrolRefusal.JoinCodeUnusable, keys.Enroll(Key(1), "friend", "PC", "203.0.113.5", "k7q29dfm").Refusal);
+        var code = keys.MintJoinCode("user-1", AgentRole.Recorder);
+        Assert.Null(keys.Enroll(Key(1), "friend", "PC", "203.0.113.5", code.Code).Refusal);
+    }
+
+    // The budget guards the stranger's door; an owner's code is not a knock.
+    [Fact]
+    public void A_valid_code_is_never_charged_against_the_guessing_budget()
+    {
+        var keys = Store();
+        for (var i = 0; i < 20; i++) Assert.Equal(EnrolRefusal.JoinCodeUnusable, keys.Enroll(Key(i), "guess", "PC", "203.0.113.5", $"WRONGCOD{i:D2}").Refusal);
+        var code = keys.MintJoinCode("user-1", AgentRole.Recorder);
+        Assert.Null(keys.Enroll(Key(50), "friend", "PC", "203.0.113.5", code.Code).Refusal);
+    }
+
+    [Fact]
+    public void A_machine_with_no_code_at_all_is_told_so_and_not_that_its_code_failed()
+    {
+        var keys = Store();
+        Assert.Equal(EnrolRefusal.JoinCodeRequired, keys.Enroll(Key(1), "m", "PC", "203.0.113.5", joinCode: null).Refusal);
+        Assert.Equal(EnrolRefusal.JoinCodeRequired, keys.Enroll(Key(2), "m", "PC", "203.0.113.5", joinCode: "   ").Refusal);
     }
 }
