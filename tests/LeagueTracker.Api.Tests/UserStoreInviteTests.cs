@@ -1,5 +1,6 @@
 using LeagueTracker.Api.Accounts;
 using LeagueTracker.Api.Auth;
+using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Registry;
 using LeagueTracker.Api.Riot;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -7,21 +8,23 @@ using Microsoft.Extensions.Options;
 
 namespace LeagueTracker.Api.Tests;
 
-public class UserStoreInviteTests : IDisposable
+[Collection(PostgresCollection.Name)]
+public class UserStoreInviteTests(PostgresFixture postgres) : IDisposable
 {
     private const string Issuer = "https://tenant.eu.auth0.com/";
     private readonly string _root = Path.Combine(Path.GetTempPath(), "lt-tests", Guid.NewGuid().ToString("N"));
+    private readonly DatabaseServer _server = postgres.NewServer();
 
     private UserStore Store(bool inviteOnly = true)
     {
-        var registry = new RegistryDatabase(Options.Create(new AccountsOptions { DataRoot = _root }), Options.Create(new RiotOptions()), new TestEnv(_root));
-        registry.EnsureCreated(NullLogger.Instance);
+        var registry = new RegistryDatabase(_server, Options.Create(new AccountsOptions { DataRoot = _root }), Options.Create(new RiotOptions()), new TestEnv(_root));
+        registry.Migrate(NullLogger.Instance);
         return new UserStore(registry, Options.Create(new AuthOptions { InviteOnly = inviteOnly }), NullLogger<UserStore>.Instance);
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, recursive: true); } catch { /* a locked WAL file on Windows; the temp folder is disposable */ }
+        try { Directory.Delete(_root, recursive: true); } catch { /* a disposable temp folder */ }
     }
 
     [Fact]
