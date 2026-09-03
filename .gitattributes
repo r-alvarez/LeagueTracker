@@ -1,0 +1,2 @@
+# Shell scripts run inside Linux images; a Windows checkout must not hand them CRLF.
+*.sh text eol=lf
