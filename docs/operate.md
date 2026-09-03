@@ -158,7 +158,18 @@ new ids.
 
 ## 6. Moving off SQLite (the first boot of the PostgreSQL build)
 
-Nothing to do by hand. On boot the app migrates the `registry` schema and
+Before the push: set `POSTGRES_PASSWORD` in the stack environment, take a
+ZFS snapshot of the dataset (the rollback point), and create the dump
+folder with the owner the `pg-backup` service runs as - Docker would create
+it as root, which 568 cannot write to:
+
+    mkdir -p /mnt/MediaPool/apps/leaguetracker/backups
+    chown 568:568 /mnt/MediaPool/apps/leaguetracker/backups
+
+(`postgres/` needs nothing: that image starts as root and takes ownership
+of its own folder.)
+
+Then nothing to do by hand. On boot the app migrates the `registry` schema and
 every account's `acct_<id>` schema, then for each schema that is still
 empty and has the SQLite era's file beside it (`/data/registry.db`,
 `<account>/leaguetracker.db`) it copies that file row for row — ids
