@@ -30,7 +30,7 @@ public sealed class AccountRegistry
         _env = env;
         _log = log;
         _registry = registry;
-        registry.EnsureCreated(log);
+        registry.Migrate(log);
         var options = accounts.Value;
         _root = options.DataRoot is { Length: > 0 } r ? Rooted(r) : null;
 

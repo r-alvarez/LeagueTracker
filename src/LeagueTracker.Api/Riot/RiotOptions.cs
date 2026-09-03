@@ -12,7 +12,7 @@ public sealed class RiotOptions
     public string? ApiKey { get; set; }
     public string? ApiKeyFile { get; set; }
     public int PollSeconds { get; set; } = 120;
-    /// Root for the SQLite db and raw per-game JSON. Relative paths resolve against content root.
+    /// Root for the raw per-game JSON and the other files. Relative paths resolve against content root.
     public string DataDir { get; set; } = "Data";
     public double RateSafetyMargin { get; set; } = 0.05;
     /// Full-game renders are big (~500MB); auto-delete this many days after
