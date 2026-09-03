@@ -80,7 +80,7 @@ public sealed class SetupForm : Form
         _review.ForeColor = Ink;
         _review.Margin = new Padding(0, 6, 0, 0);
 
-        foreach (var box in new[] { _server, _recordings, _prefix }) StyleField(box);
+        foreach (var box in new[] { _join, _server, _recordings, _prefix }) StyleField(box);
         _role.FlatStyle = FlatStyle.Flat;
         _role.BackColor = Field;
         _role.ForeColor = Ink;
