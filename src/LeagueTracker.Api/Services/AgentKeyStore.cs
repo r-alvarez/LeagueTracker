@@ -39,7 +39,7 @@ public sealed class AgentKeyRecord
     public bool MayActFor(string accountId) => ActsFor.Contains(accountId);
 }
 
-public enum EnrolRefusal { JoinCodeRequired, TooManyPending, TooManyAttempts }
+public enum EnrolRefusal { JoinCodeRequired, JoinCodeUnusable, TooManyPending, TooManyAttempts }
 
 public sealed class AgentsOptions
 {
@@ -66,7 +66,7 @@ public sealed class AgentKeyStore
 
     private readonly object _gate = new();
     private readonly List<AgentKeyRecord> _records;
-    private readonly List<(DateTime WhenUtc, string Ip)> _attempts = [];
+    private readonly List<(DateTime WhenUtc, string Ip, string Code)> _attempts = [];
     private readonly RegistryDatabase _registry;
     private readonly IOptions<AgentsOptions> _options;
     private readonly ILogger<AgentKeyStore> _log;
@@ -106,7 +106,8 @@ public sealed class AgentKeyStore
         var hash = Hash(key);
         lock (_gate)
         {
-            var code = joinCode is { Length: > 0 } ? TakeJoinCode(joinCode) : null;
+            var presented = Normalize(joinCode);
+            var code = presented is not null ? TakeJoinCode(presented) : null;
             if (_records.FirstOrDefault(r => r.KeyHash == hash) is { } existing)
             {
                 existing.LastSeenUtc = DateTime.UtcNow;
@@ -121,16 +122,23 @@ public sealed class AgentKeyStore
                 return (existing, false, null);
             }
             // Only a first announcement gets this far - a waiting machine
-            // re-announces every 20 s on the branch above - so the attempt
-            // budget is for strangers: code guessing and junk records.
-            if (ip is not null && !NoteAttempt(ip)) return (null, false, EnrolRefusal.TooManyAttempts);
-            // Without a join code nobody can approve the record, so it can
-            // only ever be junk - and twenty junk records used to lock every
-            // real enrolment out (audit M-H6). The rollout flag keeps the old
-            // door open; the caps only ever guard that door, because a valid
-            // code is an owner's hand, not a stranger's.
+            // re-announces every 20 s on the branch above - so what follows
+            // guards the stranger's door: code guessing and junk records. A
+            // valid code is an owner's hand and is never charged against it.
             if (code is null)
             {
+                // One code, one guess, however many times it is presented: a
+                // friend re-pressing Test on a code that died an hour ago used
+                // to spend the whole budget and lock their own address out.
+                if (ip is not null && !NoteAttempt(ip, presented ?? "")) return (null, false, EnrolRefusal.TooManyAttempts);
+                // A code that was offered and did not take is spent, expired
+                // or mistyped - a different sentence from having none at all,
+                // and the only one the person can act on.
+                if (presented is not null) return (null, false, EnrolRefusal.JoinCodeUnusable);
+                // Without a join code nobody can approve the record, so it can
+                // only ever be junk - and twenty junk records used to lock every
+                // real enrolment out (audit M-H6). The rollout flag keeps the old
+                // door open.
                 if (!AllowUnbound) return (null, false, EnrolRefusal.JoinCodeRequired);
                 DropStalePending();
                 var pending = _records.Where(r => r.Status is AgentKeyStatus.Pending && !r.IsBound).ToList();
@@ -158,14 +166,23 @@ public sealed class AgentKeyStore
         }
     }
 
-    private bool NoteAttempt(string ip)
+    // The budget counts distinct guesses, not presses: repeating one code costs
+    // nothing after the first time, so a person fumbling the same dead code
+    // cannot lock their own address out, while a stranger still gets only
+    // twenty tries an hour at the code space.
+    private bool NoteAttempt(string ip, string code)
     {
         var windowStart = DateTime.UtcNow - TimeSpan.FromHours(1);
         _attempts.RemoveAll(a => a.WhenUtc < windowStart);
+        if (_attempts.Any(a => a.Ip == ip && a.Code == code)) return true;
         if (_attempts.Count(a => a.Ip == ip) >= MaxAttemptsPerIpPerHour) return false;
-        _attempts.Add((DateTime.UtcNow, ip));
+        _attempts.Add((DateTime.UtcNow, ip, code));
         return true;
     }
+
+    // "K7Q2-9DFM", "k7q29dfm" and " K7Q2-9DFM " are one code; blank is none.
+    private static string? Normalize(string? code) =>
+        code?.Replace("-", "").Trim().ToUpperInvariant() is { Length: > 0 } clean ? clean : null;
 
     private void DropStalePending()
     {
@@ -261,9 +278,9 @@ public sealed class AgentKeyStore
         return db.JoinCodes.AsNoTracking().Where(c => c.OwnerUserId == ownerUserId && !c.UsedUtc.HasValue && c.ExpiresUtc > now).OrderByDescending(c => c.CreatedUtc).ToList();
     }
 
-    private JoinCode? TakeJoinCode(string presented)
+    // Takes a code that has already been through Normalize.
+    private JoinCode? TakeJoinCode(string normalized)
     {
-        var normalized = presented.Replace("-", "").Trim().ToUpperInvariant();
         using var db = _registry.Open();
         var code = db.JoinCodes.AsNoTracking().FirstOrDefault(c => c.Code == normalized);
         return code is { UsedUtc: null } && code.ExpiresUtc > DateTime.UtcNow ? code : null;

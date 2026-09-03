@@ -82,8 +82,8 @@ public sealed class TrackerClient
 
     /// Enrol (or re-announce) this machine and learn where it stands:
     /// "approved", "pending", "revoked", "refused:<why>" when the tracker
-    /// explained a refusal (no join code, since 2026-08), or null when the
-    /// server is unreachable.
+    /// explained a refusal (no join code, a spent one, too many tries), or
+    /// null when the server is unreachable or says nothing we understand.
     public async Task<string?> EnrollAsync(CancellationToken ct)
     {
         try
@@ -93,8 +93,11 @@ public sealed class TrackerClient
             using var resp = await _http.PostAsync($"{ServerUrl}/api/agent/enroll", content, ct);
             if (!IsJson(resp)) return null;
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
-            if (resp.StatusCode is System.Net.HttpStatusCode.Forbidden && doc.RootElement.TryGetProperty("error", out var error)) return $"refused:{error.GetString()}";
-            if (!resp.IsSuccessStatusCode) return null;
+            // Any answer that explains itself is worth repeating verbatim -
+            // refused for want of a code, for a spent one, or for knocking too
+            // often. Only a silent failure is "no enrolment here".
+            if (!resp.IsSuccessStatusCode)
+                return doc.RootElement.TryGetProperty("error", out var error) ? $"refused:{error.GetString()}" : null;
             return doc.RootElement.GetProperty("status").GetString();
         }
         catch (Exception) when (!ct.IsCancellationRequested)

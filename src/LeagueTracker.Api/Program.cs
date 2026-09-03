@@ -356,10 +356,15 @@ app.MapPost("/api/agent/enroll", (EnrollRequest request, HttpContext http, Agent
 {
     if (request.Key is not { Length: >= 32 } || request.Key.Length > 200) return Results.BadRequest(new { error = "key must be 32-200 characters" });
     var (record, created, refusal) = keys.Enroll(request.Key, request.Name ?? "", request.Machine ?? "unknown", http.Connection.RemoteIpAddress?.ToString(), request.Code);
+    // Every refusal says what to do about it, and says it in JSON: a bare
+    // status code reaches the setup window as "this offers no enrolment - is
+    // this a LeagueTracker server?", which sent Ben hunting the wrong fault.
     return refusal switch
     {
         EnrolRefusal.JoinCodeRequired => Results.Json(new { error = "a join code from the owner's Data page is required" }, statusCode: StatusCodes.Status403Forbidden),
-        not null => Results.StatusCode(StatusCodes.Status429TooManyRequests),
+        EnrolRefusal.JoinCodeUnusable => Results.Json(new { error = "that join code has been used already or has expired - ask the owner for a fresh one" }, statusCode: StatusCodes.Status403Forbidden),
+        EnrolRefusal.TooManyPending => Results.Json(new { error = "too many machines here are waiting for approval - ask the owner to clear the list" }, statusCode: StatusCodes.Status429TooManyRequests),
+        not null => Results.Json(new { error = "too many enrolment attempts from this address - wait an hour, then try once with a fresh code" }, statusCode: StatusCodes.Status429TooManyRequests),
         null => Results.Ok(new { record!.Id, Status = record.Status.ToString().ToLowerInvariant(), Created = created }),
     };
 });
