@@ -80,8 +80,15 @@ services:
       <<: *lt-agent-env
       TZ: Europe/London
       Riot__ApiKeyFile: /data/main/riot-api-key.txt
+      # The one database: the registry in its own schema, every account in its
+      # own (acct_<id>). The password is a Portainer stack env var, NEVER
+      # committed; the postgres service below reads the same one. The first
+      # boot on this build brings each SQLite file (registry.db, every
+      # <account>/leaguetracker.db) across, verifies it row for row and
+      # renames it *.imported - see docs/operate.md.
+      ConnectionStrings__LeagueTracker: Host=postgres;Database=leaguetracker;Username=leaguetracker;Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is a stack env var}
       # Identity: the app is an OIDC client of Auth0 with its own users table
-      # (registry.db under /data). Issuer, client id/secret are Portainer stack
+      # (the registry schema). Issuer, client id/secret are Portainer stack
       # env vars, NEVER committed. Admins and each account's owner are emails;
       # the user rows exist before anyone signs in and join on first login.
       Auth__Oidc__Authority: ${AUTH0_ISSUER:-}
@@ -141,7 +148,10 @@ services:
       Agent__Profile__RecordNamePrefix: Road to Platinum
     volumes:
       - /mnt/MediaPool/apps/leaguetracker:/data
-    networks: [frontend]
+    networks: [frontend, backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     labels:
       - traefik.enable=true
@@ -152,6 +162,57 @@ services:
       - traefik.http.routers.leaguetracker.tls.certResolver=cloudflare
       - traefik.http.routers.leaguetracker.priority=100
       - traefik.http.routers.leaguetracker.service=leaguetracker
+
+  # The database, on the same dataset as everything else so one ZFS snapshot
+  # still holds the whole tracker. Starts as root to take ownership of its
+  # folder on first run and drops to the image's postgres user - the official
+  # image's own flow; running it as 568 needs an /etc/passwd entry and buys
+  # nothing on a folder only it touches. PostgreSQL 18 images keep the cluster
+  # under /var/lib/postgresql/18/docker; the parent is the documented volume
+  # so a later major upgrade (pg_upgrade --link) has both versions in reach.
+  postgres:
+    image: postgres:18-alpine
+    container_name: leaguetracker-postgres
+    environment:
+      TZ: Europe/London
+      POSTGRES_DB: leaguetracker
+      POSTGRES_USER: leaguetracker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is a stack env var}
+    volumes:
+      - /mnt/MediaPool/apps/leaguetracker/postgres:/var/lib/postgresql
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leaguetracker -d leaguetracker"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # A nightly pg_dump into /data/backups (14 kept): the copy that restores on
+  # any host with one pg_restore, next to the crash-consistent snapshot of the
+  # cluster folder above.
+  pg-backup:
+    build:
+      context: ./pg-backup
+    pull_policy: build
+    image: leaguetracker-pg-backup:local
+    container_name: leaguetracker-pg-backup
+    user: "568:568"
+    environment:
+      TZ: Europe/London
+      PGHOST: postgres
+      PGDATABASE: leaguetracker
+      PGUSER: leaguetracker
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is a stack env var}
+      BACKUP_DIR: /backups
+      KEEP_DAYS: "14"
+    volumes:
+      - /mnt/MediaPool/apps/leaguetracker/backups:/backups
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
   # Wakes the render PC while render work waits, so the gaming machine can
   # sleep instead of idling 24/7. The PC and the NAS are on different subnets
@@ -185,3 +246,6 @@ services:
 networks:
   frontend:
     external: true
+  # App <-> database only; nothing on it is reachable from outside the stack.
+  backend:
+    internal: true

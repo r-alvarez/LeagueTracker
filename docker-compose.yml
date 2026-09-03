@@ -1,59 +1,52 @@
 services:
+  # The database a host run (dotnet run, appsettings.json's localhost
+  # connection string) and a container run share. The named volume keeps the
+  # cluster across `docker compose down`; the container name and volume name
+  # are fixed so the host-run recipe in the README finds the same instance.
+  postgres:
+    image: postgres:18-alpine
+    container_name: leaguetracker-postgres
+    environment:
+      POSTGRES_DB: leaguetracker
+      POSTGRES_USER: leaguetracker
+      POSTGRES_PASSWORD: leaguetracker
+    ports:
+      - "5432:5432"
+    volumes:
+      - leaguetracker-postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leaguetracker -d leaguetracker"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # One process, every tracked account (the three-container era is over; the
+  # TrueNAS stack in deploy/truenas/compose.yml is the production shape).
+  # ./data is the account folder of the configured account and the data root
+  # in one, which is the layout a host run has used all along.
   leaguetracker:
     build: .
     container_name: leaguetracker
-    expose:
-      - "5170"
     ports:
-      # Direct access stays available at localhost:5170 alongside the friendly name.
       - "5170:5170"
     environment:
       # Match dates/CSV timestamps render in this zone; LP ledger stays UTC.
       - TZ=Europe/London
-      # Rank/LP display back on (2026-07-16): the process-first review views
-      # exist now, so rank context reads as context, not the verdict. Capture
-      # never stopped while it was hidden.
+      - ConnectionStrings__LeagueTracker=Host=postgres;Database=leaguetracker;Username=leaguetracker;Password=leaguetracker
+      - Accounts__DataRoot=/data
+      - Accounts__List__0__GameName=ImRA
+      - Accounts__List__0__TagLine=87166
+      - Accounts__List__0__DataDir=/data
       - Riot__HideLp=false
     volumes:
-      # Everything persistent lives here: SQLite index, raw game files, LP
-      # ledger CSV, and riot-api-key.txt (first line = the key).
+      # Raw game files, replays, clips, LP ledger CSV, keys and
+      # riot-api-key.txt (first line = the key). The SQLite files of earlier
+      # builds are imported on the first boot and kept as *.imported.
       - ./data:/data
-    restart: unless-stopped
-
-  # Second tracked account (ImRA#5957): a full separate instance so its games,
-  # baselines and LP never pollute the main account's coaching stats. Needs its
-  # own data-alt/riot-api-key.txt (same key file, copied).
-  leaguetracker-alt:
-    build: .
-    container_name: leaguetracker-alt
-    expose:
-      - "5170"
-    ports:
-      - "5171:5170"
-    environment:
-      - TZ=Europe/London
-      - Riot__GameName=ImRA
-      - Riot__TagLine=5957
-      - Riot__HideLp=false
-    volumes:
-      - ./data-alt:/data
-    restart: unless-stopped
-
-  # Third tracked account (a friend's), same isolation rationale. The Riot ID
-  # is theirs, not this file's: ACCOUNT_2_* in .env.
-  leaguetracker-ben:
-    build: .
-    container_name: leaguetracker-ben
-    expose:
-      - "5170"
-    ports:
-      - "5172:5170"
-    environment:
-      - TZ=Europe/London
-      - Riot__GameName=${ACCOUNT_2_GAMENAME:-}
-      - Riot__TagLine=${ACCOUNT_2_TAGLINE:-}
-    volumes:
-      - ./data-ben:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   # Reverse proxy so the app is reachable at http://leaguetracker.localhost
@@ -69,3 +62,7 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
     restart: unless-stopped
+
+volumes:
+  leaguetracker-postgres:
+    name: leaguetracker-postgres
