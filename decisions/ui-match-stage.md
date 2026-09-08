@@ -126,3 +126,19 @@ whole game, had gone with VodReview.
 - The APM line was never removed: it draws whenever the recording's APM
   buckets exist. The 5397 copy has a hand-pasted link and no recording,
   which is why Ruben did not see it there.
+
+## 2026-09-08 — Seen live: footage leads, clips are a card again
+
+Ruben on the deployed page: with a YouTube video the stage should open on
+Footage, not the map; and "where did all my clips go?" - the Clip tab
+showed "none" for a game that had none, and the clips of other games were
+nowhere on their own pages. Reverted the clip fold: the stage has Map and
+Footage only, and the clips card from before the fold sits under the stage
+exactly as it was (with footage, only the fights the POV never saw; without
+it, all clips; planned windows say so).
+
+Until the first moment is opened the footage leads whenever there is any -
+parked, not playing - so the page is the game as played first. The
+per-moment pick still applies once a moment is chosen: a fight without you
+opens the map, your own fight or death the footage. `?t=` links count as
+opened, so a shared missed-fight link still lands on the map.
