@@ -1741,7 +1741,8 @@ a.signin-cta { display: block; }
 .vs-expand .review-q { background: var(--surface-inset); }
 .vs-expand .gp-points .rv-head { margin-bottom: 4px; }
 .vs-expand .gp-row { background: var(--surface-card); }
-.vs-caption { margin: 0 2px; }
+.vs-questions { margin-top: 12px; }
+.vs-caption { margin: 10px 2px 0; }
 .tlink { font: inherit; font-variant-numeric: tabular-nums; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 2px; }
 .tlink:hover { color: var(--accent); }
 .tlink:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }

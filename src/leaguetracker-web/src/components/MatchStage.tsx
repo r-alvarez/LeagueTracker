@@ -128,12 +128,12 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
     <div className="card stage" ref={root}>
       <div className="stage-main">
         <div className="stage-tabs" role="tablist" aria-label="Viewer">
-          {track && (
-            <button type="button" role="tab" aria-selected={view === 'map'} className={`stage-tab${view === 'map' ? ' active' : ''}`} onClick={() => setPinned('map')}>Map</button>
-          )}
           <button type="button" role="tab" aria-selected={view === 'footage'} className={`stage-tab${view === 'footage' ? ' active' : ''}`} onClick={() => setPinned('footage')}>
             Footage <span className="mut">· {sourceWord}</span>
           </button>
+          {track && (
+            <button type="button" role="tab" aria-selected={view === 'map'} className={`stage-tab${view === 'map' ? ' active' : ''}`} onClick={() => setPinned('map')}>Map</button>
+          )}
         </div>
         {track && (
           <div className="stage-view" hidden={view !== 'map'}>
