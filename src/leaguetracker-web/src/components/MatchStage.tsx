@@ -178,8 +178,8 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
 
         {view === 'map' && (
           <p className="mut sm-text map-caption">
-            Positions are Riot's 60-second samples, moved in straight lines between them; kills and objectives sit where they
-            happened. A champion stays at their death spot until the first sample that shows them elsewhere.
+            Positions are Riot's 60-second samples and the kill ledger, moved in straight lines between them; kills and objectives
+            sit where they happened. A champion stays at their death spot until the first sample or kill that shows them alive.
           </p>
         )}
       </div>
