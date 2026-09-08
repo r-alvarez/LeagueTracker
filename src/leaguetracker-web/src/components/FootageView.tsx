@@ -209,49 +209,52 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
         </div>
       )}
 
-      <div className="footage-foot mut sm-text">
-        {source === 'recorded' && vod?.sizeMb != null && <span>{vod.sizeMb} MB on the tracker</span>}
-        {source === 'youtube' && clockPairs.length === 0 && <span>No recording clock map — jumps assume the video starts at the game's 0:00.</span>}
+      <div className="footage-foot">
+        {source === 'recorded' && vod?.sizeMb != null && <div className="mut sm-text">{vod.sizeMb} MB on the tracker</div>}
+        {source === 'youtube' && clockPairs.length === 0 && <div className="mut sm-text">No recording clock map — jumps assume the video starts at the game's 0:00.</div>}
         {source === 'render' && fullGame && (
-          <span>
+          <div className="mut sm-text">
             Replay render · {fullGame.sizeMb} MB{fullGame.renderedUtc && ` · rendered ${new Date(fullGame.renderedUtc).toLocaleDateString()}`}
             {fullGame.keep ? ' · kept' : ' · auto-deleted after the retention window'} · jumps assume the render starts at 0:00
-          </span>
+          </div>
         )}
         {canManage && (
-          <span className="footage-actions">
-            {source !== 'recorded' && (
-              <>
-                <input value={linkDraft} onChange={e => setLinkDraft(e.target.value)} placeholder={vod?.youtubeUrl ? 'Replace the YouTube link…' : 'https://youtu.be/…'} aria-label="YouTube link" />
-                <button className="action" disabled={!linkDraft.trim()} onClick={() => saveLink(linkDraft.trim())}>{vod?.youtubeUrl ? 'replace' : 'link'}</button>
-                {vod?.youtubeUrl && <button className="action" onClick={() => saveLink('')}>unlink</button>}
-              </>
-            )}
-            {source === 'recorded' && (
-              <button className="action" onClick={() => {
-                if (window.confirm('Delete this VOD from the tracker? The recording on the gaming PC is kept.')) {
-                  void api.deleteVod(matchId).then(() => api.vodStatus(matchId).then(onVodChange))
-                }
-              }}>delete</button>
-            )}
-            {source === 'render' && fullGame && (
-              <>
-                <button className="action" onClick={() => api.toggleFullGameKeep(matchId).then(onFullGameChange)}>{fullGame.keep ? 'unkeep' : 'keep'}</button>
+          <div className="footage-manage">
+            <div className="sub-h">{source === 'recorded' ? 'Recording' : source === 'render' ? 'Replay render' : vod?.youtubeUrl ? 'YouTube link' : 'Link this game'}</div>
+            <div className="footage-actions">
+              {source !== 'recorded' && (
+                <>
+                  <input value={linkDraft} onChange={e => setLinkDraft(e.target.value)} placeholder={vod?.youtubeUrl ? 'Replace the YouTube link…' : 'https://youtu.be/…'} aria-label="YouTube link" />
+                  <button className="action" disabled={!linkDraft.trim()} onClick={() => saveLink(linkDraft.trim())}>{vod?.youtubeUrl ? 'replace' : 'link'}</button>
+                  {vod?.youtubeUrl && <button className="action" onClick={() => saveLink('')}>unlink</button>}
+                </>
+              )}
+              {source === 'recorded' && (
                 <button className="action" onClick={() => {
-                  if (window.confirm('Delete this render? The replay may no longer be re-renderable on a newer patch.')) {
-                    void api.deleteFullGame(matchId).then(() => api.fullGameStatus(matchId).then(onFullGameChange))
+                  if (window.confirm('Delete this VOD from the tracker? The recording on the gaming PC is kept.')) {
+                    void api.deleteVod(matchId).then(() => api.vodStatus(matchId).then(onVodChange))
                   }
                 }}>delete</button>
-              </>
-            )}
-            {(source === 'none' || source === 'pending') && fullGame?.state === 'none' && (
-              <button className="action" title="~500 MB and a real-time render on the render box — for games worth studying start to finish"
-                onClick={() => api.requestFullGame(matchId).then(onFullGameChange)}>Render full game</button>
-            )}
-            {source === 'none' && fullGame?.state === 'failed' && (
-              <button className="action" onClick={() => api.retryRender(matchId, 'full').then(() => api.fullGameStatus(matchId).then(onFullGameChange))}>Retry render</button>
-            )}
-          </span>
+              )}
+              {source === 'render' && fullGame && (
+                <>
+                  <button className="action" onClick={() => api.toggleFullGameKeep(matchId).then(onFullGameChange)}>{fullGame.keep ? 'unkeep' : 'keep'}</button>
+                  <button className="action" onClick={() => {
+                    if (window.confirm('Delete this render? The replay may no longer be re-renderable on a newer patch.')) {
+                      void api.deleteFullGame(matchId).then(() => api.fullGameStatus(matchId).then(onFullGameChange))
+                    }
+                  }}>delete</button>
+                </>
+              )}
+              {(source === 'none' || source === 'pending') && fullGame?.state === 'none' && (
+                <button className="action" title="~500 MB and a real-time render on the render box — for games worth studying start to finish"
+                  onClick={() => api.requestFullGame(matchId).then(onFullGameChange)}>Render full game</button>
+              )}
+              {source === 'none' && fullGame?.state === 'failed' && (
+                <button className="action" onClick={() => api.retryRender(matchId, 'full').then(() => api.fullGameStatus(matchId).then(onFullGameChange))}>Retry render</button>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -57,20 +57,20 @@ export default function ClipView({ matchId, clips, onClipsChange, canManage, mom
   return (
     <div className="footage">
       <video key={clip.index} ref={videoRef} src={clip.url} controls preload="metadata" className="footage-video" />
-      <div className="footage-foot mut sm-text">
-        <span>
+      <div className="footage-foot">
+        <div className="mut sm-text">
           {clip.label} · {clock(clip.startSec)}–{clock(clip.endSec)}
           {clip.kind === 'fight' && clip.cameraChampion ? ` · from ${clip.cameraChampion}'s view` : ' · rendered from the official replay'}
-        </span>
+        </div>
         {canManage && (
-          <span className="footage-actions">
+          <div className="footage-actions">
             <button className="action" title="Delete this clip and queue just this window for a fresh render"
               onClick={() => {
                 if (window.confirm('Delete this clip? The render agent will re-create it from the replay (needs the replay still playable on the current patch).')) {
                   void api.deleteClip(matchId, clip.index).then(() => api.clips(matchId).then(onClipsChange))
                 }
               }}>✕ re-render</button>
-          </span>
+          </div>
         )}
       </div>
     </div>
