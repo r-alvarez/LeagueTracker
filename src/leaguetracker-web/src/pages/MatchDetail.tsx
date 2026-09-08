@@ -10,6 +10,8 @@ import { ItemIcon, PerkIcon, UnitGlyph } from '../components/GameIcons'
 import VerdictStrip from '../components/VerdictStrip'
 import MatchStage, { type StageJump } from '../components/MatchStage'
 import { RelTime, tierClass } from '../components/Stats'
+import { clock } from '../components/TimeLink'
+import { footageSource } from '../components/FootageView'
 
 type Tab = 'scoreboard' | 'build' | 'timeline'
 
@@ -578,6 +580,11 @@ export default function MatchDetail() {
   // Duels are out - my own duels are already the kill/death rows, and other
   // lanes' solo trades are noise at review time. Towers are out too - a
   // dozen "tower" rows would bury the fights.
+  const footage = footageSource(vod, fullGame)
+  const hasFootage = footage === 'recorded' || footage === 'youtube' || footage === 'render'
+  // With footage the player's own kills and deaths are on it already; the
+  // fight clips show what the POV never could.
+  const visibleClips = hasFootage ? clips.filter(c => c.kind === 'fight') : clips
   const moments: MapMoment[] = [
     ...(detail.fights ?? [])
       .filter(f => f.kind !== 'duel')
@@ -684,7 +691,52 @@ export default function MatchDetail() {
       <MatchStage matchId={m.id} track={track && track.frames.length > 0 ? track : null} moments={moments}
         durationSec={Math.round(m.durationMin * 60)}
         vod={vod} onVodChange={setVod} fullGame={fullGame} onFullGameChange={setFullGame}
-        clips={clips} onClipsChange={setClips} canManage={canManage} jumpTo={jump} />
+        canManage={canManage} jumpTo={jump} />
+
+      {/* Clips keep rendering and stay on disk as the backup copy, but once a
+          recording (or its YouTube link) exists the footage covers the same
+          moments - only the fights the player's POV never saw earn a card. */}
+      {visibleClips.length > 0 && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <h2>
+            {hasFootage
+              ? <>Team fights <span className="mut" style={{ fontWeight: 400 }}>— the fights you weren't in, rendered from the replay (your footage never saw them)</span></>
+              : <>Clips <span className="mut" style={{ fontWeight: 400 }}>— your kills & deaths, rendered from the official replay</span></>}
+          </h2>
+          {visibleClips.every(c => !c.ready) ? (
+            <p className="mut" style={{ margin: 0 }}>
+              {visibleClips.length} fight window{visibleClips.length === 1 ? '' : 's'} planned — waiting for the render agent on the gaming PC.
+            </p>
+          ) : (
+            <div className="grid two-col">
+              {visibleClips.map(c => (
+                <div key={c.index}>
+                  <div className="sub-h" style={{ marginTop: 0 }}>
+                    {c.label} · {clock(c.startSec)}–{clock(c.endSec)}
+                    {c.kind === 'fight' && c.cameraChampion
+                      ? <span className="mut"> · from {c.cameraChampion}'s view</span>
+                      : <span className="mut"> · {c.events.map(e => `${e.kind} ${clock(e.timeSec)}`).join(', ')}</span>}
+                    {c.ready && canManage && (
+                      <button className="action" style={{ padding: '0 8px', marginLeft: 8 }}
+                        title="Delete this clip and queue just this window for a fresh render on the gaming PC"
+                        onClick={() => {
+                          if (window.confirm('Delete this clip? The render agent will re-create it from the replay (needs the replay still playable on the current patch).')) {
+                            void api.deleteClip(m.id, c.index).then(() => api.clips(m.id).then(setClips))
+                          }
+                        }}>
+                        ✕ re-render
+                      </button>
+                    )}
+                  </div>
+                  {c.ready
+                    ? <video src={c.url} controls preload="metadata" style={{ width: '100%', borderRadius: 8, background: '#000' }} />
+                    : <div className="empty">queued for render</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="filters">
         <div className="seg" role="tablist" aria-label="Match detail">

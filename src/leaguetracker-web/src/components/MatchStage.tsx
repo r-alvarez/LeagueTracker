@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { clock, defaultMoment, windowFor } from '../mapTrack'
-import ClipView, { clipFor } from './ClipView'
 import FootageView, { footageSource } from './FootageView'
 import MapCanvas from './MapCanvas'
-import type { ClipInfo, FullGameStatus, MapMoment, MatchTrack, VodStatus } from '../types'
+import type { FullGameStatus, MapMoment, MatchTrack, VodStatus } from '../types'
 
 const SPEEDS = [4, 8]
-type View = 'map' | 'footage' | 'clip'
+type View = 'map' | 'footage'
 type Filter = 'missed' | 'mine' | 'objectives' | 'all'
 const FILTERS: { key: Filter; label: string; test: (m: MapMoment) => boolean }[] = [
   { key: 'missed', label: 'Fights without you', test: m => m.kind === 'fight' && !!m.withoutMe },
@@ -17,21 +16,18 @@ const FILTERS: { key: Filter; label: string; test: (m: MapMoment) => boolean }[]
 
 export interface StageJump { timeSec: number; nonce: number }
 
-// The best evidence for a moment: the clip that covers it, else the footage
-// when the player was there (a POV recording never had the fights without
-// them), else the map. The map is the fallback viewer, never the lead over
-// something that was actually filmed.
-function viewFor(moment: MapMoment | null, clips: ClipInfo[], hasFootage: boolean, hasTrack: boolean): View {
-  if (moment && clipFor(clips, moment.timeSec)) return 'clip'
+// The best evidence for a moment: the footage when the player was there (a
+// POV recording never had the fights without them), else the map. The map
+// is the fallback viewer, never the lead over something actually filmed.
+function viewFor(moment: MapMoment | null, hasFootage: boolean, hasTrack: boolean): View {
   if (hasFootage && !moment?.withoutMe) return 'footage'
-  if (hasTrack) return 'map'
-  return hasFootage ? 'footage' : 'clip'
+  return hasTrack ? 'map' : 'footage'
 }
 
-// One list of moments, three ways to look at each: the map drawn from the
-// timeline, the footage if any exists, the rendered clip if one covers it.
-// Every clock on the page lands here through jumpTo.
-export default function MatchStage({ matchId, track, moments, durationSec, vod, onVodChange, fullGame, onFullGameChange, clips, onClipsChange, canManage, jumpTo }: {
+// One list of moments, two ways to look at each: the map drawn from the
+// timeline, the footage if any exists. Every clock on the page lands here
+// through jumpTo.
+export default function MatchStage({ matchId, track, moments, durationSec, vod, onVodChange, fullGame, onFullGameChange, canManage, jumpTo }: {
   matchId: string
   track: MatchTrack | null
   moments: MapMoment[]
@@ -40,22 +36,23 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
   onVodChange: (v: VodStatus) => void
   fullGame: FullGameStatus | null
   onFullGameChange: (f: FullGameStatus | null) => void
-  clips: ClipInfo[]
-  onClipsChange: (c: ClipInfo[]) => void
   canManage: boolean
   jumpTo: StageJump | null
 }) {
   const source = footageSource(vod, fullGame)
   const hasFootage = source === 'recorded' || source === 'youtube' || source === 'render'
-  const readyClips = clips.filter(c => c.ready).length
   const [filter, setFilter] = useState<Filter>(() => (moments.some(FILTERS[0].test) ? 'missed' : 'all'))
   const [selected, setSelected] = useState(() => defaultMoment(moments))
   const [adhoc, setAdhoc] = useState<MapMoment | null>(null)
   const moment = adhoc ?? moments[selected] ?? null
   // A tab the player clicked holds until the next moment opens; otherwise
-  // each moment picks its own viewer, from whatever has loaded so far.
+  // each moment picks its own viewer, from whatever has loaded so far. Until
+  // the first moment is opened the footage leads whenever there is any: the
+  // page is the game as played first, the map fills in what the footage
+  // never saw once a missed fight is chosen.
   const [pinned, setPinned] = useState<View | null>(null)
-  const view = pinned ?? viewFor(moment, clips, hasFootage, track !== null)
+  const [opened, setOpened] = useState(false)
+  const view = pinned ?? (!opened && hasFootage ? 'footage' : viewFor(moment, hasFootage, track !== null))
   const win = useMemo(() => (moment ? windowFor(moment, durationSec) : { start: 0, end: durationSec }), [moment, durationSec])
   // At rest the map shows the moment itself; play starts from the approach.
   const [t, setT] = useState(() => moment?.timeSec ?? 0)
@@ -67,6 +64,7 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
 
   const open = useCallback((m: MapMoment, idx: number | null) => {
     resting.current = false
+    setOpened(true)
     setPinned(null)
     setAdhoc(idx === null ? m : null)
     if (idx !== null) setSelected(idx)
@@ -95,6 +93,7 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
   useEffect(() => {
     const t0 = Number(new URLSearchParams(window.location.search).get('t'))
     if (!Number.isFinite(t0) || t0 <= 0) return
+    setOpened(true)
     const idx = moments.findIndex(m => Math.abs(m.timeSec - t0) <= 2)
     if (idx >= 0) { setSelected(idx); setT(moments[idx].timeSec) }
     else { setAdhoc({ kind: 'kill', timeSec: t0, label: `the moment at ${clock(t0)}`, tone: 'neutral' }); setT(t0) }
@@ -120,9 +119,8 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
 
   const counts = useMemo(() => FILTERS.map(f => moments.filter(f.test).length), [moments])
   const shown = FILTERS.find(f => f.key === filter) ?? FILTERS[3]
-  const clipHere = moment ? clipFor(clips, moment.timeSec) : null
 
-  if (!track && !hasFootage && clips.length === 0 && source !== 'pending') return null
+  if (!track && !hasFootage && source !== 'pending') return null
 
   const sourceWord = source === 'recorded' ? 'recorded' : source === 'youtube' ? 'YouTube' : source === 'render' ? 'render' : source === 'pending' ? 'uploading' : 'none'
 
@@ -135,9 +133,6 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
           )}
           <button type="button" role="tab" aria-selected={view === 'footage'} className={`stage-tab${view === 'footage' ? ' active' : ''}`} onClick={() => setPinned('footage')}>
             Footage <span className="mut">· {sourceWord}</span>
-          </button>
-          <button type="button" role="tab" aria-selected={view === 'clip'} className={`stage-tab${view === 'clip' ? ' active' : ''}`} onClick={() => setPinned('clip')}>
-            Clip <span className="mut">· {clipHere ? 'ready' : readyClips > 0 ? `${readyClips} elsewhere` : clips.length > 0 ? 'queued' : 'none'}</span>
           </button>
         </div>
         {track && (
@@ -171,11 +166,6 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
             canManage={canManage} moment={moment} moments={moments} durationSec={durationSec} seekKey={seekKey} active={view === 'footage'}
             onJump={t => { jump(t); setPinned('footage') }} />
         </div>
-        <div className="stage-view" hidden={view !== 'clip'}>
-          <ClipView matchId={matchId} clips={clips} onClipsChange={onClipsChange} canManage={canManage} moment={moment} seekKey={seekKey}
-            active={view === 'clip'} onJump={jump} />
-        </div>
-
         {view === 'map' && (
           <p className="mut sm-text map-caption">
             Positions are Riot's 60-second samples and the kill ledger, moved in straight lines between them; kills and objectives
@@ -200,7 +190,6 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
                 className={`map-chip ${m.tone ?? 'neutral'}${i === selected && !adhoc ? ' active' : ''}`} onClick={() => open(m, i)}>
                 <span className="map-chip-time">{clock(m.timeSec)}</span>
                 <span className="map-chip-label">{m.label}</span>
-                {clipFor(clips, m.timeSec) && <span className="map-chip-clip" title="A rendered clip covers this">▶</span>}
                 {m.withoutMe && filter !== 'missed' && <span className="map-chip-flag">without you</span>}
               </button>
             ))}

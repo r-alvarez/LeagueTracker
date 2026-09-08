@@ -1767,7 +1767,6 @@ button.footage-marker.active { border-color: var(--accent); box-shadow: 0 0 0 1p
 .footage-manage .sub-h { margin: 2px 0 6px; }
 .footage-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .footage-actions input { flex: 1 1 200px; min-width: 0; }
-.map-chip-clip { color: var(--accent); font-size: 10px; }
 @media (max-width: 900px) {
   .stage { grid-template-columns: 1fr; }
 }
