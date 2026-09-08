@@ -143,7 +143,7 @@ per-moment pick still applies once a moment is chosen: a fight without you
 opens the map, your own fight or death the footage. `?t=` links count as
 opened, so a shared missed-fight link still lands on the map.
 
-## 2026-09-08 — The questions stay open; Footage is the first tab
+## 2026-09-08 â€” The questions stay open; Footage is the first tab
 
 Ruben, seeing the chips live: "can we revert back that part, everything
 else seems to be correct". The four question chips are gone; the strip
