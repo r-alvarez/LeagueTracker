@@ -70,3 +70,32 @@ a warnings-as-errors build green.
 gives no ward positions), a per-fight "who was where when it started"
 summary sentence, and demoting the renderer to an owner-only feature -
 that is a profile/config change for Ruben once the map has been used.
+
+## 2026-09-08 — The kill ledger is the finer clock
+
+Ruben, reviewing the 19:55 skirmish of EUW1_7976932728 on the map: he had
+killed Vi at 19:47, yet the map showed him dead in mid until 20:00. The
+data: he died at 18:52 at (6488,6523); Riot's 19:00 sample still reports
+that spot (a dead champion's samples freeze where they fell); the next
+sample is 20:00. The dead-champion rule waited for a far sample and ignored
+the kill event that proved him alive, to the second, at (5091,2721).
+
+**Decision.** Two changes to the client maths, no API change.
+- Proof of life is the earliest of a far sample and a later kill the
+  champion dealt or assisted. A later death of the same champion proves
+  nothing about the seconds before it and already takes over as the held
+  spot once the clock reaches it.
+- Each champion's path is the samples plus every kill they dealt or took,
+  as anchors at the exact spot, interpolated in time order. Assists are
+  proof of life but not anchors: a global ult earns one from across the
+  map.
+
+**Still unknown.** When the champion actually respawned. Between the death
+and the first proof they stay at the death spot; the true picture is a
+teleport to the fountain and a walk, and Riot gives neither the timer
+nor the level-per-frame that would let it be estimated. The caption says
+"until the first sample or kill that shows them alive".
+
+**Verified** on the same game: the player is held at mid until 19:46, alive
+at the Vi kill spot at 19:47, interpolated to the 20:00 sample from there;
+the 19:55 frame on the 5397 instance shows him in the bottom-left jungle.

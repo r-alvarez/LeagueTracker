@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useChampionIcons, useMinimapUrl } from '../champions'
-import { MAP_SIZE, clock, deathSpotAt, positionsAt, toMap } from '../mapTrack'
+import { MAP_SIZE, clock, deathSpotAt, pathFor, positionAt, toMap } from '../mapTrack'
 import type { MatchTrack } from '../types'
 
 const ALLY = '#3d8ef3'
@@ -16,7 +16,7 @@ const OBJECTIVE_FADE_SEC = 10
 export default function MapCanvas({ track, t, label }: { track: MatchTrack; t: number; label?: string }) {
   const icon = useChampionIcons()
   const minimap = useMinimapUrl()
-  const positions = positionsAt(track.frames, t)
+  const paths = useMemo(() => new Map(track.participants.map(p => [p.pid, pathFor(track.frames, track.kills, p.pid)])), [track])
   const allyPids = useMemo(() => new Set(track.participants.filter(p => p.isAlly).map(p => p.pid)), [track.participants])
   const sideColor = (pid: number) => (allyPids.has(pid) ? ALLY : ENEMY)
 
@@ -50,7 +50,7 @@ export default function MapCanvas({ track, t, label }: { track: MatchTrack; t: n
 
       {track.participants.map(p => {
         const spot = deathSpotAt(track.kills, track.frames, p.pid, t)
-        const pos = spot ?? positions[p.pid - 1]
+        const pos = spot ?? positionAt(paths.get(p.pid) ?? [], t)
         if (!pos) return null
         const { px, py } = toMap(pos[0], pos[1])
         const src = icon(p.champion)
