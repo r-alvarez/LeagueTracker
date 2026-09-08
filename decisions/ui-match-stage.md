@@ -96,3 +96,33 @@ missed fight opens on the map; "died to Vi" opens the footage; back to a
 missed fight, the map; pinning Footage there holds; the next objective
 re-picks footage. Lint and tsc green. The clip branch of the pick has no
 rendered clip on this PC to see; it is the same one-line rule.
+
+## 2026-09-08 — Reviewed on 5397: the viewer leads, the strip is back
+
+Ruben's review of the merged stage against the old VOD card ("our clean
+version"): the current-moment line was out of place under the Footage tab
+wherever it went; the viewer and the list split the card half and half;
+and the marker strip under the video, the Ascent-like timeline of the
+whole game, had gone with VodReview.
+
+- The viewer column is two thirds (`2fr` / `1fr`, list at least 280px).
+  The map is capped at 720px so it does not become a page-tall square.
+- The moment line lives only in the map view, under the scrubber, as the
+  caption of what the map is playing. The footage names itself and the
+  list highlights the chip; the clip footer carries its own label.
+- The marker strip is back under the video, drawn from the stage's
+  moments (fights, kills, deaths; objectives left out as before),
+  positioned in video time so it lines up with the APM chart, the
+  current moment outlined. Clicking a marker opens that moment AND pins
+  the Footage tab - from the video's own timeline the intent is "seek
+  here", not "show me the best evidence", so a missed fight does not
+  flip the page to the map.
+- The video's reported length sizes the strip once it loads; a YouTube
+  embed never reports one, so the game length stands in, the same
+  assumption its jumps make.
+- The owner's controls under the video sit under a small-caps heading
+  (YouTube link / Link this game / Recording / Replay render) like the old
+  card's side box; the clock-map caveat is a muted line above them.
+- The APM line was never removed: it draws whenever the recording's APM
+  buckets exist. The 5397 copy has a hand-pasted link and no recording,
+  which is why Ruben did not see it there.

@@ -7,6 +7,14 @@ import type { FullGameStatus, MapMoment, VodStatus } from '../types'
 
 const youtubeId = (url: string) => /(?:youtu\.be\/|[?&]v=|shorts\/)([A-Za-z0-9_-]{11})/.exec(url)?.[1] ?? null
 
+const glyph = (m: MapMoment) => (m.kind === 'death' ? '✖' : m.kind === 'fight' ? '⚡' : '⚔')
+// Kills read as wins, deaths as losses; fights carry their own tone (a drawn
+// 3v3 is neither) so the strip stays honest about how each fight went.
+const markerColour = (m: MapMoment) =>
+  m.kind === 'death' || m.tone === 'loss' ? 'var(--loss, #e5484d)'
+  : m.tone === 'neutral' ? 'var(--muted, #9aa4af)'
+  : 'var(--win, #30a46c)'
+
 export type FootageSource = 'recorded' | 'youtube' | 'render' | 'pending' | 'none'
 
 // What the Footage tab can show, in the order it prefers: the tracker's own
@@ -38,7 +46,7 @@ function ApmTooltip({ active, payload }: ApmTooltipProps) {
 // The game as it was played: the recording, a hand-linked YouTube upload,
 // or the replay render, seeking to whatever moment the stage has selected
 // through the recording's clock map. The APM line rides under it.
-export default function FootageView({ matchId, vod, onVodChange, fullGame, onFullGameChange, canManage, moment, seekKey, active }: {
+export default function FootageView({ matchId, vod, onVodChange, fullGame, onFullGameChange, canManage, moment, moments, durationSec, seekKey, active, onJump }: {
   matchId: string
   vod: VodStatus | null
   onVodChange: (v: VodStatus) => void
@@ -46,10 +54,14 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
   onFullGameChange: (f: FullGameStatus | null) => void
   canManage: boolean
   moment: MapMoment | null
+  moments: MapMoment[]
+  durationSec: number
   seekKey: number
   active: boolean
+  onJump: (timeSec: number) => void
 }) {
   const [linkDraft, setLinkDraft] = useState('')
+  const [videoDuration, setVideoDuration] = useState<number | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const youtubeRef = useRef<HTMLIFrameElement | null>(null)
   const ytPlayerRef = useRef<{ seekTo: (s: number, allowAhead: boolean) => void; playVideo: () => void; pauseVideo: () => void } | null>(null)
@@ -139,6 +151,17 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
     ytPlayerRef.current?.pauseVideo?.()
   }, [active])
 
+  // The strip shares the video's width, so a marker's horizontal position IS
+  // its place in the video. Until the file reports its length (a YouTube
+  // embed never does) the game's own length stands in - the same assumption
+  // the jumps make.
+  const stripDuration = videoDuration ?? videoFor(durationSec)
+  const markers = moments
+    .filter(m => m.kind !== 'objective')
+    .map(m => ({ ...m, videoSec: videoFor(m.timeSec) }))
+    .filter(m => m.videoSec <= stripDuration)
+  const isCurrent = (m: MapMoment) => moment !== null && m.kind === moment.kind && m.timeSec === moment.timeSec
+
   const apmData = (vod?.apm?.apm ?? []).map((apm, i) => {
     const videoSec = i * (vod?.apm?.bucketSec ?? 10)
     return { videoSec, apm, gameClock: clock(interpolate('videoSec', 'gameSec', videoSec) ?? videoSec) }
@@ -152,7 +175,7 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
     <div className="footage">
       {source === 'recorded' && (
         <video ref={videoRef} src={account.apiUrl(`/api/matches/${matchId}/vod`)} poster={account.apiUrl(`/api/matches/${matchId}/vod/thumb`)}
-          controls preload="metadata" className="footage-video" />
+          controls preload="metadata" className="footage-video" onLoadedMetadata={e => setVideoDuration(e.currentTarget.duration)} />
       )}
       {source === 'youtube' && ytId && (
         <iframe ref={youtubeRef}
@@ -160,7 +183,8 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
           title="Game VOD on YouTube" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen className="footage-video footage-frame" />
       )}
       {source === 'render' && (
-        <video ref={videoRef} src={account.apiUrl(`/api/matches/${matchId}/fullgame`)} controls preload="metadata" className="footage-video" />
+        <video ref={videoRef} src={account.apiUrl(`/api/matches/${matchId}/fullgame`)} controls preload="metadata" className="footage-video"
+          onLoadedMetadata={e => setVideoDuration(e.currentTarget.duration)} />
       )}
       {source === 'pending' && (
         <div className="stage-placeholder">
@@ -178,6 +202,16 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
           {(!fullGame || fullGame.state === 'none') && (canManage
             ? 'With the agent on the gaming PC, the recording lands here and seeks to the moment; a YouTube upload linked below works the same way. The map never needs it.'
             : 'With the agent on the gaming PC, the recording lands here and seeks to the moment. The map never needs it.')}
+        </div>
+      )}
+
+      {(source === 'recorded' || source === 'youtube' || source === 'render') && markers.length > 0 && (
+        <div className="footage-markers" aria-label="Moments">
+          {markers.map(m => (
+            <button key={`${m.kind}-${m.timeSec}`} type="button" className={`action footage-marker${isCurrent(m) ? ' active' : ''}`}
+              title={`${m.label} at ${clock(m.timeSec)} — click to watch`} style={{ left: `${(m.videoSec / stripDuration) * 100}%`, color: markerColour(m) }}
+              onClick={() => onJump(m.timeSec)}>{glyph(m)}</button>
+          ))}
         </div>
       )}
 
