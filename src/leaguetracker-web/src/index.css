@@ -1683,7 +1683,7 @@ a.signin-cta { display: block; }
    moment. The chips are the index; the stage keeps its square. */
 .map-replay { display: grid; grid-template-columns: minmax(0, 520px) minmax(240px, 1fr); gap: 18px; align-items: start; }
 .map-main { display: grid; gap: 10px; }
-.map-stage { width: 100%; }
+.map-stage, .map-controls { width: 100%; max-width: 720px; }
 .map-svg { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--border); background: #0b0f14; }
 .map-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .map-controls input[type="range"] { flex: 1 1 160px; accent-color: var(--accent); }
@@ -1747,7 +1747,7 @@ a.signin-cta { display: block; }
 .tlink:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
 
 /* The stage: one moment list, three viewers. */
-.stage { display: grid; grid-template-columns: minmax(0, 560px) minmax(240px, 1fr); gap: 18px; align-items: start; margin-bottom: 14px; }
+.stage { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 18px; align-items: start; margin-bottom: 14px; }
 .stage-main { display: grid; gap: 10px; min-width: 0; }
 .stage-view { display: grid; gap: 10px; min-width: 0; }
 .stage-view[hidden] { display: none; }
@@ -1760,6 +1760,9 @@ a.signin-cta { display: block; }
 .footage { display: grid; gap: 8px; }
 .footage-video { display: block; width: 100%; border-radius: 10px; background: #000; }
 .footage-frame { aspect-ratio: 16 / 9; border: 0; }
+.footage-markers { position: relative; height: 22px; }
+button.footage-marker { position: absolute; transform: translateX(-50%); padding: 0 4px; line-height: 20px; font-size: 12px; }
+button.footage-marker.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); z-index: 1; }
 .footage-foot { display: grid; gap: 8px; }
 .footage-manage .sub-h { margin: 2px 0 6px; }
 .footage-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }

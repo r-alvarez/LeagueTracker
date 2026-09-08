@@ -140,13 +140,6 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
             Clip <span className="mut">· {clipHere ? 'ready' : readyClips > 0 ? `${readyClips} elsewhere` : clips.length > 0 ? 'queued' : 'none'}</span>
           </button>
         </div>
-        {moment && (
-          <div className="map-now">
-            <span className={`map-chip-time ${moment.tone ?? 'neutral'}`}>{clock(moment.timeSec)}</span> {moment.label}
-            {moment.withoutMe && <span className="map-chip-flag"> · without you</span>}
-          </div>
-        )}
-
         {track && (
           <div className="stage-view" hidden={view !== 'map'}>
             <div className="map-stage"><MapCanvas track={track} t={t} label={moment?.label} /></div>
@@ -165,11 +158,18 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
                 ))}
               </span>
             </div>
+            {moment && (
+              <div className="map-now">
+                <span className={`map-chip-time ${moment.tone ?? 'neutral'}`}>{clock(moment.timeSec)}</span> {moment.label}
+                {moment.withoutMe && <span className="map-chip-flag"> · without you</span>}
+              </div>
+            )}
           </div>
         )}
         <div className="stage-view" hidden={view !== 'footage'}>
           <FootageView matchId={matchId} vod={vod} onVodChange={onVodChange} fullGame={fullGame} onFullGameChange={onFullGameChange}
-            canManage={canManage} moment={moment} seekKey={seekKey} active={view === 'footage'} />
+            canManage={canManage} moment={moment} moments={moments} durationSec={durationSec} seekKey={seekKey} active={view === 'footage'}
+            onJump={t => { jump(t); setPinned('footage') }} />
         </div>
         <div className="stage-view" hidden={view !== 'clip'}>
           <ClipView matchId={matchId} clips={clips} onClipsChange={onClipsChange} canManage={canManage} moment={moment} seekKey={seekKey}
