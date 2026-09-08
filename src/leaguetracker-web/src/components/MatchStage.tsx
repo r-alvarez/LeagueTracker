@@ -17,6 +17,17 @@ const FILTERS: { key: Filter; label: string; test: (m: MapMoment) => boolean }[]
 
 export interface StageJump { timeSec: number; nonce: number }
 
+// The best evidence for a moment: the clip that covers it, else the footage
+// when the player was there (a POV recording never had the fights without
+// them), else the map. The map is the fallback viewer, never the lead over
+// something that was actually filmed.
+function viewFor(moment: MapMoment | null, clips: ClipInfo[], hasFootage: boolean, hasTrack: boolean): View {
+  if (moment && clipFor(clips, moment.timeSec)) return 'clip'
+  if (hasFootage && !moment?.withoutMe) return 'footage'
+  if (hasTrack) return 'map'
+  return hasFootage ? 'footage' : 'clip'
+}
+
 // One list of moments, three ways to look at each: the map drawn from the
 // timeline, the footage if any exists, the rendered clip if one covers it.
 // Every clock on the page lands here through jumpTo.
@@ -37,11 +48,14 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
   const source = footageSource(vod, fullGame)
   const hasFootage = source === 'recorded' || source === 'youtube' || source === 'render'
   const readyClips = clips.filter(c => c.ready).length
-  const [view, setView] = useState<View>(() => (track ? 'map' : hasFootage ? 'footage' : 'clip'))
   const [filter, setFilter] = useState<Filter>(() => (moments.some(FILTERS[0].test) ? 'missed' : 'all'))
   const [selected, setSelected] = useState(() => defaultMoment(moments))
   const [adhoc, setAdhoc] = useState<MapMoment | null>(null)
   const moment = adhoc ?? moments[selected] ?? null
+  // A tab the player clicked holds until the next moment opens; otherwise
+  // each moment picks its own viewer, from whatever has loaded so far.
+  const [pinned, setPinned] = useState<View | null>(null)
+  const view = pinned ?? viewFor(moment, clips, hasFootage, track !== null)
   const win = useMemo(() => (moment ? windowFor(moment, durationSec) : { start: 0, end: durationSec }), [moment, durationSec])
   // At rest the map shows the moment itself; play starts from the approach.
   const [t, setT] = useState(() => moment?.timeSec ?? 0)
@@ -53,6 +67,7 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
 
   const open = useCallback((m: MapMoment, idx: number | null) => {
     resting.current = false
+    setPinned(null)
     setAdhoc(idx === null ? m : null)
     if (idx !== null) setSelected(idx)
     setT(windowFor(m, durationSec).start)
@@ -116,18 +131,18 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
       <div className="stage-main">
         <div className="stage-tabs" role="tablist" aria-label="Viewer">
           {track && (
-            <button type="button" role="tab" aria-selected={view === 'map'} className={`stage-tab${view === 'map' ? ' active' : ''}`} onClick={() => setView('map')}>Map</button>
+            <button type="button" role="tab" aria-selected={view === 'map'} className={`stage-tab${view === 'map' ? ' active' : ''}`} onClick={() => setPinned('map')}>Map</button>
           )}
-          <button type="button" role="tab" aria-selected={view === 'footage'} className={`stage-tab${view === 'footage' ? ' active' : ''}`} onClick={() => setView('footage')}>
+          <button type="button" role="tab" aria-selected={view === 'footage'} className={`stage-tab${view === 'footage' ? ' active' : ''}`} onClick={() => setPinned('footage')}>
             Footage <span className="mut">· {sourceWord}</span>
           </button>
-          <button type="button" role="tab" aria-selected={view === 'clip'} className={`stage-tab${view === 'clip' ? ' active' : ''}`} onClick={() => setView('clip')}>
+          <button type="button" role="tab" aria-selected={view === 'clip'} className={`stage-tab${view === 'clip' ? ' active' : ''}`} onClick={() => setPinned('clip')}>
             Clip <span className="mut">· {clipHere ? 'ready' : readyClips > 0 ? `${readyClips} elsewhere` : clips.length > 0 ? 'queued' : 'none'}</span>
           </button>
         </div>
 
-        {view === 'map' && track && (
-          <>
+        {track && (
+          <div className="stage-view" hidden={view !== 'map'}>
             <div className="map-stage"><MapCanvas track={track} t={t} label={moment?.label} /></div>
             <div className="map-controls">
               <button type="button" className="action primary" onClick={() => {
@@ -144,15 +159,16 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
                 ))}
               </span>
             </div>
-          </>
+          </div>
         )}
-        {view === 'footage' && (
+        <div className="stage-view" hidden={view !== 'footage'}>
           <FootageView matchId={matchId} vod={vod} onVodChange={onVodChange} fullGame={fullGame} onFullGameChange={onFullGameChange}
-            canManage={canManage} moment={moment} seekKey={seekKey} />
-        )}
-        {view === 'clip' && (
-          <ClipView matchId={matchId} clips={clips} onClipsChange={onClipsChange} canManage={canManage} moment={moment} seekKey={seekKey} onJump={jump} />
-        )}
+            canManage={canManage} moment={moment} seekKey={seekKey} active={view === 'footage'} />
+        </div>
+        <div className="stage-view" hidden={view !== 'clip'}>
+          <ClipView matchId={matchId} clips={clips} onClipsChange={onClipsChange} canManage={canManage} moment={moment} seekKey={seekKey}
+            active={view === 'clip'} onJump={jump} />
+        </div>
 
         {moment && (
           <div className="map-now">

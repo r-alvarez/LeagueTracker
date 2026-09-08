@@ -7,24 +7,33 @@ import type { ClipInfo, MapMoment } from '../types'
 export const clipFor = (clips: ClipInfo[], timeSec: number) =>
   clips.find(c => c.ready && timeSec >= c.startSec - 1 && timeSec <= c.endSec + 1) ?? null
 
-export default function ClipView({ matchId, clips, onClipsChange, canManage, moment, seekKey, onJump }: {
+export default function ClipView({ matchId, clips, onClipsChange, canManage, moment, seekKey, active, onJump }: {
   matchId: string
   clips: ClipInfo[]
   onClipsChange: (c: ClipInfo[]) => void
   canManage: boolean
   moment: MapMoment | null
   seekKey: number
+  active: boolean
   onJump: Jump
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const seenSeek = useRef(0)
   const clip = moment ? clipFor(clips, moment.timeSec) : null
 
+  // Mounted behind the other viewers too, so a seek waits until the clip is
+  // on screen and is honoured once.
   useEffect(() => {
-    if (!clip || !moment || !videoRef.current || seekKey === 0) return
+    if (!active || !clip || !moment || !videoRef.current || seekKey === 0 || seenSeek.current === seekKey) return
+    seenSeek.current = seekKey
     videoRef.current.currentTime = Math.max(0, moment.timeSec - clip.startSec - 5)
     void videoRef.current.play()
-    // seekKey is the trigger; the clip and moment are read at that instant.
-  }, [seekKey, clip?.index]) // eslint-disable-line react-hooks/exhaustive-deps
+    // seekKey and active are the triggers; the clip and moment are read at that instant.
+  }, [seekKey, active, clip?.index]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!active) videoRef.current?.pause()
+  }, [active])
 
   const ready = clips.filter(c => c.ready)
   const planned = clips.filter(c => !c.ready)

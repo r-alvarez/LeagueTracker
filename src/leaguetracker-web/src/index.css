@@ -1749,6 +1749,8 @@ a.signin-cta { display: block; }
 /* The stage: one moment list, three viewers. */
 .stage { display: grid; grid-template-columns: minmax(0, 560px) minmax(240px, 1fr); gap: 18px; align-items: start; margin-bottom: 14px; }
 .stage-main { display: grid; gap: 10px; min-width: 0; }
+.stage-view { display: grid; gap: 10px; min-width: 0; }
+.stage-view[hidden] { display: none; }
 .stage-tabs { display: flex; gap: 4px; }
 .stage-tab { font: inherit; font-weight: 600; font-size: 12.5px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-inset); color: var(--muted); cursor: pointer; }
 .stage-tab.active { color: var(--ink); border-color: var(--accent); }

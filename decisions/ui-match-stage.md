@@ -62,3 +62,37 @@ tab shows the no-recording state; "open" on the first death row opens
 12:04 on the map, switches the list filter to All because a death is not
 a missed fight, and writes `?t=724` to the URL. Lint and a
 warnings-as-errors build green; the API is untouched.
+
+## 2026-09-08 — The map is the fallback viewer, not the lead
+
+Ruben, seeing the map card stacked under a linked YouTube VOD on main:
+"if I have the youtube video, there's no point adding the 2d image right?
+same with the clips". The stage as built defaulted to Map whenever a
+timeline existed, so even with footage the page opened on the 2D image.
+
+**Decision.** Each moment picks its own viewer: the clip that covers it,
+else the footage when the player was in the moment, else the map. A
+"fight without you" keeps the map even with footage - a POV recording
+never had that fight. A tab the player clicks holds until the next moment
+opens; every new moment re-picks. Objectives count as "the player was
+there" for this purpose: the POV at a dragon shows what the player was
+doing instead, which is the review question anyway, and the track's
+60-second samples are too coarse to say otherwise without false negatives
+pushing the footage away.
+
+**Mechanics.** The three viewers stay mounted and the inactive ones are
+hidden, because the pick alternates between map and footage on almost
+every click and a YouTube iframe that remounts each time loses a second
+and the API handshake its seeks need. A hidden viewer neither seeks nor
+plays (no sound behind the map); a seek is honoured once, by whichever
+viewer is on screen when it arrives, so switching tabs on the same moment
+resumes where the video was paused. The pick reads whatever has loaded
+so far, so a VOD status arriving after the track flips a parked "your
+fight" from map to footage without a click.
+
+**Verified** on the 5397 worktree instance over CDP with a YouTube link on
+the newest game (linked for the test, unlinked after): at rest the first
+missed fight opens on the map; "died to Vi" opens the footage; back to a
+missed fight, the map; pinning Footage there holds; the next objective
+re-picks footage. Lint and tsc green. The clip branch of the pick has no
+rendered clip on this PC to see; it is the same one-line rule.

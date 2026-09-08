@@ -38,7 +38,7 @@ function ApmTooltip({ active, payload }: ApmTooltipProps) {
 // The game as it was played: the recording, a hand-linked YouTube upload,
 // or the replay render, seeking to whatever moment the stage has selected
 // through the recording's clock map. The APM line rides under it.
-export default function FootageView({ matchId, vod, onVodChange, fullGame, onFullGameChange, canManage, moment, seekKey }: {
+export default function FootageView({ matchId, vod, onVodChange, fullGame, onFullGameChange, canManage, moment, seekKey, active }: {
   matchId: string
   vod: VodStatus | null
   onVodChange: (v: VodStatus) => void
@@ -47,11 +47,13 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
   canManage: boolean
   moment: MapMoment | null
   seekKey: number
+  active: boolean
 }) {
   const [linkDraft, setLinkDraft] = useState('')
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const youtubeRef = useRef<HTMLIFrameElement | null>(null)
-  const ytPlayerRef = useRef<{ seekTo: (s: number, allowAhead: boolean) => void; playVideo: () => void } | null>(null)
+  const ytPlayerRef = useRef<{ seekTo: (s: number, allowAhead: boolean) => void; playVideo: () => void; pauseVideo: () => void } | null>(null)
+  const seenSeek = useRef(0)
   const source = footageSource(vod, fullGame)
 
   // Piecewise-linear mapping over the sampled (videoSec, gameSec) pairs. A
@@ -121,12 +123,21 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
     }
   }
 
-  // Five seconds of approach before the moment.
+  // Five seconds of approach before the moment. The view stays mounted while
+  // another viewer is shown, so a seek waits until this one is on screen -
+  // never play sound behind the map - and one seek is honoured once.
   useEffect(() => {
-    if (!moment || seekKey === 0) return
+    if (!active || !moment || seekKey === 0 || seenSeek.current === seekKey) return
+    seenSeek.current = seekKey
     seekTo(Math.max(0, videoFor(moment.timeSec) - 5))
-    // seekKey is the trigger; the rest is read at that instant.
-  }, [seekKey]) // eslint-disable-line react-hooks/exhaustive-deps
+    // seekKey and active are the triggers; the rest is read at that instant.
+  }, [seekKey, active]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (active) return
+    videoRef.current?.pause()
+    ytPlayerRef.current?.pauseVideo?.()
+  }, [active])
 
   const apmData = (vod?.apm?.apm ?? []).map((apm, i) => {
     const videoSec = i * (vod?.apm?.bucketSec ?? 10)
