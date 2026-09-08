@@ -175,7 +175,9 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
           {fullGame?.state === 'requested' && 'A full-game render is queued — waiting for the render agent.'}
           {fullGame?.state === 'rendering' && 'Rendering the full game now on the render box…'}
           {fullGame?.state === 'failed' && <span><span className="loss">Render failed:</span> {fullGame.error}</span>}
-          {(!fullGame || fullGame.state === 'none') && 'With the agent on the gaming PC, the recording lands here and seeks to the moment; a YouTube upload linked below works the same way. The map never needs it.'}
+          {(!fullGame || fullGame.state === 'none') && (canManage
+            ? 'With the agent on the gaming PC, the recording lands here and seeks to the moment; a YouTube upload linked below works the same way. The map never needs it.'
+            : 'With the agent on the gaming PC, the recording lands here and seeks to the moment. The map never needs it.')}
         </div>
       )}
 
