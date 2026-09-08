@@ -140,6 +140,12 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
             Clip <span className="mut">· {clipHere ? 'ready' : readyClips > 0 ? `${readyClips} elsewhere` : clips.length > 0 ? 'queued' : 'none'}</span>
           </button>
         </div>
+        {moment && (
+          <div className="map-now">
+            <span className={`map-chip-time ${moment.tone ?? 'neutral'}`}>{clock(moment.timeSec)}</span> {moment.label}
+            {moment.withoutMe && <span className="map-chip-flag"> · without you</span>}
+          </div>
+        )}
 
         {track && (
           <div className="stage-view" hidden={view !== 'map'}>
@@ -170,12 +176,6 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
             active={view === 'clip'} onJump={jump} />
         </div>
 
-        {moment && (
-          <div className="map-now">
-            <span className={`map-chip-time ${moment.tone ?? 'neutral'}`}>{clock(moment.timeSec)}</span> {moment.label}
-            {moment.withoutMe && <span className="map-chip-flag"> · without you</span>}
-          </div>
-        )}
         {view === 'map' && (
           <p className="mut sm-text map-caption">
             Positions are Riot's 60-second samples, moved in straight lines between them; kills and objectives sit where they
