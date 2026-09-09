@@ -267,11 +267,11 @@ public sealed class MatchPollerService(
             {
                 throw;
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (MatchIngestService.IsUnprocessable(ex))
             {
                 // Corrupt match payload (no participants / tracked player missing) -
                 // permanent, so remember it rather than retrying every pass.
-                logger.LogWarning(ex, "Skipping unprocessable match {MatchId}", matchId);
+                logger.LogWarning("Skipping unprocessable match {MatchId}: {Reason}", matchId, ex.Message);
                 db.ChangeTracker.Clear();
                 db.KnownMatches.Add(new KnownMatch { Id = matchId });
                 await db.SaveChangesAsync(ct);
