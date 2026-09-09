@@ -318,9 +318,10 @@ export default function Machines() {
           YouTube, and updates itself from this site.
         </p>
         <p className="mut sm-text" style={{ margin: '0 0 10px' }}>
-          It never opens anything on your screen unless you turn on <strong>post-game review</strong> in its setup window - then,
-          about 30 seconds after a game, it opens the replay through your League client, follows your champion through the moments
-          that mattered, and closes it again. Recordings go in their own folder; videos you made yourself are never touched.
+          <strong>Post-game review</strong> is on: about 30 seconds after a game - unless you have queued again - it opens the
+          replay through your League client, follows your champion through the moments that mattered, and closes it again. F12
+          ends a review, and the setup window's checkbox turns it off for good. Recordings go in their own folder; videos you
+          made yourself are never touched.
         </p>
         {release ? (
           <div className="filters" style={{ margin: 0 }}>

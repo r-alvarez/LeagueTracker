@@ -46,6 +46,40 @@ public class AgentConfigProfileTests
     }
 
     [Fact]
+    public void Post_game_review_is_on_by_default_and_the_profile_cannot_turn_it_off()
+    {
+        var config = new AgentConfig();
+
+        Assert.True(config.PostGameReview);
+        Assert.Empty(config.ApplyProfile(Profile(("PostGameReview", "false"))));
+        Assert.True(config.PostGameReview);
+    }
+
+    [Fact]
+    public void A_file_without_the_key_leaves_post_game_review_on()
+    {
+        Assert.True(LoadJson("""{ "RecordGames": true }""").PostGameReview);
+    }
+
+    [Fact]
+    public void An_explicit_false_survives_a_reload_and_the_profile_cannot_reopen_it()
+    {
+        var config = LoadJson("""{ "PostGameReview": false }""");
+
+        Assert.False(config.PostGameReview);
+        Assert.Empty(config.ApplyProfile(Profile(("PostGameReview", "true"))));
+        Assert.False(config.PostGameReview);
+    }
+
+    private static AgentConfig LoadJson(string json)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"lt-agent-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, json);
+        try { return AgentConfig.Load(path); }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void An_overflowing_int_is_skipped_instead_of_throwing()
     {
         var config = new AgentConfig();

@@ -65,6 +65,12 @@ Not done here: "never take focus from a window that is not the game" and
 both are ReplayReview behaviour changes with their own testing needs on a
 real PC; the default-off closes the exposure for strangers today.
 
+Superseded 2026-09-09, below. The profile route named above did not survive
+`56919ea`: `PostGameReview` is not in the allow-list and
+`AgentConfigProfileTests` pins that. From then on the checkbox was the only
+switch, while the setup window went on naming the tracker's owner as a
+fallback that could never fire.
+
 ## 2026-08-26 — A refusal is worth more than "no answer"
 
 The tracker now answers a codeless enrolment with 403 and a reason. The
@@ -72,3 +78,42 @@ agent treated every non-2xx as unreachable, so a person without a join
 code would read "is this a LeagueTracker server?". `EnrollAsync` returns
 `refused:<why>`; the agent loop and the setup window's Test connection
 print it.
+
+## 2026-09-09 — Post-game review is opt-out (reverses G-N3)
+
+Ben played a week of games (3-8 September, build 2026.903.1647.50) and never
+saw a review. His log prints the recorder, renderer and YouTube banners at
+every start and never ReplayReview's, so `PostGameReview` was false on that
+machine; the log cannot say whether the key was absent or written false, only
+that nothing turned it on. Nor did the tracker: pre-allow-list `ApplyProfile`
+set any writable property and logged what changed, and `PostGameReview` never
+appears in his "Profile from tracker applied" lines.
+
+So opt-in was the whole cause, and `56919ea` (2026-09-09 09:31, after that
+week) then closed the profile route the setup window still advertised - the
+escape hatch G-N3 leaned on is gone going forward, not retroactively. Either
+way the switch nobody reaches is the switch nobody uses, and the person
+opt-in was protecting was the person who wanted the feature.
+
+Default true. The `RecordGames` gate still keeps it off a renderer-only
+box. `Save()` now writes the key on both branches: against a true default
+an omitted key reads as a yes, so unticking had to become an explicit false
+to mean anything at all. `PostGameReview` stays out of `ProfileKeys` - the
+answer belongs to the machine that owns the screen.
+
+Rejected: adding it to `ProfileKeys` so the setup window's promise came
+true. That makes a screen-taking feature remotely switchable on someone
+else's PC, which is the exposure G-N3 was written about. Also rejected:
+fixing only the copy, which leaves every friend's review off until they
+find the checkbox.
+
+Accepted trade-off: the next agent update starts opening replays on
+recording machines whose owners never said yes - the G-N3 exposure, taken
+knowingly this time, and now stated on the install card and in the setup
+window instead of contradicted by them. Worse, the old `Save()` deleted the
+key on untick, so a deliberate opt-out is byte-identical to a machine that
+was never asked: those people get the review back and cannot be told apart
+from those who never chose. Only settings written from this build forward
+carry an answer that survives a default change. The two mitigations G-N3
+deferred are the ones worth building next: never take focus from a window
+that is not the game, and ask before rewriting `game.cfg`.

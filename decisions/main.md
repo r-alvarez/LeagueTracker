@@ -1036,8 +1036,9 @@ game is live.
 Someone watching a replay looks exactly like an idle machine to the render
 gate, which would otherwise launch a second replay over the top of the review.
 
-Off by default (`PostGameReview`): it takes the screen, which is only welcome
-if you asked for it. `LT_REVIEW_TEST=<matchId>` runs a session now instead of
+On by default (`PostGameReview`), opt-out in the setup window - see
+agent-safe-defaults, 2026-09-09: opt-in plus a fallback that could not fire
+meant it never ran on the machines it was built for. `LT_REVIEW_TEST=<matchId>` runs a session now instead of
 waiting for a game to end - the only way to exercise launch, camera lock, seek
 and hotkeys without playing first. Honest limits: the review needs the match
 imported AND its replay archived, so it opens minutes after the game rather
