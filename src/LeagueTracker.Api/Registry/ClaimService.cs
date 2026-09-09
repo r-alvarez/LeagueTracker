@@ -39,11 +39,10 @@ public sealed class ClaimService(RegistryDatabase registry, AccountRegistry acco
     {
         if (accounts.ById(accountId) is not { } account) return (null, "no such account");
         if (account.IsOwned) return (null, account.OwnerUserId == userId ? "you already own this account" : "this account already has an owner");
-
-        using var db = registry.Open();
-        var now = DateTime.UtcNow;
-        var open = db.OwnershipClaims.FirstOrDefault(c => c.UserId == userId && c.AccountId == accountId && c.State == ClaimState.Pending && c.ExpiresUtc > now);
-        if (open is not null) return (View(open, account.RiotId), null);
+        using (var peek = registry.Open())
+        {
+            if (LiveChallengeOfSomeoneElse(peek, accountId, userId) is { } taken) return (null, TakenMessage(taken));
+        }
 
         int currentIcon;
         try
@@ -63,6 +62,14 @@ public sealed class ClaimService(RegistryDatabase registry, AccountRegistry acco
         var iconId = Random.Shared.Next(1, StarterIcons);
         if (iconId == currentIcon) iconId = iconId == StarterIcons - 1 ? 1 : iconId + 1;
 
+        using var db = registry.Open();
+        using var tx = db.Database.BeginTransaction();
+        LockAccountRow(db, accountId);
+        if (LiveChallengeOfSomeoneElse(db, accountId, userId) is { } lost) return (null, TakenMessage(lost));
+        // The person's own earlier challenge gives way to this one: one icon
+        // to set, not a choice between two.
+        var now = DateTime.UtcNow;
+        foreach (var earlier in db.OwnershipClaims.Where(c => c.AccountId == accountId && c.UserId == userId && c.State == ClaimState.Pending)) earlier.State = ClaimState.Expired;
         var claim = new OwnershipClaim
         {
             Id = Ids.New(),
@@ -75,6 +82,7 @@ public sealed class ClaimService(RegistryDatabase registry, AccountRegistry acco
         };
         db.OwnershipClaims.Add(claim);
         db.SaveChanges();
+        tx.Commit();
         log.LogInformation("Claim {Id}: user {User} on {RiotId}, icon {Icon}", claim.Id, userId, account.RiotId, iconId);
         return (View(claim, account.RiotId), null);
     }
@@ -126,13 +134,42 @@ public sealed class ClaimService(RegistryDatabase registry, AccountRegistry acco
                 : $"Riot still shows icon {icon}, not {claim.IconId} - set it in the client (it can take a minute to propagate) and try again");
         }
 
-        claim.State = ClaimState.Verified;
-        foreach (var other in db.OwnershipClaims.Where(c => c.AccountId == account.Id && c.Id != claim.Id && c.State == ClaimState.Pending)) other.State = ClaimState.Failed;
-        db.SaveChanges();
+        using (var tx = db.Database.BeginTransaction())
+        {
+            // The conditional update is the compare-and-set: of two verifies
+            // that both saw an unowned account, Postgres lets exactly one row
+            // through, and the other learns it lost here.
+            var won = db.Accounts.Where(a => a.Id == account.Id && a.OwnerUserId == null).ExecuteUpdate(s => s.SetProperty(a => a.OwnerUserId, userId)) == 1;
+            claim.State = won ? ClaimState.Verified : ClaimState.Failed;
+            if (won)
+            {
+                foreach (var other in db.OwnershipClaims.Where(c => c.AccountId == account.Id && c.Id != claim.Id && c.State == ClaimState.Pending)) other.State = ClaimState.Failed;
+            }
+            db.SaveChanges();
+            tx.Commit();
+            if (!won) return (View(claim, account.RiotId), false, "the account was claimed by someone else meanwhile");
+        }
+        // Memory follows the database, never the other way round: only the
+        // winner's copy learns the owner, so a loser's later write-through
+        // cannot put a null back.
         accounts.Update(account, a => a.OwnerUserId = userId);
         log.LogInformation("Claim {Id} verified: {RiotId} is owned by user {User}", claim.Id, account.RiotId, userId);
         return (View(claim, account.RiotId), true, null);
     }
+
+    // Starts on one account queue behind this lock, so two people pressing
+    // Claim together cannot both open a challenge.
+    private static void LockAccountRow(RegistryDbContext db, string accountId) =>
+        db.Database.ExecuteSql($"SELECT 1 FROM \"Accounts\" WHERE \"Id\" = {accountId} FOR UPDATE");
+
+    private static OwnershipClaim? LiveChallengeOfSomeoneElse(RegistryDbContext db, string accountId, string userId)
+    {
+        var now = DateTime.UtcNow;
+        return db.OwnershipClaims.AsNoTracking().FirstOrDefault(c => c.AccountId == accountId && c.UserId != userId && c.State == ClaimState.Pending && c.ExpiresUtc > now);
+    }
+
+    private static string TakenMessage(OwnershipClaim taken) =>
+        $"someone else is proving this account is theirs right now - if it is yours, try again after {taken.ExpiresUtc:HH:mm} UTC";
 
     // Fresh says whether Riot answered for this call or an earlier one within
     // the cache life. A start evicts its account's entry: the icon it just
