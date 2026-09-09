@@ -59,3 +59,16 @@ well-known password to the room. The password is now
 `${POSTGRES_PASSWORD:-leaguetracker}` in both places the compose uses it;
 `appsettings.json` keeps the same default (it is under `src/`, which this
 branch does not touch) and user-secrets is the override path for a host run.
+
+### N15 — sleep-until-02:00 in the script, not busybox crond
+
+`sleep $INTERVAL_SECONDS` in a loop meant "every 24 h from container
+start", and the container starts on every push to main. Alternatives: (a)
+busybox `crond` in the postgres-alpine image; (b) computing the seconds
+until the next `BACKUP_AT` (UTC) and sleeping that. Chosen (b): crond wants
+a crontab under a named user and the sidecar runs as uid 568 with no
+passwd entry, and the one loop keeps the atomic rename, the retention sweep
+and the custom-format dump exactly where they were. Epoch arithmetic is
+used instead of `date -d` because busybox's parser is the part that
+differs between builds. No dump on start: a deploy-time dump per push was
+noise in the retention window, and the next 02:00 is at most a day away.

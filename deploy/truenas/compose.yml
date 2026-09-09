@@ -235,6 +235,8 @@ services:
       PGUSER: leaguetracker
       PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is a stack env var}
       BACKUP_DIR: /backups
+      # Wall-clock UTC; the evening's games are over and nobody is reviewing.
+      BACKUP_AT: "02:00"
       KEEP_DAYS: "14"
     volumes:
       - /mnt/MediaPool/apps/leaguetracker/backups:/backups

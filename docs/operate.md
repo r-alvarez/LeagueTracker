@@ -12,7 +12,7 @@ The container sees one volume, `/data` = `/mnt/MediaPool/apps/leaguetracker`.
 | Path | What it holds | Rebuildable? |
 | --- | --- | --- |
 | `postgres/` | The PostgreSQL cluster (the `postgres` service's volume, `/var/lib/postgresql` inside). One database, `leaguetracker`: the `registry` schema holds users and their Auth0 logins, tracked accounts (surrogate id, puuid, owner, settings, folder), agent keys, join codes, ownership claims; one `acct_<id>` schema per account holds that account's index (below) | The registry: **no**, it must never be lost. The account schemas: mostly — see §3 |
-| `backups/` | `leaguetracker-<utc stamp>.dump`: a nightly `pg_dump` of the whole database by the `pg-backup` service, 14 kept | Yes, every night; the copy that restores on any host |
+| `backups/` | `leaguetracker-<utc stamp>.dump`: a `pg_dump` of the whole database by the `pg-backup` service at 02:00 UTC every day (`BACKUP_AT` in the compose), 14 days kept | Yes, every night; the copy that restores on any host |
 | `registry.db.imported`, `<account>/leaguetracker.db.imported` (+ `-wal`, `-shm`) | The SQLite era's files, kept after their verified one-time import into the schemas (§6) | Disposable once a dump exists |
 | `keys/` | ASP.NET Data Protection keys: session cookies are signed with them | No, but losing them only signs everyone out. As sensitive as a session cookie |
 | `main/riot-api-key.txt` | The Riot API key (`Riot__ApiKeyFile`) | Re-issue at developer.riotgames.com |
@@ -135,6 +135,13 @@ new ids.
   was initialised under Europe/London and `postgresql.conf` still says so;
   the flags win), dump names and every log line carry a `Z`. Anything that
   shows local time does it in the browser.
+- `pg-backup` dumps at a fixed wall-clock time (02:00 UTC), not "24 h
+  after the container started": every push redeploys the stack, so a
+  sleep-based interval reset on each deploy and the "nightly" dump landed
+  whenever the last push happened. The sidecar logs `next run at 02:00Z, in
+  Ns` on start and after each dump, so the Portainer log shows the schedule
+  is armed. A redeploy during the dump loses that run (the `.partial` file
+  is discarded), the next one is 02:00 the day after.
 - Container logs are capped (`logging:` in the compose): the app keeps
   5 x 10 MB, each sidecar 3 x 2 MB, rotated by Docker. Older lines are
   gone; anything worth keeping longer than a day or two belongs in the
