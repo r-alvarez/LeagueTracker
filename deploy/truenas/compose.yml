@@ -98,8 +98,11 @@ services:
       # committed; the postgres service below reads the same one. The first
       # boot on this build brings each SQLite file (registry.db, every
       # <account>/leaguetracker.db) across, verifies it row for row and
-      # renames it *.imported - see docs/operate.md.
-      ConnectionStrings__LeagueTracker: Host=postgres;Database=leaguetracker;Username=leaguetracker;Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is a stack env var}
+      # renames it *.imported - see docs/operate.md. One Npgsql pool serves
+      # every schema and its default cap equals the server's max_connections
+      # (100); 80 leaves pg_dump, a psql session and the reserved superuser
+      # slots a way in.
+      ConnectionStrings__LeagueTracker: Host=postgres;Database=leaguetracker;Username=leaguetracker;Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is a stack env var};Maximum Pool Size=80
       # Identity: the app is an OIDC client of Auth0 with its own users table
       # (the registry schema). Issuer, client id/secret are Portainer stack
       # env vars, NEVER committed. Admins and each account's owner are emails;

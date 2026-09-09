@@ -180,7 +180,7 @@ new ids.
 | `ACCOUNT_2_GAMENAME`, `ACCOUNT_2_TAGLINE`, `ACCOUNT_2_DISPLAYNAME` | A friend's Riot ID and name — theirs, not the public repo's. All three unset: the entry is skipped and the registry's copy is used |
 | `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` | The shared YouTube channel grant handed to agents |
 | `YT_BEN_CLIENT_ID`, `YT_BEN_CLIENT_SECRET`, `YT_BEN_REFRESH_TOKEN` | One agent's own Google project (keyed by its key id in the compose) |
-| `POSTGRES_PASSWORD` | The database password: the `postgres` service sets it, the app and `pg-backup` connect with it. Must exist before the first deploy of the PostgreSQL build - the compose refuses to start without it |
+| `POSTGRES_PASSWORD` | The database password: the `postgres` service sets it, the app and `pg-backup` connect with it. Must exist before the first deploy of the PostgreSQL build - the compose refuses to start without it. The app's connection string caps its one pool at 80 of the server's 100 connections so `pg_dump` and a hand `psql` always get in |
 | `PC_MAC`, `WOL_BROADCAST`, `UNIFI_URL`, `UNIFI_USER`, `UNIFI_PASS` | The waker |
 
 ## 6. Moving off SQLite (the first boot of the PostgreSQL build)
