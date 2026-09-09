@@ -10,6 +10,20 @@ x-lt-build: &lt-build
   context: ../..
   dockerfile: Dockerfile
 
+# Docker's default json-file log has no cap: one crash-looping container
+# would fill the boot pool. The app gets room for a day of noisy logs, the
+# sidecars say a line an hour.
+x-lt-log-app: &lt-log-app
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+x-lt-log-sidecar: &lt-log-sidecar
+  driver: json-file
+  options:
+    max-size: 2m
+    max-file: "3"
+
 # What every tracker hands its agents (GET /api/agent/profile): the shared
 # YouTube channel's OAuth client + refresh token, so no Google credential ever
 # sits on a friend's PC, plus the recording defaults. YT_* are Portainer stack
@@ -162,6 +176,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 3m
+    logging: *lt-log-app
     restart: unless-stopped
     labels:
       - traefik.enable=true
@@ -199,6 +214,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+    logging: *lt-log-sidecar
     restart: unless-stopped
 
   # A nightly pg_dump into /data/backups (14 kept): the copy that restores on
@@ -226,6 +242,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    logging: *lt-log-sidecar
     restart: unless-stopped
 
   # Wakes the render PC while render work waits, so the gaming machine can
@@ -259,6 +276,7 @@ services:
     depends_on:
       leaguetracker:
         condition: service_healthy
+    logging: *lt-log-sidecar
     restart: unless-stopped
 
 networks:

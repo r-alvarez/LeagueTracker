@@ -1,3 +1,16 @@
+# Same caps as the TrueNAS stack: an uncapped json-file log from a
+# crash-looping container fills whatever disk Docker Desktop sits on.
+x-log-app: &log-app
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+x-log-sidecar: &log-sidecar
+  driver: json-file
+  options:
+    max-size: 2m
+    max-file: "3"
+
 services:
   # The database a host run (dotnet run, appsettings.json's localhost
   # connection string) and a container run share. The named volume keeps the
@@ -19,6 +32,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+    logging: *log-sidecar
     restart: unless-stopped
 
   # One process, every tracked account (the three-container era is over; the
@@ -45,6 +59,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    logging: *log-app
     restart: unless-stopped
 
   # Reverse proxy so the app is reachable at http://leaguetracker.localhost
@@ -59,6 +74,7 @@ services:
       - "80:80"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    logging: *log-sidecar
     restart: unless-stopped
 
 volumes:

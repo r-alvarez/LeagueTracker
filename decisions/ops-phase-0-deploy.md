@@ -40,3 +40,11 @@ command. Chosen (b): it is in the compose, survives a restore of the cluster
 folder and a fresh initdb alike, and needs no step anyone can forget.
 Npgsql moves `timestamptz` as UTC regardless; this is about `SHOW timezone`,
 the server log and any hand-run `psql` reading the same clock as the app.
+
+### F10 — json-file with a cap, not a log driver change
+
+Alternatives: `local` driver (compressed, capped by default at 100 MB x 5)
+or `journald`. Chosen: keep `json-file` with `max-size`/`max-file`, because
+Portainer's log viewer and `docker logs` read it without a flag and the
+NAS has nothing consuming journald. 50 MB for the app is a day or two of
+its chattiest output; 6 MB per sidecar is months of theirs.
