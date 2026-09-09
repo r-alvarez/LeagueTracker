@@ -202,9 +202,6 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
         }
     }
 
-    // Everything (admin's view, and the agent-to-agent listing).
-    public List<AgentLive> Snapshot() => SnapshotFor(null, admin: true);
-
     // The machines an owner may see: theirs, plus every renderer (a renderer
     // serves everyone, so everyone gets to know it exists); an admin sees
     // all. Windows user names never leave the owner's own view.

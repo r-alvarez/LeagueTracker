@@ -447,8 +447,6 @@ app.MapPost("/api/agent/heartbeat", (AgentHeartbeat beat, Caller caller, AgentRe
     return Results.Ok(new { latest = agents.Latest()?.Version, command = pending?.Command, commandToken = pending?.Token });
 }).RequireAuthorization(Policies.Agent);
 
-app.MapGet("/api/agent/agents", (AgentRegistry agents) => Results.Ok(agents.Snapshot())).RequireAuthorization(Policies.Agent);
-
 // The waker on the NAS needs one bit - is render work waiting anywhere -
 // counted across every account. It knocks with an agent key like any other
 // machine: anonymous, this was a full-population scan for anyone on the
