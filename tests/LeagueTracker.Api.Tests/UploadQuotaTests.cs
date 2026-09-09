@@ -20,23 +20,66 @@ public class UploadQuotaTests : IDisposable
         return new UploadQuota(new DataPaths(context), Options.Create(new UploadsOptions { MaxMediaGbPerAccount = maxMediaGb, MinFreeGb = minFreeGb }));
     }
 
+    private const double OneKilobyteInGb = 1024.0 / (1024 * 1024 * 1024);
+
     [Fact]
     public void Media_counts_everything_but_the_raw_games()
     {
         Directory.CreateDirectory(Path.Combine(_root, "vods", "EUW1_1"));
         Directory.CreateDirectory(Path.Combine(_root, "games"));
-        File.WriteAllBytes(Path.Combine(_root, "vods", "EUW1_1", "vod.mp4"), new byte[2000]);
+        File.WriteAllBytes(Path.Combine(_root, "vods", "EUW1_1", "vod.mp4"), new byte[600]);
         File.WriteAllBytes(Path.Combine(_root, "games", "EUW1_1.json"), new byte[1_000_000]);
 
-        var oneKilobyteAllowance = Quota(maxMediaGb: 3000.0 / (1024 * 1024 * 1024));
-        Assert.Contains("allowance", oneKilobyteAllowance.Refusal(incomingBytes: 1500));
-        Assert.Null(oneKilobyteAllowance.Refusal(incomingBytes: 500));
+        var quota = Quota(maxMediaGb: OneKilobyteInGb);
+        using var refused = quota.Reserve(declaredBytes: 500, fileCap: 4096);
+        Assert.Equal(UploadRefusal.Allowance, refused.Refusal);
+        using var accepted = quota.Reserve(declaredBytes: 400, fileCap: 4096);
+        Assert.Null(accepted.Refusal);
     }
 
     [Fact]
     public void A_nearly_full_disk_refuses_before_a_byte_is_written()
     {
-        Assert.Contains("disk", Quota(maxMediaGb: 1000, minFreeGb: 1e9).Refusal(0));
+        using var reservation = Quota(maxMediaGb: 1000, minFreeGb: 1e9).Reserve(0, 4096);
+        Assert.Equal(UploadRefusal.Disk, reservation.Refusal);
+    }
+
+    // Review of D1: a body with no Content-Length passed the allowance check
+    // as zero bytes and was then bounded by the file cap alone.
+    [Fact]
+    public async Task An_unknown_length_body_is_bounded_by_the_allowance_not_only_the_file_cap()
+    {
+        var quota = Quota(maxMediaGb: OneKilobyteInGb);
+        using var reservation = quota.Reserve(declaredBytes: null, fileCap: 4096);
+        Assert.Null(reservation.Refusal);
+        Assert.Equal(1024, reservation.Budget);
+
+        using var body = new MemoryStream(new byte[2048]);
+        using var file = new MemoryStream();
+        Assert.False(await UploadQuota.CopyWithinAsync(body, file, reservation.Budget, CancellationToken.None));
+        Assert.Equal(UploadRefusal.Allowance, reservation.Exceeded);
+    }
+
+    [Fact]
+    public void Concurrent_uploads_cannot_each_take_the_same_remaining_allowance()
+    {
+        var quota = Quota(maxMediaGb: OneKilobyteInGb);
+        using (var first = quota.Reserve(declaredBytes: null, fileCap: 4096))
+        {
+            Assert.Equal(1024, first.Budget);
+            using var second = quota.Reserve(declaredBytes: null, fileCap: 4096);
+            Assert.Equal(UploadRefusal.Allowance, second.Refusal);
+        }
+        using var afterRelease = quota.Reserve(declaredBytes: null, fileCap: 4096);
+        Assert.Null(afterRelease.Refusal);
+    }
+
+    [Fact]
+    public async Task A_budgeted_stream_throws_past_its_budget()
+    {
+        using var inner = new MemoryStream(new byte[3000]);
+        var stream = new BudgetedStream(inner, 2000);
+        await Assert.ThrowsAsync<UploadBudgetExceededException>(() => stream.CopyToAsync(Stream.Null));
     }
 
     [Fact]

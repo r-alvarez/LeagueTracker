@@ -250,28 +250,32 @@ static async ValueTask<object?> RequireAvailableAccount(EndpointFilterInvocation
         : Results.Problem($"{account.RiotId} is unavailable: {initializer.ErrorFor(account)}", statusCode: 503, title: "Account unavailable");
 }
 
-// The declared length is the client's word, so the cap is enforced on the
-// bytes as they arrive, not on Content-Length alone.
+// The declared length is the client's word (and a chunked body declares
+// none), so the budget is enforced on the bytes as they arrive.
 static async Task<IResult> StoreUploadAsync(HttpRequest request, string target, UploadQuota quota, long cap, CancellationToken ct)
 {
-    if (request.ContentLength > cap) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
-    if (quota.Refusal(request.ContentLength ?? 0) is { } refusal) return Results.Json(new { error = refusal }, statusCode: StatusCodes.Status507InsufficientStorage);
+    using var reservation = quota.Reserve(request.ContentLength, cap);
+    if (reservation.Refusal is { } refused) return Refuse(refused);
     request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = cap;
 
     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
     var temp = target + ".tmp";
     await using (var file = File.Create(temp))
     {
-        if (!await UploadQuota.CopyWithinAsync(request.Body, file, cap, ct))
+        if (!await UploadQuota.CopyWithinAsync(request.Body, file, reservation.Budget, ct))
         {
             file.Close();
             File.Delete(temp);
-            return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            return Refuse(reservation.Exceeded);
         }
     }
     File.Move(temp, target, overwrite: true);
     return Results.Ok(new { bytes = new FileInfo(target).Length });
 }
+
+static IResult Refuse(UploadRefusal refusal) => Results.Json(
+    new { error = UploadQuota.Describe(refusal) },
+    statusCode: refusal is UploadRefusal.TooLarge ? StatusCodes.Status413PayloadTooLarge : StatusCodes.Status507InsufficientStorage);
 
 // The public shape of an account: no rename history (names a player left
 // behind), no owner id unless an admin asks (links a main to a smurf), no
@@ -841,8 +845,11 @@ recorder.MapPut("/vods/{matchId}/chunk", async (string matchId, long offset, Htt
 {
     if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
     if (vods.TargetPath(matchId, "vod.mp4.part") is not { } part) return Results.BadRequest();
-    if (offset < 0 || offset >= quota.MaxVodBytes) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
-    if (quota.Refusal(request.ContentLength ?? 0) is { } refusal) return Results.Json(new { error = refusal }, statusCode: StatusCodes.Status507InsufficientStorage);
+    if (offset < 0 || offset >= quota.MaxVodBytes) return Refuse(UploadRefusal.TooLarge);
+    // The assembled file, not the chunk, is what the cap bounds: appends at
+    // offset <= length were otherwise open-ended.
+    using var reservation = quota.Reserve(request.ContentLength, quota.MaxVodBytes - offset);
+    if (reservation.Refusal is { } refused) return Refuse(refused);
 
     request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
         .MaxRequestBodySize = 256L * 1024 * 1024;
@@ -851,12 +858,10 @@ recorder.MapPut("/vods/{matchId}/chunk", async (string matchId, long offset, Htt
     await using var file = new FileStream(part, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
     if (offset > file.Length) return Results.Conflict(new { expected = file.Length });
     file.Seek(offset, SeekOrigin.Begin);
-    // The assembled file, not the chunk, is what the cap bounds: appends at
-    // offset <= length were otherwise open-ended.
-    if (!await UploadQuota.CopyWithinAsync(request.Body, file, quota.MaxVodBytes - offset, ct))
+    if (!await UploadQuota.CopyWithinAsync(request.Body, file, reservation.Budget, ct))
     {
         file.SetLength(0);
-        return Results.Json(new { error = "the recording is larger than this tracker accepts - upload restarted" }, statusCode: StatusCodes.Status413PayloadTooLarge);
+        return Refuse(reservation.Exceeded);
     }
     return Results.Ok(new { length = file.Length });
 });
@@ -887,15 +892,23 @@ recorder.MapPut("/vods/{matchId}/{file}", async (string matchId, string file, Ht
     };
     var match = await db.Matches.AsNoTracking().Where(m => m.Id == matchId).Select(m => new { m.DurationSec }).FirstOrDefaultAsync(ct);
     if (name is null || match is null) return Results.NotFound();
-    if (quota.Refusal(request.ContentLength ?? 0) is { } refusal) return Results.Json(new { error = refusal }, statusCode: StatusCodes.Status507InsufficientStorage);
     // Telemetry is checked line by line against the recording's length on the
     // way in (audit N16); the other sidecars are just bounded files.
     if (name is "events.csv.gz")
     {
+        using var reservation = quota.Reserve(request.ContentLength, quota.MaxSidecarBytes);
+        if (reservation.Refusal is { } refused) return Refuse(refused);
         request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = quota.MaxSidecarBytes;
-        return await vods.StoreTelemetryAsync(matchId, request.Body, match.DurationSec, ct) is { } rejected
-            ? Results.BadRequest(new { error = rejected.Error })
-            : Results.Ok();
+        try
+        {
+            return await vods.StoreTelemetryAsync(matchId, new BudgetedStream(request.Body, reservation.Budget), match.DurationSec, ct) is { } rejected
+                ? Results.BadRequest(new { error = rejected.Error })
+                : Results.Ok();
+        }
+        catch (UploadBudgetExceededException)
+        {
+            return Refuse(reservation.Exceeded);
+        }
     }
     return await StoreUploadAsync(request, vods.TargetPath(matchId, name)!, quota, quota.MaxSidecarBytes, ct);
 });
