@@ -205,10 +205,12 @@ public sealed class AgentKeyStore
 
     // What a machine calls itself goes into log lines and the Machines page:
     // one line, printable, 64 characters - a newline in a name must not forge
-    // a log entry.
+    // a log entry. The explicit Replace is the step CodeQL counts as sanitising.
     private static string DisplayText(string text)
     {
-        var printable = new string(text.Where(ch => !char.IsControl(ch)).ToArray()).Trim();
+        var oneLine = text.Replace("", "").Replace("
+", "");
+        var printable = new string(oneLine.Where(ch => !char.IsControl(ch)).ToArray()).Trim();
         return printable[..Math.Min(printable.Length, 64)];
     }
 
