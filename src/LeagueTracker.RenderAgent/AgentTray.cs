@@ -87,11 +87,15 @@ public sealed class AgentTray : IDisposable
         _icon.Icon = IconFor(paused ? "paused" : state is "starting" or "waiting" ? "waiting" : AgentStatus.LastError is not null && state is "idle" ? "warn" : state is "idle" ? "idle" : "busy");
     }
 
-    private void OnRecordingReady() => _ui?.Post(_ =>
+    private void OnRecordingReady()
     {
-        _reviewNotification = true;
-        _icon?.ShowBalloonTip(5000, "Your recording is ready", "Click to review your last game.", ToolTipIcon.Info);
-    }, null);
+        if (!_config.NotifyRecordingReady) return;
+        _ui?.Post(_ =>
+        {
+            _reviewNotification = true;
+            _icon?.ShowBalloonTip(5000, "Your recording is ready", "Click to review your last game.", ToolTipIcon.Info);
+        }, null);
+    }
 
     private static string Describe(string state, string? detail) => state switch
     {

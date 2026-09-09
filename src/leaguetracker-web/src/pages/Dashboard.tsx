@@ -583,7 +583,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Full-width so the dpm.lol-style column set (KDA line, DPM, form
+          {/* Full-width so the column set (KDA line, DPM, form
               dots) fits without horizontal scroll; role + collapse pair below. */}
           <div style={{ marginBottom: 16 }}>
             <SplitTable title="Champion performance" rows={stats.byChampion} champIcons

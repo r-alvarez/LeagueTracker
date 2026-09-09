@@ -35,7 +35,7 @@ public sealed class VodService(DataPaths paths)
 
     /// What the match page needs to decide whether (and how) to show the
     /// review player: the recording sidecar plus the derived APM series.
-    public object Status(string matchId)
+    public object Status(string matchId, bool includeApm = true)
     {
         var videoPath = VideoPath(matchId);
         object? meta = null;
@@ -45,15 +45,17 @@ public sealed class VodService(DataPaths paths)
             catch { /* sidecar unreadable - the VOD still plays */ }
         }
         var youtubeUrl = ReadLink(matchId);
-        var apm = ApmSeries(matchId);
+        var apm = includeApm ? ApmSeries(matchId) : null;
         // A match can have review data in three shapes: a hosted mp4, a
         // YouTube link over sidecar data (the storage-free mode), or sidecars
         // still waiting for their link. Nothing at all = no card.
         if (videoPath is null && meta is null && youtubeUrl is null && apm is null) return new { exists = false };
+        var sizeBytes = videoPath is null ? (long?)null : new FileInfo(videoPath).Length;
         return new
         {
             exists = videoPath is not null,
-            sizeMb = videoPath is null ? (int?)null : (int)(new FileInfo(videoPath).Length / 1024 / 1024),
+            sizeMb = sizeBytes / 1024 / 1024,
+            sizeBytes,
             youtubeUrl,
             meta,
             apm,

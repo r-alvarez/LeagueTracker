@@ -47,6 +47,7 @@ env:
     src/LeagueTracker.ReplayLauncher
     src/leaguetracker-web
     deploy/build-review-ui.ps1
+    deploy/get-webview-bootstrapper.ps1
     deploy/publish-agent.ps1
     deploy/agent-setup.iss
     deploy/screenrecorderlib

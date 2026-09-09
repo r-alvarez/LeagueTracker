@@ -1,6 +1,8 @@
 using LeagueTracker.RenderAgent;
 using LeagueTracker.RenderAgent.Review;
 
+if (args.Contains("--ensure-webview2")) return await WebViewRuntime.PrepareAsync();
+
 // A viewer is an independent, on-demand process. It must never enter the
 // recorder's setup, stop-sentinel or single-instance replacement paths.
 if (args.Contains("--review")) return ReviewApp.Run(AgentConfig.Load(), args.Contains("--last"));

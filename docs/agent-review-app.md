@@ -36,7 +36,7 @@ self-contained review interface, not a replacement for the backend.
 YouTube-only footage opens externally. Remote YouTube JavaScript is not loaded
 into the document that has native capabilities. Existing website embeds remain.
 The app watches recorded video and existing rendered replays; it does not decode
-`.rofl` files itself or implement Ascent's clip editing/cloud feature set.
+`.rofl` files itself or provide clip editing and cloud sharing.
 
 ## Re-review of the revised feasibility note
 
@@ -70,17 +70,23 @@ Remaining qualifications:
    that an MP4 has a backup. New `.review-published` markers require a complete
    MP4 upload or confirmed YouTube processing and linking.
    Legacy `.uploaded` files are not promoted using today's upload setting;
-   their historical contents cannot prove that video was sent. Such copies
-   remain protected when video delivery is enabled until publication is
-   confirmed or the user explicitly removes them.
+   their historical contents cannot prove that video was sent. The delivery
+   sweep now probes `vod/status?includeApm=false` for these recordings. Only a
+   hosted MP4 with identical byte length, match ID, video filename and recording
+   start/end timestamps establishes a backup. The local files are held against
+   writes/deletion during confirmation. Sidecars alone, unavailable trackers,
+   mismatched recordings and older servers without `sizeBytes` remain protected
+   when video delivery is enabled. No video download or re-upload is needed.
 7. Reuse the site's sharing rules. Agent discovery now uses the existing
    `Caller.Owns` predicate, including explicit shared-PC grants. The desktop
    bridge only reads accounts returned by discovery. This does not change the
    site's intentionally broader authenticated Read policy.
-8. Evergreen runtime availability must be handled. The app gives a native
-   installation link when it is missing; this branch does not silently install
-   it. Microsoft documents that redirecting users to its runtime installer is a
-   supported deployment option.
+8. Evergreen runtime installation is part of agent setup. The build verifies
+   Microsoft's signature on the small bootstrapper and embeds it in the agent.
+   Setup.exe runs it silently when the runtime is missing; ZIP setup and the
+   first review launch after an update use the same installation helper.
+   Existing installations are reused. Failure leaves recording available and
+   offers retry inside the app rather than requiring a separate browser install.
    [WebView2 distribution](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution)
 
 The overall recommendation remains WebView2 with the existing languages. Rust
@@ -93,7 +99,7 @@ before accepting that ongoing cost.
 No paid UI framework or new commercial service is required. WebView2's SDK
 licence is included in the agent notices, and the frontend build generates its
 dependency notices. Existing distribution obligations still apply, including
-FFmpeg and the separate WebView2 Runtime terms. This is not a claim that every
+FFmpeg and the WebView2 Runtime/bootstrapper terms. This is not a claim that every
 development/deployment tool has unrestricted use under every licence.
 
 ## Boundaries and storage
@@ -115,9 +121,18 @@ Sidecars remain the recording catalogue. Pins, manual deletion and automatic
 retention share a named mutex. A persistent read handle protects the selected
 local video even while paused between range requests. Finalizing recordings,
 pins and pending video deliveries survive cleanup. For local-only recording,
-old unpinned games rotate within the limits. Keep-all disables count/budget
-eviction, while admission still checks the free-space floor on both recording
-and scratch drives. Sidecars survive deletion. Unknown MP4s are left alone.
+old unpinned games rotate within the limits. Keep-all disables all automatic
+eviction, including eviction under low disk space. Recording admission checks
+the full free-space floor on both recording and scratch drives and pauses new
+recordings below it. This deliberately changes the previous half-floor admission
+and the G-N2 rule that still evicted published games under disk pressure with
+keep-all enabled. At a 6 GB floor, 5 GB available now refuses the next recording.
+Sidecars survive deletion. Unknown MP4s are left alone.
+
+Recording-ready tray notifications are opt-in (`NotifyRecordingReady`, off by
+default), controlled in Agent settings under This machine. They open review only
+when clicked. The existing League-client replay automation remains a separate
+opt-in setting.
 
 Library preferences are saved in `metadata/library-settings.json`; explicit
 preferences take precedence over profile defaults. The default is 20 games
@@ -143,6 +158,7 @@ Free space is checked at admission and cleanup, not continuously while encoding.
 
 ```powershell
 ./deploy/build-review-ui.ps1
+./deploy/get-webview-bootstrapper.ps1
 dotnet build src/LeagueTracker.RenderAgent -c Release
 dotnet test tests/LeagueTracker.RenderAgent.Tests
 dotnet test tests/LeagueTracker.Api.Tests
@@ -152,9 +168,24 @@ npm run build
 ```
 
 `deploy/publish-agent.ps1` builds the desktop UI first and requires its embedded
-archive. Inno Setup includes the native WebView2 loader and generated notices;
+archive and verified runtime bootstrapper. Inno Setup includes the native WebView2 loader and generated notices;
 the published files remain flat for the existing updater. Agent CI builds both
 parts, and frontend changes now participate in the agent release decision.
+
+`--ensure-webview2` prepares the runtime without entering recorder startup or
+enrolment. Setup.exe invokes it before the final setup page; the ZIP setup form
+also prepares review when saving. The review window shows preparation progress
+and performs the same check for older installations receiving a ZIP update.
+No runtime installer is started when the current user already has access to an
+Evergreen installation. Concurrent setup attempts serialize through a local
+file lock and recheck availability after acquiring it. Closing review cancels
+its wait, but does not terminate Microsoft's shared installer.
+
+The bootstrapper requires an internet connection only when the runtime is
+missing. Fully offline first-time installation would require bundling the much
+larger standalone runtime installer. The shared Evergreen runtime keeps itself
+updated through Microsoft's updater and is not removed when the agent is
+uninstalled. No browser is launched to complete normal agent setup.
 
 Launch the built agent with `--review` (optionally `--last`). Review uses that
 build's config, key and recording folder. No release has been distributed.
@@ -178,19 +209,28 @@ Validation performed on this development PC with WebView2 152.0.4191.66:
 
 | Check | Result |
 |---|---|
-| Agent tests | 53 passed |
-| API tests, including PostgreSQL-backed tests | 176 passed |
+| Agent tests | 120 passed |
+| API tests, including PostgreSQL-backed discovery/grant tests | 255 passed |
 | Desktop and website production frontend builds | Passed |
-| Frontend lint | Passed; existing Fast Refresh export warnings |
+| Frontend lint | Passed; existing React warnings |
 | Self-contained agent publish | Passed; embedded UI and flat native loader verified |
+| Missing-asset publish guards | Both missing UI and missing bootstrapper correctly fail publishing |
+| Runtime setup failure/retry/cancellation | Covered with simulated installers; clean-machine installation still needs a VM check |
+| Published `--ensure-webview2` with an installed runtime | Passed without entering recorder startup |
 | Local playback, metadata and seek in WebView2 | Passed |
-| WebView processes remaining after closing | 0 in both smoke runs |
+| WebView processes remaining after closing | 0 in all three smoke runs |
 | First development smoke run | Library 1,502 ms from harness timer; seek 118 ms |
 | Release-mode smoke run | Library 2,068 ms from process creation; seek 781 ms |
-| Sum of host + WebView working sets during playback | 464 MiB and 468.2 MiB |
-| Desktop entry JavaScript | About 254 KB / 81 KB gzip; charts and review load on demand |
-| Embedded frontend ZIP, including fonts/notices | 447,453 bytes at verification |
-| Self-contained agent executable, before bundling FFmpeg | About 145.3 MB |
+| Runtime-setup follow-up smoke run | Library 6,562 ms from process creation (1,697 ms from harness timer); seek 103 ms |
+| Sum of host + WebView working sets during playback | 464 MiB, 468.2 MiB and 475.6 MiB |
+| Desktop entry JavaScript | About 251 KB / 80 KB gzip; charts and review load on demand |
+| Embedded frontend ZIP, including fonts/notices | 447,938 bytes after rebasing the dependency updates |
+| Self-contained agent executable, before bundling FFmpeg | About 147.1 MB, including the 1.78 MB runtime bootstrapper |
+
+The main-branch executable was about 116.6 MB. The approximately 30.5 MB
+increase includes the ASP.NET Core runtime for Kestrel, WebView2 integration,
+the embedded UI and bootstrapper. The shared WebView2 Runtime, if missing,
+requires an additional installation; its size is not included in that figure.
 
 The first timer excluded process startup and part of native initialization.
 The second captures process-creation-to-library readiness. Neither is a repeated
@@ -199,12 +239,6 @@ Working-set sums can count shared pages more than once and do not include GPU
 memory. These numbers must not be advertised as cold-start, private-memory,
 seek-percentile or in-game FPS guarantees.
 
-Ascent's published comparison claims under 1% recording FPS impact, but provides
-no equivalent library-opening benchmark. Startup, recording overhead and seek
-responsiveness are separate measurements. No Ascent installation was measured
-on this PC, so a faster/slower claim is unsupported.
-[Ascent's own comparison](https://www.tryascent.gg/blog/ascent-vs-medal-vs-obs)
-
 Before broad release, measure repeated cold/warm starts and seek percentiles
 with real full-length 1440p60 recordings, large catalogues and full telemetry;
 profile CPU, private memory and GPU allocations on a lower-spec PC; verify
@@ -212,4 +246,4 @@ automatic teardown while entering a real game; and exercise installer/update
 flows and authenticated online review end to end. Inno installer execution,
 live-game FPS impact and a live server-backed desktop session were not tested
 here. Passing this branch's functional tests establishes feasibility, not
-performance parity with Ascent or completion of those rollout checks.
+completion of those rollout checks.

@@ -65,7 +65,7 @@ redistribution of installers built with it. https://jrsoftware.org/files/is/lice
 
 ## WebView2 SDK
 
-Microsoft.Web.WebView2 1.0.4191.47 includes the following licence. The Evergreen Runtime is installed separately under Microsoft's WebView2 Runtime terms.
+Microsoft.Web.WebView2 1.0.4191.47 includes the following licence. The agent embeds Microsoft's Evergreen bootstrapper and installs the shared runtime when needed, under Microsoft's WebView2 Runtime terms: https://developer.microsoft.com/microsoft-edge/webview2/
 
 Copyright (C) Microsoft Corporation. All rights reserved.
 

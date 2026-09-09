@@ -115,6 +115,10 @@ internal sealed class ReviewForm : Form
     private bool _checkingGame;
     private bool _closing;
     private bool _disposed;
+    private bool _initializing;
+    private bool _listening;
+    private bool _mediaStarted;
+    private readonly Label _preparation = new() { Dock = DockStyle.Fill, TextAlign = System.Drawing.ContentAlignment.MiddleCenter, ForeColor = System.Drawing.Color.White };
     private readonly string _pipe;
     private readonly string? _leagueRoot;
     private readonly object _playbackGate = new();
@@ -146,12 +150,26 @@ internal sealed class ReviewForm : Form
 
     private async Task InitializeAsync()
     {
+        if (_initializing || _closing) return;
+        _initializing = true;
         try
         {
             await CheckGameAsync();
             if (_closing) return;
-            _ = ListenAsync();
-            await _media.StartAsync(_lifetime.Token);
+            if (!_listening) { _listening = true; _ = ListenAsync(); }
+            _gameTimer.Start();
+            if (!WebViewRuntime.IsInstalled())
+            {
+                Controls.Clear();
+                _preparation.Text = "Preparing gameplay review…\nThis one-time setup may take a few minutes.";
+                Controls.Add(_preparation);
+                var result = await WebViewRuntime.EnsureAsync(_lifetime.Token);
+                if (_closing) return;
+                if (!result.Available) { ShowFailure(result.Error!, true); return; }
+            }
+            Controls.Clear();
+            Controls.Add(_view);
+            if (!_mediaStarted) { await _media.StartAsync(_lifetime.Token); _mediaStarted = true; }
             var assets = ReviewApp.ExtractAssets();
             var options = new CoreWebView2EnvironmentOptions { AdditionalBrowserArguments = "--disk-cache-size=33554432" };
             var environment = await CoreWebView2Environment.CreateAsync(null, Path.Combine(ReviewApp.DataRoot, "browser"), options);
@@ -171,16 +189,16 @@ internal sealed class ReviewForm : Form
             core.WebMessageReceived += OnMessage;
             core.ProcessFailed += (_, _) => Close();
             core.Navigate(ReviewMediaServer.AppOrigin + "/desktop.html");
-            _gameTimer.Start();
             await CheckGameAsync();
         }
         catch (WebView2RuntimeNotFoundException)
         {
-            ShowFailure("Install Microsoft Edge WebView2 Runtime, then reopen LeagueTracker. Your recorder can continue running.", true);
+            ShowFailure("Gameplay review could not start after setup. Restart LeagueTracker and try again. Recording can continue.", true);
         }
         catch (OperationCanceledException) when (_closing) { }
         catch (Exception ex)
         { if (!_closing) ShowFailure($"Could not open gameplay review. {ex.Message}"); }
+        finally { _initializing = false; }
     }
 
     private void ShowFailure(string text, bool runtime = false)
@@ -190,9 +208,9 @@ internal sealed class ReviewForm : Form
         panel.Controls.Add(new Label { Text = text, AutoSize = true, MaximumSize = new System.Drawing.Size(750, 0), ForeColor = System.Drawing.Color.White });
         if (runtime)
         {
-            var download = new Button { Text = "Get WebView2", AutoSize = true };
-            download.Click += (_, _) => Process.Start(new ProcessStartInfo("https://developer.microsoft.com/en-us/microsoft-edge/webview2/") { UseShellExecute = true });
-            panel.Controls.Add(download);
+            var retry = new Button { Text = "Retry setup", AutoSize = true };
+            retry.Click += async (_, _) => await InitializeAsync();
+            panel.Controls.Add(retry);
         }
         Controls.Add(panel);
     }
@@ -368,6 +386,7 @@ internal sealed class ReviewForm : Form
             _lifetime.Cancel();
             _gameTimer.Dispose();
             _view.Dispose();
+            _preparation.Dispose();
             // No UI continuations are required by the media server.
             Task.Run(async () => await _media.DisposeAsync()).GetAwaiter().GetResult();
             _api.Dispose();

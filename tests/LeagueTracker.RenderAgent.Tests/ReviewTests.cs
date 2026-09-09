@@ -68,6 +68,32 @@ public sealed class ReviewTests : IDisposable
         Assert.False(_library.Find(r.Id).Published);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Legacy_receipts_become_published_only_after_a_matching_server_copy_is_confirmed(bool matches)
+    {
+        var r = Add("legacy-backed-up");
+        var metadataPath = Path.Combine(_root, "metadata", r.Name + ".json");
+        File.WriteAllText(Path.Combine(_root, "metadata", r.Name + ".uploaded"), "legacy receipt");
+        var config = new AgentConfig { RecordingsDir = _root, UploadVods = true, YouTubeUpload = false };
+        using var handler = new Handler
+        {
+            Reply = _ =>
+            {
+                Assert.Throws<IOException>(() => File.Delete(_library.VideoPath(r)));
+                Assert.Throws<IOException>(() => File.WriteAllText(metadataPath, "{}"));
+                var status = new JsonObject { ["exists"] = true, ["sizeBytes"] = matches ? r.SizeBytes : r.SizeBytes - 1, ["meta"] = JsonNode.Parse(File.ReadAllText(metadataPath)) };
+                return new(HttpStatusCode.OK) { Content = new StringContent(status.ToJsonString()) };
+            },
+        };
+        var tracker = new TrackerClient("https://tracker.test", "https://tracker.test/api", null, config, true, handler);
+        var recorder = new GameRecorder(config, "", "", [tracker]);
+        await recorder.MarkPublishedIfSafeAsync(r.Name, CancellationToken.None);
+        Assert.Equal(matches, _library.Find(r.Id).Published);
+        Assert.True(File.Exists(_library.VideoPath(r)));
+    }
+
     [Fact]
     public void Local_only_recordings_rotate_and_foreign_videos_survive()
     {

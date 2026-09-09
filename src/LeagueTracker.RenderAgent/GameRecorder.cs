@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace LeagueTracker.RenderAgent;
 
-/// Records live games, Ascent-style: when the local player enters a real game
+/// Records live games: when the local player enters a real game
 /// (LCU gameflow "InProgress" - replay renders are "WatchInProgress" and never
 /// trigger this), the desktop is captured cropped to the game window and
 /// encoded on the GPU (NVENC), so playing cost is a video encode the graphics
@@ -827,17 +827,42 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
     internal async Task MarkPublishedIfSafeAsync(string baseName, CancellationToken ct)
     {
+        try { await ConfirmPublicationAsync(baseName, ct); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            Log.Warn($"Could not verify backup for {baseName}: {ex.Message}");
+        }
+    }
+
+    private async Task ConfirmPublicationAsync(string baseName, CancellationToken ct)
+    {
         string M(string ext) => Path.Combine(MetaDir, baseName + ext);
-        if (File.Exists(M(".review-published"))) return;
-        bool safe;
+        if (File.Exists(M(".review-published")) || File.Exists(M(".inflight.json"))) return;
+        if (!File.Exists(Path.Combine(RecordingsDir, baseName + ".mp4"))) return;
+        using var video = new FileStream(Path.Combine(RecordingsDir, baseName + ".mp4"), FileMode.Open, FileAccess.Read, FileShare.Read);
+        var safe = false;
         if (_youtube.Enabled)
         {
-            if (!File.Exists(M(".youtube.txt")) || !File.Exists(M(".linked"))) return;
-            var url = File.ReadAllText(M(".youtube.txt")).Trim();
-            if (YouTubeUploader.VideoIdOf(url) is not { } id) return;
-            safe = await _youtube.IsProcessedAsync(id, ct) is true;
+            if (File.Exists(M(".youtube.txt")) && File.Exists(M(".linked")))
+            {
+                var url = File.ReadAllText(M(".youtube.txt")).Trim();
+                if (YouTubeUploader.VideoIdOf(url) is { } id)
+                    safe = await _youtube.IsProcessedAsync(id, ct) is true;
+            }
         }
-        else return;
+        if (!safe && File.Exists(M(".uploaded")))
+        {
+            using var metadataFile = new FileStream(M(".json"), FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var metadata = await JsonDocument.ParseAsync(metadataFile, cancellationToken: ct);
+            if (metadata.RootElement.ValueKind == JsonValueKind.Object
+                && metadata.RootElement.TryGetProperty("matchId", out var match) && match.ValueKind == JsonValueKind.String && match.GetString() is { Length: > 0 } matchId)
+                foreach (var tracker in TrackersFor(baseName).Where(t => !_refusedTrackers.Contains(t.Name)))
+                    if (await tracker.HasVodBackupAsync(matchId, video.Length, metadata.RootElement, ct))
+                    {
+                        File.WriteAllText(M(".review-published"), DateTime.UtcNow.ToString("O"));
+                        return;
+                    }
+        }
         // Publication is a library attribute now, not permission to immediately
         // delete the video. Only the bounded retention pass evicts old games.
         if (safe) File.WriteAllText(M(".review-published"), DateTime.UtcNow.ToString("O"));
@@ -2022,7 +2047,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var pcm = Path.ChangeExtension(src, ".pcm");
         // NVENC stamps sRGB transfer (YouTube darkens for it) and a genuine
         // BT.601 matrix; the Media Foundation (WGC) encoder leaves the matrix
-        // untagged although it converts BT.709 (measured against Ascent's
+        // untagged although it converts BT.709 (measured against a reference
         // tagged capture of the same game, 15 Aug 2026) - untagged 1440p is
         // read as BT.601 by browsers/YouTube's transcoder, which lifts and
         // yellows the greens. Tag what each encoder actually did.

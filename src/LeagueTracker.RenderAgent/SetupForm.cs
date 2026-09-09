@@ -16,6 +16,7 @@ public sealed class SetupForm : Form
     private readonly TextBox _recordings = new();
     private readonly TextBox _prefix = new() { Width = ContentWidth };
     private readonly CheckBox _review = new() { Text = "Automatically open replays in the League client", AutoSize = true };
+    private readonly CheckBox _notifyReview = new() { Text = "Notify me when a recording is ready", AutoSize = true };
     private readonly Label _verdict = new() { AutoSize = true };
     private readonly Button _test = new() { Text = "Test connection" };
     private readonly Button _save = new() { Text = "Save" };
@@ -77,6 +78,9 @@ public sealed class SetupForm : Form
         _recordings.Text = current.RecordingsDir;
         _prefix.Text = current.RecordNamePrefix;
         _review.Checked = current.PostGameReview;
+        _notifyReview.Checked = current.NotifyRecordingReady;
+        _notifyReview.ForeColor = Ink;
+        _notifyReview.Margin = new Padding(0, 6, 0, 0);
         _review.ForeColor = Ink;
         _review.Margin = new Padding(0, 6, 0, 0);
 
@@ -109,7 +113,8 @@ public sealed class SetupForm : Form
         root.Controls.Add(Card("This machine",
             Fields(
                 ("Role", _role, "Recorder for a player's PC; Renderer for the box that cuts replay clips; Both for one machine doing everything."),
-                ("After each game", _review, "On: about 30 seconds after a game ends (unless you have queued again), the agent opens the replay through your League client, takes the screen for a few minutes, follows your champion through the moments that mattered (F8-F12 to skip or pause) and closes it. Off: nothing opens unless the tracker's owner turned it on for this machine - the review is on your match page either way."))));
+                ("After each game", _review, "On: about 30 seconds after a game ends (unless you have queued again), the agent opens the replay through your League client, takes the screen for a few minutes, follows your champion through the moments that mattered (F8-F12 to skip or pause) and closes it. Off: nothing opens unless the tracker's owner turned it on for this machine - the review is on your match page either way."),
+                ("Notifications", _notifyReview, "Show a tray notification after recording a game. Click it to open gameplay review. Off by default."))));
         root.Controls.Add(Card("Recordings",
             Fields(
                 ("Recordings folder", RecordingsRow(), "Blank = Videos\\LeagueTracker. Games are 1.5-3 GB each at 1440p60 - pick a drive with room. Work in progress is kept on the system drive automatically."),
@@ -320,6 +325,7 @@ public sealed class SetupForm : Form
             RecordingsDir = _recordings.Text.Trim(),
             RecordNamePrefix = _prefix.Text.Trim(),
             PostGameReview = _review.Checked,
+            NotifyRecordingReady = _notifyReview.Checked,
         };
     }
 
@@ -361,6 +367,14 @@ public sealed class SetupForm : Form
         _verdict.Text = "Saved - enrolling this machine…";
         var draft = Draft();
         List<string> results = [];
+        if (!Review.WebViewRuntime.IsInstalled())
+        {
+            _verdict.Text = "Preparing gameplay review… This may take a few minutes.";
+            var runtime = await Review.WebViewRuntime.EnsureAsync(CancellationToken.None);
+            if (!runtime.Available) results.Add(runtime.Error!);
+            if (IsDisposed) return;
+            _verdict.Text = "Saved - enrolling this machine…";
+        }
         foreach (var url in draft.ServerUrls)
         {
             var client = TrackerClient.ForServer(url, draft);
@@ -413,6 +427,7 @@ public sealed class SetupForm : Form
         // sees that profile, so a written "false" would silently beat it.
         if (draft.PostGameReview) Set("PostGameReview", true);
         else settings.Remove("PostGameReview");
+        Set("NotifyRecordingReady", draft.NotifyRecordingReady);
         // Only when given: an empty prefix written locally would win over
         // the tracker's default (a written key beats the profile).
         if (draft.RecordNamePrefix is { Length: > 0 }) Set("RecordNamePrefix", draft.RecordNamePrefix);

@@ -73,7 +73,18 @@ jobs:
         with:
           node-version: 24
       - run: ./deploy/build-review-ui.ps1
-      - run: dotnet build src/LeagueTracker.RenderAgent -c Release --nologo
+      - run: ./deploy/get-webview-bootstrapper.ps1
+      - name: Verify required review assets
+        shell: pwsh
+        run: |
+          foreach ($asset in @('ReviewUiArchive', 'WebViewBootstrapper')) {
+            $output = & dotnet msbuild src/LeagueTracker.RenderAgent -t:RequireReviewAssets -p:RequireReviewAssets=true "-p:${asset}=bin/missing-review-asset" --nologo 2>&1
+            if ($LASTEXITCODE -eq 0 -or ($output -join "`n") -notmatch 'error : (Build the desktop UI|Run deploy/get-webview-bootstrapper)') {
+              throw "Required asset guard failed for ${asset}: $output"
+            }
+          }
+          exit 0
+      - run: dotnet build src/LeagueTracker.RenderAgent -c Release -p:RequireReviewAssets=true --nologo
       - run: dotnet build src/LeagueTracker.ReplayLauncher -c Release --nologo
       # The agent's own tests (upload pacing, profile parsing) - Windows-only
       # like the agent, so they live here rather than in the API test job.

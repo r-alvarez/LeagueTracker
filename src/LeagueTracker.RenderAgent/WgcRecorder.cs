@@ -4,7 +4,7 @@ namespace LeagueTracker.RenderAgent;
 
 /// Plan-B capture engine (CaptureBackend "wgc"): Windows Graphics Capture
 /// through ScreenRecorderLib's Media Foundation pipeline - the same class of
-/// capture OBS (and therefore Ascent) uses. WGC reads the DWM-composited
+/// capture OBS uses. WGC reads the DWM-composited
 /// desktop, so the exclusive-fullscreen display mode switches that tear down
 /// a Desktop Duplication session (and with it ffmpeg's ddagrab) do not
 /// interrupt it. Records video ONLY: game-process audio keeps coming from

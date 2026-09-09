@@ -23,7 +23,7 @@ public sealed class AgentConfig
     /// reliably (and politely) when nobody is using the PC.
     public int IdleSeconds { get; set; } = 120;
 
-    /// Record live games (Ascent-style auto-VOD): capture the game window
+    /// Record live games automatically: capture the game window
     /// while the local player is in a real game.
     public bool RecordGames { get; set; } = true;
 
@@ -164,6 +164,8 @@ public sealed class AgentConfig
     /// the replay UI and edits game.cfg, which nobody should meet by surprise
     /// (audit G-N3). Never runs on a renderer-only box.
     public bool PostGameReview { get; set; }
+
+    public bool NotifyRecordingReady { get; set; }
 
     /// How long to let the end-of-game screens settle before deciding whether
     /// a review is wanted. Long enough that hitting "play again" immediately

@@ -76,3 +76,19 @@ Type: files; Name: "{app}\paused"
 Type: filesandordirs; Name: "{app}\update"
 ; agent.key, appsettings.json and youtube-token.json are deliberately kept:
 ; a reinstall picks the machine's identity and settings back up.
+
+[Code]
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    WizardForm.StatusLabel.Caption := 'Preparing gameplay review...';
+    if not Exec(ExpandConstant('{app}\LeagueTracker.RenderAgent.exe'), '--ensure-webview2',
+      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      ResultCode := 1;
+    if ResultCode <> 0 then
+      SuppressibleMsgBox('Gameplay review could not be prepared. Check your internet connection. LeagueTracker will retry automatically when you open review; recording can continue.', mbInformation, MB_OK, IDOK);
+  end;
+end;
