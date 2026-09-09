@@ -157,13 +157,9 @@ public sealed class AgentConfig
     /// unlisted (default), private, or public.
     public string YouTubeVisibility { get; set; } = "unlisted";
 
-    /// After a game, launch its replay through the person's League client
-    /// and drive the camera through the moments that mattered (ReplayReview)
-    /// - unless the next game is already being queued for. Off unless the
-    /// person turned it on in the setup window: it takes the screen, clicks
-    /// the replay UI and edits game.cfg, which nobody should meet by surprise
-    /// (audit G-N3). Never runs on a renderer-only box.
-    public bool PostGameReview { get; set; }
+    // Out of ProfileKeys on purpose: it takes the screen, so the answer stays
+    // on the machine rather than arriving from the tracker.
+    public bool PostGameReview { get; set; } = true;
 
     public bool NotifyRecordingReady { get; set; }
 
@@ -200,11 +196,11 @@ public sealed class AgentConfig
 
     public static string Version => Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "0.0.0.0";
 
-    /// appsettings.json next to the exe, then LT_* environment variables on top.
-    public static AgentConfig Load()
+    public static AgentConfig Load() => Load(Path.Combine(AppContext.BaseDirectory, "appsettings.json"));
+
+    public static AgentConfig Load(string path)
     {
         var config = new AgentConfig();
-        var path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
         if (File.Exists(path))
         {
             var options = new JsonSerializerOptions
