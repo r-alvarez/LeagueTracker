@@ -250,7 +250,7 @@ public static class ManagementEndpoints
             if (user.ProviderUserId is null) users.SetProviderUserId(user.Id, providerId);
             await auth0.SendPasswordSetupEmailAsync(user.Email, ct);
             users.MarkInviteSent(user.Id);
-            log.LogInformation("Invite mailed to {Email} ({ProviderId})", user.Email, providerId);
+            log.LogInformation("Invite mailed for user {UserId} ({ProviderId})", user.Id, providerId);
             return (true, null);
         }
         catch (Auth0Exception ex)
