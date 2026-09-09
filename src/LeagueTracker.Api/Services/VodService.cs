@@ -216,15 +216,22 @@ public sealed class VodService(DataPaths paths)
             {
                 if (buffer[i] != '\n') continue;
                 current.Append(buffer, start, i - start);
-                yield return current.ToString().TrimEnd('\r');
+                yield return Complete(current);
                 current.Clear();
                 start = i + 1;
             }
             current.Append(buffer, start, read - start);
-            if (current.Length > MaxLineChars) throw new TelemetryTooLargeException($"telemetry line longer than {MaxLineChars} characters");
+            if (current.Length > MaxLineChars) throw TooLong();
         }
-        if (current.Length > 0) yield return current.ToString().TrimEnd('\r');
+        if (current.Length > 0) yield return Complete(current);
     }
+
+    // Checked on the finished line as well as the fragment: a newline right
+    // after an oversized field slipped past the fragment check (review of N16).
+    private static string Complete(StringBuilder line) =>
+        line.Length > MaxLineChars ? throw TooLong() : line.ToString().TrimEnd('\r');
+
+    private static TelemetryTooLargeException TooLong() => new($"telemetry line longer than {MaxLineChars} characters");
 
     private static bool IsAction(ReadOnlySpan<char> type)
     {

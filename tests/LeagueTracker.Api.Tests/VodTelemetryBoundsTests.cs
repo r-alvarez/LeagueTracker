@@ -144,6 +144,15 @@ public class VodTelemetryBoundsTests : IDisposable
         Assert.Contains("line longer", rejection!.Error);
     }
 
+    // Review of N16: the length check ran on the unfinished fragment only, so
+    // a newline-terminated line with a 10,000-character field went through.
+    [Fact]
+    public async Task A_newline_terminated_line_over_the_length_is_rejected()
+    {
+        var rejection = await Store(Gzip([$"100,key_down,{new string('x', 10_000)},0,0", "200,key_down,Q,0,0"]));
+        Assert.Contains("line longer", rejection!.Error);
+    }
+
     [Fact]
     public async Task Bytes_that_are_not_gzip_are_rejected()
     {
