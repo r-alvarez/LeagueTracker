@@ -417,7 +417,13 @@ app.MapManagementEndpoints();
 // (Agent__Profiles__<key id>__...) - by its id, never by the name it chose
 // at enrol: any user can mint a key and name it after another machine
 // (audit T-N1).
-app.MapGet("/api/agent/profile", (Caller caller, AgentRegistry agents) => Results.Ok(agents.ProfileFor(caller.Agent!.Id))).RequireAuthorization(Policies.Agent);
+app.MapGet("/api/agent/profile", (Caller caller, AgentRegistry agents, UserStore users) =>
+{
+    var agent = caller.Agent!;
+    var profile = agents.ProfileFor(agent.Id);
+    var operatorsMachine = agent.IsBound && users.ById(agent.OwnerUserId)?.IsAdmin is true;
+    return Results.Ok(operatorsMachine ? profile : AgentOptions.WithoutSecrets(profile));
+}).RequireAuthorization(Policies.Agent);
 
 // The agent's side of "sendlog": the tail of agent.log, filed under the key
 // that authenticated - only an approved agent writes here, only as itself.

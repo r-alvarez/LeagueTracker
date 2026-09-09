@@ -44,4 +44,17 @@ public class AgentOptionsTests
         Assert.Equal("shared-id", profile["YouTubeClientId"]);
         Assert.Equal(3, profile.Count);
     }
+
+    [Fact]
+    public void A_profile_without_secrets_keeps_nothing_secret_shaped_and_turns_uploads_off()
+    {
+        var options = Options();
+        options.Profile["YouTubeClientSecret"] = "shared-secret";
+        options.Profile["YouTubeUpload"] = "true";
+
+        var stripped = AgentOptions.WithoutSecrets(options.ProfileFor(BenKeyId));
+
+        Assert.Equal(["RecordQueues", "YouTubeClientId", "YouTubeUpload"], stripped.Keys.Order());
+        Assert.Equal("false", stripped["YouTubeUpload"]);
+    }
 }

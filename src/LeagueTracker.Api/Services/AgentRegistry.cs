@@ -36,6 +36,25 @@ public sealed class AgentOptions
         return merged;
     }
 
+    // The shared YouTube secret and refresh token are the operator's own
+    // channel: only machines an admin owns may carry them. Any signed-in user
+    // can mint and approve a recorder key, so serving them to every approved
+    // key was the tracker's credentials one enrolment away (audit B2). Until
+    // per-user channels exist, everyone else records without uploading.
+    public static IReadOnlyDictionary<string, string> WithoutSecrets(IReadOnlyDictionary<string, string> profile)
+    {
+        var stripped = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in profile)
+        {
+            if (!IsSecret(key)) stripped[key] = value;
+        }
+        if (stripped.ContainsKey("YouTubeUpload")) stripped["YouTubeUpload"] = "false";
+        return stripped;
+    }
+
+    public static bool IsSecret(string key) =>
+        key.Contains("Secret", StringComparison.OrdinalIgnoreCase) || key.Contains("Token", StringComparison.OrdinalIgnoreCase);
+
     /// Folder holding LeagueTracker.RenderAgent-<version>.zip builds. Blank =
     /// <Accounts:DataRoot or the default account's DataDir>/agent-releases -
     /// process-wide, not per account.
