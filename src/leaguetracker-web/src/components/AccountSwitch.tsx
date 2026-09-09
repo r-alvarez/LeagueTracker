@@ -16,6 +16,11 @@ export default function AccountSwitch() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Someone else's page: the visitor's own list does not carry it, but the
+  // pill still names where they are.
+  const mounted = account.current
+  const options = account.all.some(a => a.slug === mounted.slug) ? account.all : [mounted, ...account.all]
+
   const onPick = (value: string) => {
     if (value === ADD) { setAdding(true); return }
     account.switchTo(value)
@@ -45,7 +50,7 @@ export default function AccountSwitch() {
     <span className="account-control">
       <label className="player account-switch" title="Switch account">
         <select value={account.current.slug} onChange={e => onPick(e.target.value)} aria-label="Account">
-          {account.all.map(a => (
+          {options.map(a => (
             <option key={a.slug} value={a.slug}>{a.label} · {a.riotId}{a.available ? '' : ' · unavailable'}</option>
           ))}
           {account.canAdd && auth.signedIn && <option value={ADD}>＋ Add account…</option>}
