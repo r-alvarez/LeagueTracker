@@ -45,6 +45,22 @@ public class AgentKeyStoreEnrolTests(PostgresFixture postgres) : IDisposable
         Assert.Equal(new[] { "mine" }, caller.DiscoverAgentAccounts(accounts).Select(a => a.Id));
     }
 
+    [Fact]
+    public void A_renderer_reviews_only_its_owners_and_shared_pc_accounts()
+    {
+        var keys = Store();
+        var code = keys.MintJoinCode("owner", AgentRole.Renderer);
+        var agent = keys.Enroll(Key(1), "combined-pc", "PC", "203.0.113.5", code.Code).Record!;
+        keys.Decide(agent.Id, AgentKeyStatus.Approved);
+        keys.Assign(agent.Id, "owner", AgentRole.Renderer, ["shared"]);
+        Account[] accounts = [new() { Id = "mine", OwnerUserId = "owner" }, new() { Id = "shared", OwnerUserId = "friend" }, new() { Id = "unrelated", OwnerUserId = "stranger" }];
+
+        var caller = CallerFor(keys, agent);
+
+        Assert.Equal(new[] { "mine", "shared", "unrelated" }, caller.DiscoverAgentAccounts(accounts).Select(a => a.Id));
+        Assert.Equal(new[] { "mine", "shared" }, caller.DiscoverReviewAccounts(accounts).Select(a => a.Id));
+    }
+
     [Theory]
     [InlineData(AgentRole.Renderer, false, 2)]
     [InlineData(AgentRole.Recorder, true, 2)]
@@ -58,6 +74,7 @@ public class AgentKeyStoreEnrolTests(PostgresFixture postgres) : IDisposable
         keys.Assign(agent.Id, null, role);
         Account[] accounts = [new() { Id = "one", OwnerUserId = "owner" }, new() { Id = "two", OwnerUserId = "friend" }];
         Assert.Equal(expected, CallerFor(keys, agent).DiscoverAgentAccounts(accounts).Count());
+        Assert.Empty(CallerFor(keys, agent).DiscoverReviewAccounts(accounts));
     }
 
     private Caller CallerFor(AgentKeyStore keys, AgentKeyRecord agent)

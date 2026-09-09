@@ -174,6 +174,7 @@ public sealed class ReviewTests : IDisposable
     [Theory]
     [InlineData("/matches/EUW1_123/track", true)]
     [InlineData("/matches?page=2&pageSize=20", true)]
+    [InlineData("/matches?page=25&pageSize=200", true)]
     [InlineData("https://example.com/matches/123", false)]
     [InlineData("/matches/../admin", false)]
     [InlineData("/matches/%2e%2e/admin", false)]
@@ -240,6 +241,28 @@ public sealed class ReviewTests : IDisposable
     {
         public Func<HttpRequestMessage, HttpResponseMessage> Reply { get; set; } = _ => throw new HttpRequestException();
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(Reply(request));
+    }
+
+    [Fact]
+    public async Task Desktop_account_discovery_uses_the_personal_endpoint_and_does_not_fall_back_to_renderer_scope()
+    {
+        var paths = new List<string>();
+        var handler = new Handler
+        {
+            Reply = request =>
+            {
+                paths.Add(request.RequestUri!.AbsolutePath);
+                return request.RequestUri.AbsolutePath == "/api/agent/accounts"
+                    ? new(HttpStatusCode.OK) { Content = new StringContent("{\"accounts\":[{\"id\":\"somebody-else\",\"region\":\"euw\",\"slug\":\"Other-EUW\"}]}", Encoding.UTF8, "application/json") }
+                    : new(HttpStatusCode.NotFound) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
+            },
+        };
+        using var api = new ReviewApi(new AgentConfig { ServerUrl = "https://tracker.example" }, Path.Combine(_root, "cache"), handler, "private-test-key");
+
+        var result = JsonSerializer.SerializeToNode(await api.DiscoverAsync(true, CancellationToken.None), new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+
+        Assert.Empty(result["accounts"]!.AsArray());
+        Assert.Equal(["/api/agent/review/accounts"], paths);
     }
 
     [Fact]

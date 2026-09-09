@@ -297,7 +297,21 @@ internal sealed class ReviewForm : Form
         switch (operation)
         {
             case "bootstrap": return new { artPrefix = _media.ArtPrefix, last = _last, version = AgentConfig.Version };
-            case "library": return new { recordings = _library.List(), settings = _library.Settings(_config), freeGb = RecordingLibrary.FreeGb(_library.Root) };
+            case "library":
+            {
+                var recordings = _library.List();
+                return new
+                {
+                    recordings = recordings.Select(r => new
+                    {
+                        r.Id, r.Name, r.MatchId, r.Player, r.RecordedUtc, r.DurationSec, r.SizeBytes,
+                        r.Available, r.Pinned, r.Published,
+                        ThumbnailUrl = _library.ThumbnailPath(r) is null ? null : _media.Thumbnail(r.Id),
+                    }),
+                    settings = _library.Settings(_config),
+                    freeGb = RecordingLibrary.FreeGb(_library.Root),
+                };
+            }
             case "accounts": return await _api.DiscoverAsync(Flag("refresh"), ct);
             case "pin": _library.Pin(Text("id"), Flag("pinned")); return true;
             case "delete": _library.Delete(Text("id"), Flag("confirm")); return true;
