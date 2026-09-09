@@ -39,6 +39,7 @@ public sealed class ClaimService(RegistryDatabase registry, AccountRegistry acco
     {
         if (accounts.ById(accountId) is not { } account) return (null, "no such account");
         if (account.IsOwned) return (null, account.OwnerUserId == userId ? "you already own this account" : "this account already has an owner");
+        if (accounts.CannotTakeOn(userId, account)) return (null, CeilingMessage);
         using (var peek = registry.Open())
         {
             if (LiveChallengeOfSomeoneElse(peek, accountId, userId) is { } taken) return (null, TakenMessage(taken));
@@ -134,28 +135,40 @@ public sealed class ClaimService(RegistryDatabase registry, AccountRegistry acco
                 : $"Riot still shows icon {icon}, not {claim.IconId} - set it in the client (it can take a minute to propagate) and try again");
         }
 
-        using (var tx = db.Database.BeginTransaction())
+        // One ownership change at a time process-wide: the per-user ceiling is
+        // judged on the registry's count, and two verifies for different
+        // accounts by the same person must not both read the same number
+        // (review of N5). The claim stays pending, so untracking one and
+        // verifying again works.
+        lock (OwnershipGate)
         {
-            // The conditional update is the compare-and-set: of two verifies
-            // that both saw an unowned account, Postgres lets exactly one row
-            // through, and the other learns it lost here.
-            var won = db.Accounts.Where(a => a.Id == account.Id && a.OwnerUserId == null).ExecuteUpdate(s => s.SetProperty(a => a.OwnerUserId, userId)) == 1;
-            claim.State = won ? ClaimState.Verified : ClaimState.Failed;
-            if (won)
+            if (accounts.CannotTakeOn(userId, account)) return (View(claim, account.RiotId), false, CeilingMessage);
+            using (var tx = db.Database.BeginTransaction())
             {
-                foreach (var other in db.OwnershipClaims.Where(c => c.AccountId == account.Id && c.Id != claim.Id && c.State == ClaimState.Pending)) other.State = ClaimState.Failed;
+                // The conditional update is the compare-and-set: of two verifies
+                // that both saw an unowned account, Postgres lets exactly one row
+                // through, and the other learns it lost here.
+                var won = db.Accounts.Where(a => a.Id == account.Id && a.OwnerUserId == null).ExecuteUpdate(s => s.SetProperty(a => a.OwnerUserId, userId)) == 1;
+                claim.State = won ? ClaimState.Verified : ClaimState.Failed;
+                if (won)
+                {
+                    foreach (var other in db.OwnershipClaims.Where(c => c.AccountId == account.Id && c.Id != claim.Id && c.State == ClaimState.Pending)) other.State = ClaimState.Failed;
+                }
+                db.SaveChanges();
+                tx.Commit();
+                if (!won) return (View(claim, account.RiotId), false, "the account was claimed by someone else meanwhile");
             }
-            db.SaveChanges();
-            tx.Commit();
-            if (!won) return (View(claim, account.RiotId), false, "the account was claimed by someone else meanwhile");
+            // Memory follows the database, never the other way round: only the
+            // winner's copy learns the owner, so a loser's later write-through
+            // cannot put a null back.
+            accounts.Update(account, a => a.OwnerUserId = userId);
         }
-        // Memory follows the database, never the other way round: only the
-        // winner's copy learns the owner, so a loser's later write-through
-        // cannot put a null back.
-        accounts.Update(account, a => a.OwnerUserId = userId);
         log.LogInformation("Claim {Id} verified: {RiotId} is owned by user {User}", claim.Id, account.RiotId, userId);
         return (View(claim, account.RiotId), true, null);
     }
+
+    private const string CeilingMessage = "you already track the most accounts allowed here - untrack one, then verify again";
+    private static readonly object OwnershipGate = new();
 
     // Starts on one account queue behind this lock, so two people pressing
     // Claim together cannot both open a challenge.

@@ -20,9 +20,9 @@ public class ClaimServiceTests(PostgresFixture postgres) : IDisposable
     private readonly DatabaseServer _server = postgres.NewServer();
     private readonly RiotStub _riot = new();
 
-    private (ClaimService Claims, AccountRegistry Accounts, RegistryDatabase Registry) Build()
+    private (ClaimService Claims, AccountRegistry Accounts, RegistryDatabase Registry) Build(int maxPerUser = 5)
     {
-        var config = Options.Create(new AccountsOptions { DataRoot = _root, List = [new Account { GameName = "Player", TagLine = "TEST", DataDir = _root, Puuid = "puuid-1" }] });
+        var config = Options.Create(new AccountsOptions { DataRoot = _root, MaxAccountsPerUser = maxPerUser, List = [new Account { GameName = "Player", TagLine = "TEST", DataDir = _root, Puuid = "puuid-1" }] });
         var riot = Options.Create(new RiotOptions());
         var env = new TestEnv(_root);
         var registry = new RegistryDatabase(_server, config, riot, env);
@@ -144,5 +144,25 @@ public class ClaimServiceTests(PostgresFixture postgres) : IDisposable
             await _release.Task.WaitAsync(TimeSpan.FromSeconds(10), ct);
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent($"{{\"profileIconId\":{Icon}}}") };
         }
+    }
+
+    // Review of N5: adding checked the per-user ceiling, claiming did not.
+    [Fact]
+    public async Task A_user_at_the_ceiling_cannot_claim_another_account_but_may_claim_one_they_added()
+    {
+        var (claims, accounts, registry) = Build(maxPerUser: 1);
+        var mine = accounts.Add("Mine", "0001", "euw1", null, "puuid-mine", "claimant-a");
+        var target = accounts.Default;
+        SeedPendingClaim(registry, "claimant-a", target.Id, 10);
+        _riot.Icon = 10;
+
+        var refused = await claims.VerifyAsync("claimant-a", "claimant-a", CancellationToken.None);
+        Assert.False(refused.Verified);
+        Assert.Contains("most accounts", refused.Error);
+        Assert.Equal("pending", refused.Claim!.State);
+        Assert.Null(accounts.ById(target.Id)!.OwnerUserId);
+
+        Assert.False(accounts.CannotTakeOn("claimant-a", mine));
+        Assert.Contains("most accounts", (await claims.StartAsync("claimant-a", target.Id, CancellationToken.None)).Error);
     }
 }

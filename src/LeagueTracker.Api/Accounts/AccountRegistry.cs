@@ -86,6 +86,11 @@ public sealed class AccountRegistry
     public bool AtCapacity { get { lock (_gate) return _all.Count >= _maxAccounts; } }
     public bool AtCapacityFor(string userId) => CountedAgainst(userId) >= _maxPerUser;
 
+    // Claiming charges the claimant one more slot unless they added the
+    // account themselves, in which case it is already on their count.
+    public bool CannotTakeOn(string userId, Account account) =>
+        CountedAgainst(userId) + (account.AddedByUserId == userId ? 0 : 1) > _maxPerUser;
+
     // Untracking is for whoever is answerable for the slot: the owner, an
     // admin, or the person who added it - the last only while it is unclaimed,
     // so the adder cannot pull a profile out from under its owner.
