@@ -161,8 +161,8 @@ public sealed class AgentKeyStore
             var record = new AgentKeyRecord
             {
                 Id = Ids.New(),
-                Name = name is { Length: > 0 } ? name[..Math.Min(name.Length, 64)] : machine,
-                Machine = machine[..Math.Min(machine.Length, 64)],
+                Name = DisplayText(name is { Length: > 0 } ? name : machine),
+                Machine = DisplayText(machine),
                 KeyHash = hash,
                 Status = AgentKeyStatus.Pending,
                 CreatedUtc = DateTime.UtcNow,
@@ -202,6 +202,15 @@ public sealed class AgentKeyStore
     // "K7Q2-9DFM", "k7q29dfm" and " K7Q2-9DFM " are one code; blank is none.
     private static string? Normalize(string? code) =>
         code?.Replace("-", "").Trim().ToUpperInvariant() is { Length: > 0 } clean ? clean : null;
+
+    // What a machine calls itself goes into log lines and the Machines page:
+    // one line, printable, 64 characters - a newline in a name must not forge
+    // a log entry.
+    private static string DisplayText(string text)
+    {
+        var printable = new string(text.Where(ch => !char.IsControl(ch)).ToArray()).Trim();
+        return printable[..Math.Min(printable.Length, 64)];
+    }
 
     private void DropStalePending()
     {

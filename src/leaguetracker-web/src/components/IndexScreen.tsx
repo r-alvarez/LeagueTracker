@@ -15,7 +15,8 @@ export default function IndexScreen() {
 
   const open = () => {
     const slug = slugOf(name)
-    if (slug) window.location.assign(`/${region}/${encodeURIComponent(slug)}/`)
+    // Both segments encoded: the target can only ever be a path on this site.
+    if (slug) window.location.assign(`/${encodeURIComponent(region)}/${encodeURIComponent(slug)}/`)
   }
 
   return (
