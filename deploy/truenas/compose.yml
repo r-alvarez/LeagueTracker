@@ -54,6 +54,8 @@ x-lt-agent-env: &lt-agent-env
   Agent__Profiles__8b239314d4e9__YouTubeClientId: ${YT_BEN_CLIENT_ID:-}
   Agent__Profiles__8b239314d4e9__YouTubeClientSecret: ${YT_BEN_CLIENT_SECRET:-}
   Agent__Profiles__8b239314d4e9__YouTubeRefreshToken: ${YT_BEN_REFRESH_TOKEN:-}
+  # The title prefix is per agent, and the shared one is Ruben's series.
+  Agent__Profiles__8b239314d4e9__RecordNamePrefix: Ben
   # Friends publish to YouTube and send only the small review sidecar; the
   # full multi-GB video is NOT pushed to the NAS (YouTube hosts it). Without
   # this an agent defaults to UploadVods=true and tries to upload every game's
