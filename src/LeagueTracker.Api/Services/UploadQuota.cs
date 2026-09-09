@@ -42,7 +42,7 @@ public sealed class UploadReservation : IDisposable
     public void Dispose() => _release();
 }
 
-public sealed class UploadQuota(DataPaths paths, IOptions<UploadsOptions> options)
+public sealed class UploadQuota(DataPaths paths, IOptions<UploadsOptions> options, Func<string, long>? freeSpaceOf = null)
 {
     private const long Gb = 1024L * 1024 * 1024;
     private const long Mb = 1024L * 1024;
@@ -62,9 +62,10 @@ public sealed class UploadQuota(DataPaths paths, IOptions<UploadsOptions> option
         lock (Gate)
         {
             var key = paths.DataDir;
-            var inFlight = InFlight.GetValueOrDefault(key);
-            var allowanceLeft = (long)(options.Value.MaxMediaGbPerAccount * Gb) - MediaBytes() - inFlight;
-            var diskLeft = FreeBytes() - (long)(options.Value.MinFreeGb * Gb) - inFlight;
+            // The allowance is the account's; the disk is everyone's, so its
+            // headroom is net of every account's in-flight uploads.
+            var allowanceLeft = (long)(options.Value.MaxMediaGbPerAccount * Gb) - MediaBytes() - InFlight.GetValueOrDefault(key);
+            var diskLeft = FreeBytes() - (long)(options.Value.MinFreeGb * Gb) - InFlight.Values.Sum();
             var budget = Math.Max(0, Math.Min(fileCap, Math.Min(allowanceLeft, diskLeft)));
 
             var refusal =
@@ -113,8 +114,10 @@ public sealed class UploadQuota(DataPaths paths, IOptions<UploadsOptions> option
     private long FreeBytes()
     {
         Directory.CreateDirectory(paths.DataDir);
-        return new DriveInfo(Path.GetFullPath(paths.DataDir)).AvailableFreeSpace;
+        return (freeSpaceOf ?? DriveFreeSpace)(paths.DataDir);
     }
+
+    private static long DriveFreeSpace(string dir) => new DriveInfo(Path.GetFullPath(dir)).AvailableFreeSpace;
 
     // Media is everything the machines send; the raw game JSON under games/
     // is the tracker's own and rebuildable from Riot.

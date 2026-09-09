@@ -13,11 +13,31 @@ public class UploadQuotaTests : IDisposable
         try { Directory.Delete(_root, recursive: true); } catch { /* a disposable temp folder */ }
     }
 
-    private UploadQuota Quota(double maxMediaGb, double minFreeGb = 0)
+    private UploadQuota Quota(double maxMediaGb, double minFreeGb = 0, string? dataDir = null, Func<string, long>? freeSpace = null)
     {
         var context = new AccountContext(null!);
-        context.Bind(new Account { GameName = "A", TagLine = "B", DataDir = _root });
-        return new UploadQuota(new DataPaths(context), Options.Create(new UploadsOptions { MaxMediaGbPerAccount = maxMediaGb, MinFreeGb = minFreeGb }));
+        context.Bind(new Account { GameName = "A", TagLine = "B", DataDir = dataDir ?? _root });
+        return new UploadQuota(new DataPaths(context), Options.Create(new UploadsOptions { MaxMediaGbPerAccount = maxMediaGb, MinFreeGb = minFreeGb }), freeSpace);
+    }
+
+    // Review of D1, second pass: in-flight reservations were netted off the
+    // disk per account, so two accounts could each take the same last bytes.
+    [Fact]
+    public void Two_accounts_cannot_both_reserve_the_same_disk_headroom()
+    {
+        const double oneGb = 1;
+        var oneKilobyteAboveTheFloor = (long)(oneGb * 1024 * 1024 * 1024) + 1024;
+        var first = Quota(maxMediaGb: 1000, minFreeGb: oneGb, dataDir: Path.Combine(_root, "a"), freeSpace: _ => oneKilobyteAboveTheFloor);
+        var second = Quota(maxMediaGb: 1000, minFreeGb: oneGb, dataDir: Path.Combine(_root, "b"), freeSpace: _ => oneKilobyteAboveTheFloor);
+
+        using (var held = first.Reserve(declaredBytes: null, fileCap: 4096))
+        {
+            Assert.Equal(1024, held.Budget);
+            using var refused = second.Reserve(declaredBytes: 512, fileCap: 4096);
+            Assert.Equal(UploadRefusal.Disk, refused.Refusal);
+        }
+        using var afterRelease = second.Reserve(declaredBytes: 512, fileCap: 4096);
+        Assert.Null(afterRelease.Refusal);
     }
 
     private const double OneKilobyteInGb = 1024.0 / (1024 * 1024 * 1024);
