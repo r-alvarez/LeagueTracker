@@ -25,6 +25,11 @@ updates:
     groups:
       nuget:
         patterns: ['*']
+    # The agent ships its own build of ScreenRecorderLib (deploy/screenrecorderlib,
+    # HDR tone-map patch against a pinned tag); the reference moves only when
+    # that patch has been rebased and the ci build updated with it.
+    ignore:
+      - dependency-name: ScreenRecorderLib
 
   - package-ecosystem: npm
     directory: /src/leaguetracker-web
