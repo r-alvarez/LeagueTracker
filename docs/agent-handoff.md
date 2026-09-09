@@ -127,8 +127,9 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
    URL `https://league.rjav-tech.co.uk`, role Recorder, optional recordings
    folder and title prefix, and the **post-game review** checkbox - off
    unless they want the replay opening on their screen after each game
-   (`Agent__Profiles__<key id>__PostGameReview: "true"` turns it on from
-   here for a machine whose owner asked). A folder that already holds
+   (a machine-local setting: that checkbox, or `PostGameReview` in the
+   agent's `appsettings.json`; the tracker profile cannot switch it on,
+   so nothing opens on a player's screen from afar). A folder that already holds
    videos gets a `LeagueTracker` subfolder; the agent never counts, deletes
    or publishes a video it did not make. **No token.** **Test connection** enrols the
    machine - it is the owner's from that moment - and says "waiting for
@@ -168,10 +169,12 @@ is up on that box; the gaming PCs are never used for rendering again.
   upstream (`UploadInGameMbps` to pin it). Game 1 should be on YouTube by
   the end of game 2; if a player says otherwise, ask for their **Log** from
   the Agent access row (the "sendlog" command ships it within a minute).
-- **Recordings are deleted once safe** (YouTube processed + linked), per
-  the tracker profile: shared `KeepRecordingsAfterPublish=false`, Ruben's key
-  overridden to `true`. A new agent that should keep files gets its own
-  `Agent__Profiles__<key id>__KeepRecordingsAfterPublish: "true"` line.
+- **Recordings are deleted once safe** (YouTube processed + linked): the
+  agent's own default is `KeepRecordingsAfterPublish=false`. A machine that
+  should keep its files (Ruben's, for debugging) sets `true` in its own
+  `appsettings.json`; the tracker profile cannot decide it, so a
+  self-updating agent nobody is sitting at never deletes anything on a
+  server's say-so.
 
 - **Pause** stops new recordings/renders/reviews; an upload in flight
   finishes (it's invisible and stopping it only loses work).

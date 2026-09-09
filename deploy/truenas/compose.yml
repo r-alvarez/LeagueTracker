@@ -30,29 +30,22 @@ x-lt-log-sidecar: &lt-log-sidecar
 # env vars, NEVER committed. Per-tracker overrides (a different title prefix,
 # a private channel) go in that service's environment block. Builds published
 # by deploy/publish-agent.ps1 land in the shared agent-releases folder; every
-# agent updates itself from whichever tracker it talks to.
+# agent updates itself from whichever tracker it talks to. The agent takes
+# only an allow-listed set of keys from here (recording, upload and YouTube
+# settings); what happens on the player's screen or disk - post-game review,
+# keeping recordings - is the machine's own setting, so a tracker can never
+# open a replay on someone or delete their files from afar. A key outside
+# the list is ignored with one warning in the agent log.
 x-lt-agent-env: &lt-agent-env
   Agent__ReleaseDir: /agent-releases
   Agent__Profile__YouTubeUpload: "true"
-  Agent__Profile__YouTubeVisibility: unlisted
   Agent__Profile__YouTubeClientId: ${YT_CLIENT_ID:-}
   Agent__Profile__YouTubeClientSecret: ${YT_CLIENT_SECRET:-}
   Agent__Profile__YouTubeRefreshToken: ${YT_REFRESH_TOKEN:-}
-  # Recordings leave the player's PC once safely on YouTube (processed +
-  # linked here) - customers don't keep gigabytes they never look at. Ruben's
-  # own agent keeps them for debugging: the per-agent override wins over the
-  # shared value, and this is decided from here so a self-updating agent on a
-  # machine nobody is sitting at never deletes anything by surprise.
-  Agent__Profile__KeepRecordingsAfterPublish: "false"
   # Per-agent blocks are keyed by the KEY ID an admin sees on the Machines
   # page (the code beside the machine's name), never by the name the machine
   # chose at enrol - a name is anyone's to type. A block that names no key is
   # reported in the boot log. The ids: GET /api/admin/agents, keys[].id.
-  Agent__Profiles__79f4badd6236__KeepRecordingsAfterPublish: "true"
-  # Post-game review is off for a new install (it opens the replay on the
-  # player's screen); the two machines whose owners asked for it get it here.
-  Agent__Profiles__79f4badd6236__PostGameReview: "true"
-  Agent__Profiles__60250018a226__PostGameReview: "true"
   # Ben's agent uploads through its own Google Cloud project (own 10k-unit
   # daily quota - videos.insert costs 1,600, so one project is ~6 uploads a
   # day for everyone together) but still to the same channel: the refresh
@@ -61,7 +54,6 @@ x-lt-agent-env: &lt-agent-env
   Agent__Profiles__60250018a226__YouTubeClientId: ${YT_BEN_CLIENT_ID:-}
   Agent__Profiles__60250018a226__YouTubeClientSecret: ${YT_BEN_CLIENT_SECRET:-}
   Agent__Profiles__60250018a226__YouTubeRefreshToken: ${YT_BEN_REFRESH_TOKEN:-}
-  Agent__Profile__RecordQueues: ranked-solo,normal
   # Friends publish to YouTube and send only the small review sidecar; the
   # full multi-GB video is NOT pushed to the NAS (YouTube hosts it). Without
   # this an agent defaults to UploadVods=true and tries to upload every game's
