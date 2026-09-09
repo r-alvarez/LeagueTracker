@@ -894,12 +894,19 @@ recorder.MapPut("/vods/{matchId}/{file}", async (string matchId, string file, Ht
         "thumb" => "thumb.jpg",
         _ => null,
     };
-    if (name is null || !await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
-    var target = vods.TargetPath(matchId, name)!;
-    var stored = await StoreUploadAsync(request, target, quota, quota.MaxSidecarBytes, ct);
-    // Telemetry replaced = derived series stale; recomputed on next read.
-    if (name is "events.csv.gz" && vods.TargetPath(matchId, "apm.json") is { } apm && File.Exists(apm)) File.Delete(apm);
-    return stored;
+    var match = await db.Matches.AsNoTracking().Where(m => m.Id == matchId).Select(m => new { m.DurationSec }).FirstOrDefaultAsync(ct);
+    if (name is null || match is null) return Results.NotFound();
+    if (quota.Refusal(request.ContentLength ?? 0) is { } refusal) return Results.Json(new { error = refusal }, statusCode: StatusCodes.Status507InsufficientStorage);
+    // Telemetry is checked line by line against the recording's length on the
+    // way in (audit N16); the other sidecars are just bounded files.
+    if (name is "events.csv.gz")
+    {
+        request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = quota.MaxSidecarBytes;
+        return await vods.StoreTelemetryAsync(matchId, request.Body, match.DurationSec, ct) is { } rejected
+            ? Results.BadRequest(new { error = rejected.Error })
+            : Results.Ok();
+    }
+    return await StoreUploadAsync(request, vods.TargetPath(matchId, name)!, quota, quota.MaxSidecarBytes, ct);
 });
 
 // --- Full-game renders (opt-in per match; retention-swept unless kept) ----------

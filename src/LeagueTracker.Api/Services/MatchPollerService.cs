@@ -15,6 +15,7 @@ public sealed class MatchPollerService(
     AccountInitializer initializer,
     IOptions<RiotOptions> options,
     PerAccount<LiveGameState> liveStates,
+    PollerHeartbeat heartbeat,
     ILogger<MatchPollerService> logger) : BackgroundService
 {
     /// After a live game ends, poll fast until its match shows up - Riot takes a
@@ -108,6 +109,7 @@ public sealed class MatchPollerService(
                 Reschedule(account, live);
             }
 
+            heartbeat.PassCompleted();
             await Task.Delay(SleepUntil(accounts.All.Select(a => _nextDueUtc.GetValueOrDefault(a.Id)), DateTime.UtcNow), ct);
         }
     }
