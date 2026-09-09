@@ -152,6 +152,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # /readyz, not the image's /healthz: a process that is up but cannot
+    # reach the database or whose poller has wedged should show unhealthy in
+    # Portainer. The Host header keeps the loopback probe inside
+    # AllowedHosts. start_period covers migrations and the first poll pass;
+    # Docker never restarts an unhealthy container by itself.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-H", "Host: league.rjav-tech.co.uk", "http://127.0.0.1:5170/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 3m
     restart: unless-stopped
     labels:
       - traefik.enable=true
@@ -243,6 +254,11 @@ services:
       - UNIFI_URL=${UNIFI_URL:-}
       - UNIFI_USER=${UNIFI_USER:-}
       - UNIFI_PASS=${UNIFI_PASS:-}
+    # Nothing to poll until the tracker answers; waiting on its readiness
+    # keeps the "cannot read queue" line out of every redeploy's log.
+    depends_on:
+      leaguetracker:
+        condition: service_healthy
     restart: unless-stopped
 
 networks:

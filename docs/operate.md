@@ -130,6 +130,17 @@ new ids.
   is fixed (Portainer's "re-pull image" must be on for that path).
 - `GET /api/version` identifies what is running: informational version,
   image build time, process start.
+- Health: `GET /healthz` answers 200 whenever the process is up (the
+  image's own `HEALTHCHECK`, for `docker run` and the dev compose);
+  `GET /readyz` answers 200 only while the registry database is reachable
+  and the poller has completed a pass recently, 503 otherwise. The TrueNAS
+  stack probes `/readyz` every 30 s (3 misses = unhealthy, 3 min grace after
+  a start for migrations and the first poll pass), so Portainer shows a
+  wedged poller as unhealthy without anyone reading logs. Both endpoints
+  are anonymous. Docker does **not** restart an unhealthy container: the
+  state is a signal, the fix is `docker restart leaguetracker` (or a
+  redeploy) once the log says why. The waker starts only after the tracker
+  is healthy, so on a redeploy it is the last container up.
 - The GitHub ruleset "Main" (id 20981187, created 2026-08-18: no
   deletion, no force-push, the four CI checks, PR required) **targets no
   branch** as of 2026-08-26 — its include list is empty — so nothing is
