@@ -47,7 +47,7 @@ INSECURE.verify_mode = ssl.CERT_NONE
 
 
 def log(msg: str) -> None:
-    print(time.strftime("%H:%M:%S"), msg, flush=True)
+    print(time.strftime("%H:%M:%SZ", time.gmtime()), msg, flush=True)
 
 
 def get_json(url: str):

@@ -28,3 +28,15 @@ accepts for the sake of a probe.
 No auto-restart on unhealthy: Docker only reports it. An `autoheal` sidecar
 was considered and left out — the poller wedging is a bug to read the log
 for, not to mask with a restart loop.
+
+### E1 — UTC by flag, not by re-initdb
+
+The cluster was created with `TZ=Europe/London` in the environment, and
+initdb persists that as `timezone`/`log_timezone` in `postgresql.conf`.
+Removing the env var alone would leave the server on London time.
+Alternatives: (a) `ALTER SYSTEM SET timezone = 'UTC'` by hand on the NAS;
+(b) `postgres -c timezone=UTC -c log_timezone=UTC` as the service's
+command. Chosen (b): it is in the compose, survives a restore of the cluster
+folder and a fresh initdb alike, and needs no step anyone can forget.
+Npgsql moves `timestamptz` as UTC regardless; this is about `SHOW timezone`,
+the server log and any hand-run `psql` reading the same clock as the app.

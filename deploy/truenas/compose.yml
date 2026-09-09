@@ -78,7 +78,6 @@ services:
     user: "568:568"
     environment:
       <<: *lt-agent-env
-      TZ: Europe/London
       Riot__ApiKeyFile: /data/main/riot-api-key.txt
       # The one database: the registry in its own schema, every account in its
       # own (acct_<id>). The password is a Portainer stack env var, NEVER
@@ -184,8 +183,11 @@ services:
   postgres:
     image: postgres:18-alpine
     container_name: leaguetracker-postgres
+    # initdb ran with TZ=Europe/London and wrote that into postgresql.conf;
+    # the flags outrank the file, so the server is UTC without touching the
+    # cluster folder.
+    command: ["postgres", "-c", "timezone=UTC", "-c", "log_timezone=UTC"]
     environment:
-      TZ: Europe/London
       POSTGRES_DB: leaguetracker
       POSTGRES_USER: leaguetracker
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is a stack env var}
@@ -212,7 +214,6 @@ services:
     container_name: leaguetracker-pg-backup
     user: "568:568"
     environment:
-      TZ: Europe/London
       PGHOST: postgres
       PGDATABASE: leaguetracker
       PGUSER: leaguetracker
@@ -245,7 +246,6 @@ services:
     user: "568:568"
     network_mode: host
     environment:
-      - TZ=Europe/London
       # One URL: /api/render/pending already counts every account.
       - TRACKER_URLS=https://league.rjav-tech.co.uk
       - PC_MAC=${PC_MAC:-}

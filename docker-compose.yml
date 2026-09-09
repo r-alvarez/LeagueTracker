@@ -31,8 +31,6 @@ services:
     ports:
       - "5170:5170"
     environment:
-      # Match dates/CSV timestamps render in this zone; LP ledger stays UTC.
-      - TZ=Europe/London
       - ConnectionStrings__LeagueTracker=Host=postgres;Database=leaguetracker;Username=leaguetracker;Password=leaguetracker
       - Accounts__DataRoot=/data
       - Accounts__List__0__GameName=ImRA

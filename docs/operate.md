@@ -130,6 +130,11 @@ new ids.
   is fixed (Portainer's "re-pull image" must be on for that path).
 - `GET /api/version` identifies what is running: informational version,
   image build time, process start.
+- Every clock in the stack is UTC: no container sets `TZ`, the `postgres`
+  service is started with `timezone=UTC`/`log_timezone=UTC` (its cluster
+  was initialised under Europe/London and `postgresql.conf` still says so;
+  the flags win), dump names and every log line carry a `Z`. Anything that
+  shows local time does it in the browser.
 - Health: `GET /healthz` answers 200 whenever the process is up (the
   image's own `HEALTHCHECK`, for `docker run` and the dev compose);
   `GET /readyz` answers 200 only while the registry database is reachable
