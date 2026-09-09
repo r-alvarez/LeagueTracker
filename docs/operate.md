@@ -208,6 +208,25 @@ up, an owner approves it, the key goes in the stack environment.
 Revoking the row on the Machines page is how to lock the waker out; it logs
 the 401 once and keeps polling until a new key is set.
 
+## 5a. Ceilings (app settings, `Accounts__*` / `Uploads__*` env vars)
+
+Every tracked account is a permanent poller slot, a schema and a warm
+connection; every upload lands on the NAS. The defaults are for a small
+public instance - raise them knowingly, and read `docs/launch-board`
+findings N2/N4 before going past a few hundred accounts.
+
+| Setting | Default | What it stops |
+| --- | --- | --- |
+| `Accounts__MaxAccounts` | 200 | The add box refuses once this many accounts exist (config ones count) |
+| `Accounts__MaxAccountsPerUser` | 5 | Per signed-in person: what they own plus what they added and nobody claimed |
+| `Uploads__MaxMediaGbPerAccount` | 60 | Recordings, clips and renders per account; the raw game JSON is not counted |
+| `Uploads__MinFreeGb` | 20 | No upload is accepted that would leave less than this free on the data disk |
+| `Uploads__MaxVodGb` / `MaxRenderGb` / `MaxClipMb` / `MaxSidecarMb` | 8 / 4 / 512 / 64 | Per-file caps, enforced while the body streams |
+| `Uploads__SweepTempAfterHours` | 24 | Interrupted `.tmp`/`.part` uploads older than this are removed (every six hours) |
+
+A refused upload answers 413 (over a cap) or 507 (allowance or disk);
+the agent retries a couple of times and then logs it.
+
 ## 6. Moving off SQLite (the first boot of the PostgreSQL build)
 
 Before the push: set `POSTGRES_PASSWORD` in the stack environment, take a
