@@ -174,7 +174,8 @@ public sealed class AgentKeyStore
             _records.Add(record);
             Persist(record);
             if (code is not null) MarkUsed(code, record.Id);
-            _log.LogInformation("Agent enrolment pending: {Name} ({Machine}) from {Ip}{Owner}", record.Name, record.Machine, ip, record.IsBound ? $" for user {record.OwnerUserId}" : " (unbound)");
+            _log.LogInformation("Agent enrolment pending: {Name} ({Machine}){Owner}", record.Name, record.Machine, record.IsBound ? $" for user {record.OwnerUserId}" : " (unbound)");
+            _log.LogDebug("Agent {Name} enrolled from {Ip}", record.Name, ip);
             return (record, true, null);
         }
     }

@@ -47,6 +47,7 @@ public sealed class MatchPollerService(
     private readonly Dictionary<string, DateTime> _lastAliasCheckUtc = [];
     private readonly Dictionary<string, DateTime> _nextDueUtc = [];
     private readonly Dictionary<string, DateTime> _timelineRetryAfterUtc = [];
+    private readonly HashSet<string> _failing = [];
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -74,6 +75,7 @@ public sealed class MatchPollerService(
                 try
                 {
                     await RunPassAsync(account, live, ct);
+                    NoteRiotRecovered("Poll pass", account);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -91,6 +93,14 @@ public sealed class MatchPollerService(
                     RescheduleAll();
                     break;
                 }
+                catch (RiotApiException ex) when (ex.StatusCode >= 500)
+                {
+                    NoteRiotFailing("Poll pass", account, $"Riot {ex.StatusCode}");
+                }
+                catch (HttpRequestException ex)
+                {
+                    NoteRiotFailing("Poll pass", account, ex.Message);
+                }
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "Poll pass failed for {Account}", account.Slug);
@@ -100,6 +110,18 @@ public sealed class MatchPollerService(
 
             await Task.Delay(SleepUntil(accounts.All.Select(a => _nextDueUtc.GetValueOrDefault(a.Id)), DateTime.UtcNow), ct);
         }
+    }
+
+    // A Riot outage lasts minutes and the poller runs every 30-120 s.
+    private void NoteRiotFailing(string what, Account account, string reason)
+    {
+        if (_failing.Add($"{account.Id}:{what}")) logger.LogWarning("{What} for {Account} failing ({Reason}); retrying quietly until it recovers", what, account.Slug, reason);
+        else logger.LogDebug("{What} for {Account} still failing ({Reason})", what, account.Slug, reason);
+    }
+
+    private void NoteRiotRecovered(string what, Account account)
+    {
+        if (_failing.Remove($"{account.Id}:{what}")) logger.LogInformation("{What} for {Account} recovered", what, account.Slug);
     }
 
     private void Reschedule(Account account, LiveGameState live) =>
@@ -148,17 +170,18 @@ public sealed class MatchPollerService(
         accounts.Rename(account, current.GameName, current.TagLine);
     }
 
-    private async Task CheckLiveGameAsync(LiveGameState live, string puuid, RiotApiClient riot, RankLookupService ranks, CancellationToken ct)
+    private async Task CheckLiveGameAsync(Account account, LiveGameState live, string puuid, RiotApiClient riot, RankLookupService ranks, CancellationToken ct)
     {
         string? activeRaw;
         try
         {
             activeRaw = await riot.GetActiveGameRawAsync(puuid, ct);
+            NoteRiotRecovered("Spectator check", account);
         }
         catch (RiotApiException ex) when (!ex.IsAuthFailure)
         {
             // Spectator hiccups must never stall match capture.
-            logger.LogWarning("Spectator check failed ({Status}); skipping this pass", ex.StatusCode);
+            NoteRiotFailing("Spectator check", account, $"Riot {ex.StatusCode}");
             return;
         }
 
@@ -228,7 +251,7 @@ public sealed class MatchPollerService(
             await RefreshAliasAsync(account, puuid, riot, ct);
         }
 
-        await CheckLiveGameAsync(live, puuid, riot, scope.ServiceProvider.GetRequiredService<RankLookupService>(), ct);
+        await CheckLiveGameAsync(account, live, puuid, riot, scope.ServiceProvider.GetRequiredService<RankLookupService>(), ct);
 
         // Full-game renders are big; expire unkept ones on a slow cadence.
         if (DateTime.UtcNow - _lastRetentionSweepUtc.GetValueOrDefault(account.Id) > TimeSpan.FromHours(6))
@@ -271,8 +294,9 @@ public sealed class MatchPollerService(
                 await IngestNewMatchAsync(matchId, puuid, db, riot, ingest, lp, ct);
                 ingested++;
             }
-            catch (RiotApiException ex) when (ex.IsAuthFailure)
+            catch (Exception ex) when (ex is RiotApiException { IsAuthFailure: true } or RiotApiException { StatusCode: >= 500 } or HttpRequestException)
             {
+                // Riot is down for everyone on the list; the pass says so once.
                 throw;
             }
             catch (Exception ex) when (MatchIngestService.IsUnprocessable(ex))
@@ -339,11 +363,6 @@ public sealed class MatchPollerService(
             {
                 _timelineRetryAfterUtc[matchId] = now + TimelineRecheck;
                 continue;
-            }
-            catch (RiotApiException ex) when (!ex.IsAuthFailure)
-            {
-                logger.LogWarning("Timeline repair for {Account} stops for this pass: Riot answered {Status}", account.Slug, ex.StatusCode);
-                break;
             }
             try
             {
