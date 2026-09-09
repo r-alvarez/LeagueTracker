@@ -212,8 +212,9 @@ the 401 once and keeps polling until a new key is set.
 
 Every tracked account is a permanent poller slot, a schema and a warm
 connection; every upload lands on the NAS. The defaults are for a small
-public instance - raise them knowingly, and read `docs/launch-board`
-findings N2/N4 before going past a few hundred accounts.
+public instance - raise them knowingly: the nightly `pg_dump` fails near
+550 schemas and schema-per-account is the wrong shape past a thousand
+(`decisions/ops-postgres.md`).
 
 | Setting | Default | What it stops |
 | --- | --- | --- |
