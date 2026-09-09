@@ -100,8 +100,9 @@ public sealed class HistorySyncService(
 
     // A 503 or a reset socket used to count as permanent and hid healthy
     // games from the poller for good (audit E4).
+    // 408 and 429 are 4xx the provider sends about the moment, not the match.
     internal static bool IsPermanentFailure(Exception ex) =>
-        ex is RiotApiException { IsAuthFailure: false, StatusCode: >= 400 and < 500 } || MatchIngestService.IsUnprocessable(ex);
+        ex is RiotApiException { IsAuthFailure: false, StatusCode: >= 400 and < 500 and not (408 or 429) } || MatchIngestService.IsUnprocessable(ex);
 
     private async Task<Exception?> TryIngestAsync(string matchId, string puuid, bool includeTimeline, bool includeRanks, CancellationToken ct)
     {

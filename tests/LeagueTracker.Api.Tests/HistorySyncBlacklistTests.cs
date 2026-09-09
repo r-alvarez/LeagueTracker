@@ -13,12 +13,15 @@ public class HistorySyncBlacklistTests
     public void Riot_refusing_the_id_is_permanent(int status) =>
         Assert.True(HistorySyncService.IsPermanentFailure(new RiotApiException(status, "match-v5/matches/{id}", "")));
 
+    // 408 and 429 are 4xx about the moment, not the match (review of E4).
     [Theory]
+    [InlineData(408)]
+    [InlineData(429)]
     [InlineData(500)]
     [InlineData(502)]
     [InlineData(503)]
     [InlineData(504)]
-    public void A_5xx_is_retried_not_blacklisted(int status) =>
+    public void A_timeout_a_rate_limit_or_a_5xx_is_retried_not_blacklisted(int status) =>
         Assert.False(HistorySyncService.IsPermanentFailure(new RiotApiException(status, "match-v5/matches/{id}", "")));
 
     [Fact]
