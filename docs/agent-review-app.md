@@ -152,6 +152,13 @@ gameplan and clips still come through the account-scoped tracker APIs. An
 unmatched or offline-only file retains the simple local player. Retention
 examines the whole catalogue.
 
+The picker is narrower than the agent's rendering scope. A combined machine may
+render replay clips for every account, but only accounts represented by its
+full-game recording sidecars appear in review. The newest local recording
+chooses the initial account. Background match association prioritizes locally
+named Riot IDs, runs one account at a time and stops once all catalogue matches
+are resolved; render-only accounts do not become review identities.
+
 Analysis caches are partitioned by installation and agent-key identity, keyed
 by schema and URL, capped at 128 MiB per identity. Artwork is separately capped
 at 128 MiB per installation. Successful JSON responses can be reused for five
