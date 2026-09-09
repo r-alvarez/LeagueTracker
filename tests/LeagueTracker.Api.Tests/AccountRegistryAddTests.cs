@@ -89,4 +89,26 @@ public class AccountRegistryAddTests(PostgresFixture postgres) : IDisposable
         Assert.True(registry.MayUntrack(added, "user-b", admin: false));
         Assert.True(registry.MayUntrack(added, null, admin: true));
     }
+
+    // Review of N5, second pass: adds and claims judged the ceiling under two
+    // different locks, so one of each in flight could both pass.
+    [Fact]
+    public async Task A_concurrent_add_and_claim_cannot_both_pass_the_ceiling()
+    {
+        var registry = Registry(maxPerUser: 1);
+        var unowned = Enumerable.Range(0, 8).Select(i => registry.Add($"Open{i}", "0000", "euw1", null, $"open-{i}", $"adder-{i}")).ToList();
+
+        var attempts = Enumerable.Range(0, 8).SelectMany(i => new Func<Task>[]
+        {
+            () => Task.Run(() =>
+            {
+                try { registry.Add($"Mine{i}", "0000", "euw1", null, $"mine-{i}", "user-a"); }
+                catch (AccountQuotaException) { /* the ceiling did its job */ }
+            }),
+            () => Task.Run(() => registry.TakeOwnership(unowned[i], "user-a", () => true)),
+        });
+        await Task.WhenAll(attempts.Select(start => start()));
+
+        Assert.Equal(1, registry.CountedAgainst("user-a"));
+    }
 }

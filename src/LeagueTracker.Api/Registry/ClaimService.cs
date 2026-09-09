@@ -135,40 +135,33 @@ public sealed class ClaimService(RegistryDatabase registry, AccountRegistry acco
                 : $"Riot still shows icon {icon}, not {claim.IconId} - set it in the client (it can take a minute to propagate) and try again");
         }
 
-        // One ownership change at a time process-wide: the per-user ceiling is
-        // judged on the registry's count, and two verifies for different
-        // accounts by the same person must not both read the same number
-        // (review of N5). The claim stays pending, so untracking one and
-        // verifying again works.
-        lock (OwnershipGate)
+        // The registry judges the ceiling and takes the owner under the same
+        // gate as an add (review of N5); a refused claim stays pending, so
+        // untracking one and verifying again works. Memory follows the
+        // database: only the winner's copy learns the owner.
+        var outcome = accounts.TakeOwnership(account, userId, () =>
         {
-            if (accounts.CannotTakeOn(userId, account)) return (View(claim, account.RiotId), false, CeilingMessage);
-            using (var tx = db.Database.BeginTransaction())
+            using var tx = db.Database.BeginTransaction();
+            // The conditional update is the compare-and-set: of two verifies
+            // that both saw an unowned account, Postgres lets exactly one row
+            // through, and the other learns it lost here.
+            var won = db.Accounts.Where(a => a.Id == account.Id && a.OwnerUserId == null).ExecuteUpdate(s => s.SetProperty(a => a.OwnerUserId, userId)) == 1;
+            claim.State = won ? ClaimState.Verified : ClaimState.Failed;
+            if (won)
             {
-                // The conditional update is the compare-and-set: of two verifies
-                // that both saw an unowned account, Postgres lets exactly one row
-                // through, and the other learns it lost here.
-                var won = db.Accounts.Where(a => a.Id == account.Id && a.OwnerUserId == null).ExecuteUpdate(s => s.SetProperty(a => a.OwnerUserId, userId)) == 1;
-                claim.State = won ? ClaimState.Verified : ClaimState.Failed;
-                if (won)
-                {
-                    foreach (var other in db.OwnershipClaims.Where(c => c.AccountId == account.Id && c.Id != claim.Id && c.State == ClaimState.Pending)) other.State = ClaimState.Failed;
-                }
-                db.SaveChanges();
-                tx.Commit();
-                if (!won) return (View(claim, account.RiotId), false, "the account was claimed by someone else meanwhile");
+                foreach (var other in db.OwnershipClaims.Where(c => c.AccountId == account.Id && c.Id != claim.Id && c.State == ClaimState.Pending)) other.State = ClaimState.Failed;
             }
-            // Memory follows the database, never the other way round: only the
-            // winner's copy learns the owner, so a loser's later write-through
-            // cannot put a null back.
-            accounts.Update(account, a => a.OwnerUserId = userId);
-        }
+            db.SaveChanges();
+            tx.Commit();
+            return won;
+        });
+        if (outcome is OwnershipOutcome.OverCeiling) return (View(claim, account.RiotId), false, CeilingMessage);
+        if (outcome is OwnershipOutcome.Lost) return (View(claim, account.RiotId), false, "the account was claimed by someone else meanwhile");
         log.LogInformation("Claim {Id} verified: {RiotId} is owned by user {User}", claim.Id, account.RiotId, userId);
         return (View(claim, account.RiotId), true, null);
     }
 
     private const string CeilingMessage = "you already track the most accounts allowed here - untrack one, then verify again";
-    private static readonly object OwnershipGate = new();
 
     // Starts on one account queue behind this lock, so two people pressing
     // Claim together cannot both open a challenge.

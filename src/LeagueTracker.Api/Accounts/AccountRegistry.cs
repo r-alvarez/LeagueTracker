@@ -88,8 +88,25 @@ public sealed class AccountRegistry
 
     // Claiming charges the claimant one more slot unless they added the
     // account themselves, in which case it is already on their count.
-    public bool CannotTakeOn(string userId, Account account) =>
-        CountedAgainst(userId) + (account.AddedByUserId == userId ? 0 : 1) > _maxPerUser;
+    public bool CannotTakeOn(string userId, Account account) { lock (_gate) return CannotTakeOnUnlocked(userId, account); }
+    private bool CannotTakeOnUnlocked(string userId, Account account) =>
+        CountedAgainstUnlocked(userId) + (account.AddedByUserId == userId ? 0 : 1) > _maxPerUser;
+
+    // Adds and ownership changes judge the per-user ceiling under the one
+    // gate: two locks let an add and a claim each read the same count and
+    // both pass. The compare-and-set is the caller's database transaction;
+    // memory learns the owner only if it won.
+    public OwnershipOutcome TakeOwnership(Account account, string userId, Func<bool> compareAndSet)
+    {
+        lock (_gate)
+        {
+            if (CannotTakeOnUnlocked(userId, account)) return OwnershipOutcome.OverCeiling;
+            if (!compareAndSet()) return OwnershipOutcome.Lost;
+            account.OwnerUserId = userId;
+            Persist(account);
+            return OwnershipOutcome.Won;
+        }
+    }
 
     // Untracking is for whoever is answerable for the slot: the owner, an
     // admin, or the person who added it - the last only while it is unclaimed,
@@ -346,3 +363,5 @@ public sealed class AccountContext(AccountRegistry registry)
 public sealed class AccountConflictException(string message) : InvalidOperationException(message);
 
 public sealed class AccountQuotaException(string message) : InvalidOperationException(message);
+
+public enum OwnershipOutcome { Won, Lost, OverCeiling }
