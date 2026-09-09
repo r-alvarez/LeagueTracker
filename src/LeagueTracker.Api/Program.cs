@@ -255,19 +255,21 @@ static async ValueTask<object?> RequireAvailableAccount(EndpointFilterInvocation
         : Results.Problem($"{account.RiotId} is unavailable: {initializer.ErrorFor(account)}", statusCode: 503, title: "Account unavailable");
 }
 
-object AccountView(Account a) => new
-{
+// The public shape of an account: no rename history (names a player left
+// behind), no owner id unless an admin asks (links a main to a smurf), no
+// database error text (audit A6).
+AccountView ViewOf(Account a, Caller caller) => new(
     a.Id, a.Slug, a.Label, a.RiotId, a.GameName, a.TagLine, a.HideLp, a.Platform,
-    Region = a.RegionCode, Path = a.UrlPath, a.FromConfig,
-    Owned = a.IsOwned, a.OwnerUserId, a.MediaPublic,
-    PreviousSlugs = a.PreviousSlugList,
-    Available = initializer.IsReady(a),
-    Unavailable = initializer.ErrorFor(a),
-};
+    a.RegionCode, a.UrlPath, a.FromConfig,
+    a.IsOwned, caller.IsUser && a.OwnerUserId == caller.UserId, a.MediaPublic,
+    initializer.IsReady(a),
+    caller.IsAdmin ? a.OwnerUserId : null);
 
-// The list is Riot IDs and who owns them - Read data, so a visitor gets it
-// only once PublicReads is on; the SPA shows the sign-in screen on a 401.
-app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct) => Results.Ok(new
+// The caller's own accounts (every account for an admin) and the region
+// table - Read data, so a visitor gets it only once PublicReads is on; the
+// SPA shows the sign-in screen on a 401. Any other account is reached by
+// name through /resolve, never by listing the population.
+app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct, Caller caller) => Results.Ok(new
 {
     Default = registry.Default.Slug,
     // The account this request is bound to (the default, since the global
@@ -275,8 +277,20 @@ app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct) => R
     Current = acct.Slug,
     registry.CanAdd,
     Regions = Platforms.All.Select(p => new { Code = p.Code, p.Label, p.Platform }),
-    Accounts = registry.All.Select(AccountView),
+    Accounts = (caller.IsAdmin ? registry.All : caller.UserId is { } user ? registry.OwnedBy(user) : []).Select(a => ViewOf(a, caller)),
 })).RequireAuthorization(Policies.Read);
+
+// What a URL names: the current slug or one from before a rename, in the
+// region given (a bare /{slug} from the one-site build gives none). A slug
+// that exists in another region is a suggestion, not a match.
+app.MapGet("/api/accounts/resolve", (string slug, string? region, AccountRegistry registry, Caller caller) =>
+{
+    var found = registry.BySlug(slug) ?? registry.ByPreviousSlug(slug);
+    if (found is null) return Results.NotFound(new { error = $"No account named {slug}", suggestion = (AccountView?)null });
+    if (region is { Length: > 0 } && !found.RegionCode.Equals(region, StringComparison.OrdinalIgnoreCase))
+        return Results.NotFound(new { error = $"No account named {slug} in {region}", suggestion = ViewOf(found, caller) });
+    return Results.Ok(new { account = ViewOf(found, caller), canonical = "/" + found.UrlPath });
+}).RequireAuthorization(Policies.Read);
 
 // The "add account" box: a Riot ID typed by a person, checked against Riot
 // (account-v1 answers with the canonical casing and the puuid), then given a
@@ -292,7 +306,7 @@ app.MapPost("/api/accounts", async (AddAccountRequest request, Caller caller, Ac
     if (gameName is null || tagLine is null) return Results.BadRequest(new { error = "Type the Riot ID as GameName#TAG" });
     var platform = Platforms.ByCode(request.Region) ?? Platforms.ByPlatform(request.Region);
     if (platform is null) return Results.BadRequest(new { error = $"Unknown region '{request.Region}'" });
-    if (registry.BySlug($"{gameName}-{tagLine}") is { } existing) return Results.Conflict(new { error = $"{existing.RiotId} is already tracked", account = AccountView(existing) });
+    if (registry.BySlug($"{gameName}-{tagLine}") is { } existing) return Results.Conflict(new { error = $"{existing.RiotId} is already tracked", account = ViewOf(existing, caller) });
     if (keys.GetKey() is null) return Results.Problem("No Riot API key configured - the account cannot be verified", statusCode: 503);
 
     // Resolve through a scope bound to a throwaway account with the target
@@ -314,7 +328,7 @@ app.MapPost("/api/accounts", async (AddAccountRequest request, Caller caller, Ac
             return Results.Problem($"Riot answered {ex.StatusCode} while checking the account{(ex.IsAuthFailure ? " - the API key is invalid or expired" : "")}", statusCode: 502);
         }
     }
-    if (registry.ByPuuid(resolved.Puuid) is { } samePlayer) return Results.Conflict(new { error = $"{samePlayer.RiotId} is already tracked (same player, renamed)", account = AccountView(samePlayer) });
+    if (registry.ByPuuid(resolved.Puuid) is { } samePlayer) return Results.Conflict(new { error = $"{samePlayer.RiotId} is already tracked (same player, renamed)", account = ViewOf(samePlayer, caller) });
     Account account;
     try
     {
@@ -332,7 +346,7 @@ app.MapPost("/api/accounts", async (AddAccountRequest request, Caller caller, Ac
     {
         await scope.ServiceProvider.GetRequiredService<TrackedPlayerService>().StorePuuidAsync(resolved.Puuid, ct);
     }
-    return Results.Created($"/{account.UrlPath}/", AccountView(account));
+    return Results.Created($"/{account.UrlPath}/", ViewOf(account, caller));
 }).RequireAuthorization(Policies.User).RequireRateLimiting("account-add");
 
 // Untrack (the folder stays on the NAS). Configured accounts say no; so
@@ -1557,6 +1571,13 @@ static object MatchListItem(Match m, string? items = null, int? summoner1Id = nu
 
 static IResult CsvFile(string fileName, string csv) =>
     Results.File(Encoding.UTF8.GetBytes(csv), "text/csv", fileName);
+
+// OwnerUserId is admin-only and null otherwise; the serializer drops nulls
+// so a visitor never sees the property at all.
+public sealed record AccountView(
+    string Id, string Slug, string Label, string RiotId, string GameName, string TagLine, bool HideLp, string Platform,
+    string Region, string Path, bool FromConfig, bool Owned, bool Mine, bool MediaPublic, bool Available,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? OwnerUserId);
 
 public sealed record AddAccountRequest(string RiotId, string Region, string? DisplayName);
 
