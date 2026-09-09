@@ -22,6 +22,7 @@ builder.Services.Configure<AccountsOptions>(builder.Configuration.GetSection("Ac
 builder.Services.Configure<AgentsOptions>(builder.Configuration.GetSection("Agents"));
 builder.Services.Configure<ProxyOptions>(builder.Configuration.GetSection("Proxy"));
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth"));
+builder.Services.Configure<UploadsOptions>(builder.Configuration.GetSection("Uploads"));
 
 // One PostgreSQL database: the registry (users, the accounts they own, the
 // machines they enrolled) in its own schema, every tracked account in its own.
@@ -86,6 +87,8 @@ builder.Services.AddHostedService<AgentReleaseSyncService>();
 builder.Services.AddHttpClient(Auth0ManagementClient.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddSingleton<Auth0ManagementClient>();
 builder.Services.AddScoped<VodService>();
+builder.Services.AddScoped<UploadQuota>();
+builder.Services.AddHostedService<TempFileSweeper>();
 builder.Services.AddPerAccount<LiveGameState>();
 builder.Services.AddSingleton<PollerHeartbeat>();
 builder.Services.AddHostedService<MatchPollerService>();
@@ -253,6 +256,31 @@ static async ValueTask<object?> RequireAvailableAccount(EndpointFilterInvocation
     return initializer.EnsureReady(account)
         ? await next(context)
         : Results.Problem($"{account.RiotId} is unavailable: {initializer.ErrorFor(account)}", statusCode: 503, title: "Account unavailable");
+}
+
+// One shape for every whole-file upload: refused up front when the account's
+// allowance or the disk would not take it, bounded while it streams (the
+// declared length is the client's word), and only ever visible under its
+// final name once complete.
+static async Task<IResult> StoreUploadAsync(HttpRequest request, string target, UploadQuota quota, long cap, CancellationToken ct)
+{
+    if (request.ContentLength > cap) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+    if (quota.Refusal(request.ContentLength ?? 0) is { } refusal) return Results.Json(new { error = refusal }, statusCode: StatusCodes.Status507InsufficientStorage);
+    request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = cap;
+
+    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+    var temp = target + ".tmp";
+    await using (var file = File.Create(temp))
+    {
+        if (!await UploadQuota.CopyWithinAsync(request.Body, file, cap, ct))
+        {
+            file.Close();
+            File.Delete(temp);
+            return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+        }
+    }
+    File.Move(temp, target, overwrite: true);
+    return Results.Ok(new { bytes = new FileInfo(target).Length });
 }
 
 // The public shape of an account: no rename history (names a player left
@@ -810,32 +838,22 @@ recorder.MapPost("/matches/{id}/vod/link", async (string id, HttpRequest request
 // Agent-facing uploads. The mp4 is only accepted for a match this tracker
 // knows - the one agent serves several trackers and offers each VOD to all
 // of them; the owning tracker is the one whose db has the match.
-recorder.MapPut("/vods/{matchId}", async (string matchId, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+recorder.MapPut("/vods/{matchId}", async (string matchId, HttpRequest request, VodService vods, UploadQuota quota, LeagueDbContext db, CancellationToken ct) =>
 {
     if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
     if (vods.TargetPath(matchId, "vod.mp4") is not { } target) return Results.BadRequest();
-
-    // A 1440p60 game runs to ~3GB; lift the body cap accordingly.
-    request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
-        .MaxRequestBodySize = 8L * 1024 * 1024 * 1024;
-
-    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-    var temp = target + ".tmp";
-    await using (var file = File.Create(temp))
-    {
-        await request.Body.CopyToAsync(file, ct);
-    }
-    File.Move(temp, target, overwrite: true);
-    return Results.Ok(new { bytes = new FileInfo(target).Length });
+    return await StoreUploadAsync(request, target, quota, quota.MaxVodBytes, ct);
 });
 
 // Chunked variant of the mp4 upload: Cloudflare caps request bodies around
 // 100MB, so a multi-GB VOD arrives as ordered 64MB pieces appended at their
 // offset, then an atomic commit that checks the assembled size.
-recorder.MapPut("/vods/{matchId}/chunk", async (string matchId, long offset, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+recorder.MapPut("/vods/{matchId}/chunk", async (string matchId, long offset, HttpRequest request, VodService vods, UploadQuota quota, LeagueDbContext db, CancellationToken ct) =>
 {
     if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
     if (vods.TargetPath(matchId, "vod.mp4.part") is not { } part) return Results.BadRequest();
+    if (offset < 0 || offset >= quota.MaxVodBytes) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+    if (quota.Refusal(request.ContentLength ?? 0) is { } refusal) return Results.Json(new { error = refusal }, statusCode: StatusCodes.Status507InsufficientStorage);
 
     request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
         .MaxRequestBodySize = 256L * 1024 * 1024;
@@ -844,7 +862,13 @@ recorder.MapPut("/vods/{matchId}/chunk", async (string matchId, long offset, Htt
     await using var file = new FileStream(part, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
     if (offset > file.Length) return Results.Conflict(new { expected = file.Length });
     file.Seek(offset, SeekOrigin.Begin);
-    await request.Body.CopyToAsync(file, ct);
+    // The assembled file, not the chunk, is what the cap bounds: appends at
+    // offset <= length were otherwise open-ended.
+    if (!await UploadQuota.CopyWithinAsync(request.Body, file, quota.MaxVodBytes - offset, ct))
+    {
+        file.SetLength(0);
+        return Results.Json(new { error = "the recording is larger than this tracker accepts - upload restarted" }, statusCode: StatusCodes.Status413PayloadTooLarge);
+    }
     return Results.Ok(new { length = file.Length });
 });
 
@@ -863,7 +887,7 @@ recorder.MapPost("/vods/{matchId}/commit", (string matchId, long size, VodServic
 // Sidecar pieces (small): recording metadata, input telemetry, thumbnail.
 // Accepted for any known match WITHOUT requiring the mp4 - in the
 // YouTube-hosted mode these are the only bytes the tracker ever stores.
-recorder.MapPut("/vods/{matchId}/{file}", async (string matchId, string file, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+recorder.MapPut("/vods/{matchId}/{file}", async (string matchId, string file, HttpRequest request, VodService vods, UploadQuota quota, LeagueDbContext db, CancellationToken ct) =>
 {
     var name = file switch
     {
@@ -874,16 +898,10 @@ recorder.MapPut("/vods/{matchId}/{file}", async (string matchId, string file, Ht
     };
     if (name is null || !await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
     var target = vods.TargetPath(matchId, name)!;
-    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-    var temp = target + ".tmp";
-    await using (var f = File.Create(temp))
-    {
-        await request.Body.CopyToAsync(f, ct);
-    }
-    File.Move(temp, target, overwrite: true);
+    var stored = await StoreUploadAsync(request, target, quota, quota.MaxSidecarBytes, ct);
     // Telemetry replaced = derived series stale; recomputed on next read.
     if (name is "events.csv.gz" && vods.TargetPath(matchId, "apm.json") is { } apm && File.Exists(apm)) File.Delete(apm);
-    return Results.Ok();
+    return stored;
 });
 
 // --- Full-game renders (opt-in per match; retention-swept unless kept) ----------
@@ -1019,43 +1037,18 @@ render.MapPost("/render/next", async (AccountContext acct, ClipService clips, Fu
     return Results.NoContent();
 });
 
-render.MapPut("/render/{matchId}/full", async (string matchId, HttpRequest request, FullGameService full, LeagueDbContext db, CancellationToken ct) =>
+render.MapPut("/render/{matchId}/full", async (string matchId, HttpRequest request, FullGameService full, UploadQuota quota, LeagueDbContext db, CancellationToken ct) =>
 {
     if (full.VideoTargetPath(matchId) is not { } target) return Results.NotFound();
     if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
-
-    // A full game runs to ~500MB; lift the body cap accordingly.
-    request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
-        .MaxRequestBodySize = 4L * 1024 * 1024 * 1024;
-
-    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-    var temp = target + ".tmp";
-    await using (var file = File.Create(temp))
-    {
-        await request.Body.CopyToAsync(file, ct);
-    }
-    File.Move(temp, target, overwrite: true);
-    return Results.Ok(new { bytes = new FileInfo(target).Length });
+    return await StoreUploadAsync(request, target, quota, quota.MaxRenderBytes, ct);
 });
 
-render.MapPut("/render/{matchId}/clips/{index:int}", async (string matchId, int index, HttpRequest request, ClipService clips, CancellationToken ct) =>
+render.MapPut("/render/{matchId}/clips/{index:int}", async (string matchId, int index, HttpRequest request, ClipService clips, UploadQuota quota, CancellationToken ct) =>
 {
     var plan = await clips.LoadPlanAsync(matchId, ct);
     if (plan is null || index < 0 || index >= plan.Windows.Count) return Results.NotFound();
-
-    // Clips run tens of MB; lift the default 30MB body cap for this request only.
-    request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
-        .MaxRequestBodySize = 512L * 1024 * 1024;
-
-    var target = clips.ClipTargetPath(matchId, index);
-    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-    var temp = target + ".tmp";
-    await using (var file = File.Create(temp))
-    {
-        await request.Body.CopyToAsync(file, ct);
-    }
-    File.Move(temp, target, overwrite: true);
-    return Results.Ok(new { index, bytes = new FileInfo(target).Length });
+    return await StoreUploadAsync(request, clips.ClipTargetPath(matchId, index), quota, quota.MaxClipBytes, ct);
 });
 
 render.MapPost("/render/{matchId}/complete", (string matchId, RenderLeaseService leases, ClipService clips, FullGameService full, string kind = "clips") =>
