@@ -46,15 +46,46 @@ public class AgentOptionsTests
     }
 
     [Fact]
-    public void A_profile_without_secrets_keeps_nothing_secret_shaped_and_turns_uploads_off()
+    public void A_friends_machine_loses_the_shared_secrets_but_uploads_go_off()
     {
         var options = Options();
         options.Profile["YouTubeClientSecret"] = "shared-secret";
         options.Profile["YouTubeUpload"] = "true";
 
-        var stripped = AgentOptions.WithoutSecrets(options.ProfileFor(BenKeyId));
+        var profile = options.ProfileFor("some-other-key", sharedSecrets: false);
 
-        Assert.Equal(["RecordQueues", "YouTubeClientId", "YouTubeUpload"], stripped.Keys.Order());
-        Assert.Equal("false", stripped["YouTubeUpload"]);
+        Assert.Equal(["RecordQueues", "YouTubeClientId", "YouTubeUpload"], profile.Keys.Order());
+        Assert.Equal("false", profile["YouTubeUpload"]);
+    }
+
+    // Ben's own channel: the operator put the token in his key's override
+    // block, so it reaches that key whoever owns it.
+    [Fact]
+    public void A_keys_own_override_secrets_always_reach_it()
+    {
+        var options = Options();
+        options.Profile["YouTubeClientSecret"] = "shared-secret";
+        options.Profile["YouTubeUpload"] = "true";
+        options.Profiles[BenKeyId]["YouTubeClientSecret"] = "ben-secret";
+        options.Profiles[BenKeyId]["YouTubeRefreshToken"] = "ben-token";
+
+        var profile = options.ProfileFor(BenKeyId, sharedSecrets: false);
+
+        Assert.Equal("ben-id", profile["YouTubeClientId"]);
+        Assert.Equal("ben-secret", profile["YouTubeClientSecret"]);
+        Assert.Equal("ben-token", profile["YouTubeRefreshToken"]);
+        Assert.Equal("true", profile["YouTubeUpload"]);
+    }
+
+    [Fact]
+    public void The_operators_machine_gets_the_shared_secrets()
+    {
+        var options = Options();
+        options.Profile["YouTubeClientSecret"] = "shared-secret";
+
+        var profile = options.ProfileFor("ruben-key", sharedSecrets: true);
+
+        Assert.Equal("shared-secret", profile["YouTubeClientSecret"]);
+        Assert.Equal("shared-token", profile["YouTubeRefreshToken"]);
     }
 }

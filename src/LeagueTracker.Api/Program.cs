@@ -500,9 +500,8 @@ app.MapManagementEndpoints();
 app.MapGet("/api/agent/profile", (Caller caller, AgentRegistry agents, UserStore users) =>
 {
     var agent = caller.Agent!;
-    var profile = agents.ProfileFor(agent.Id);
     var operatorsMachine = agent.IsBound && users.ById(agent.OwnerUserId)?.IsAdmin is true;
-    return Results.Ok(operatorsMachine ? profile : AgentOptions.WithoutSecrets(profile));
+    return Results.Ok(agents.ProfileFor(agent.Id, sharedSecrets: operatorsMachine));
 }).RequireAuthorization(Policies.Agent);
 
 // The agent's side of "sendlog": the tail of agent.log, filed under the key

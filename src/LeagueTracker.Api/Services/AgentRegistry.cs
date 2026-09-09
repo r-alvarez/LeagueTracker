@@ -25,31 +25,30 @@ public sealed class AgentOptions
 
     /// The shared profile with the keyed agent's overrides on top (blank
     /// overrides ignored: an unset stack env var must not blank a value).
-    public IReadOnlyDictionary<string, string> ProfileFor(string? agentId)
-    {
-        if (agentId is not { Length: > 0 } || !Profiles.TryGetValue(agentId, out var overrides)) return Profile;
-        var merged = new Dictionary<string, string>(Profile, StringComparer.OrdinalIgnoreCase);
-        foreach (var (key, value) in overrides)
-        {
-            if (value is { Length: > 0 }) merged[key] = value;
-        }
-        return merged;
-    }
+    public IReadOnlyDictionary<string, string> ProfileFor(string? agentId) => ProfileFor(agentId, sharedSecrets: true);
 
     // The shared YouTube secret and refresh token are the operator's own
-    // channel: only machines an admin owns may carry them. Any signed-in user
-    // can mint and approve a recorder key, so serving them to every approved
-    // key was the tracker's credentials one enrolment away (audit B2). Until
-    // per-user channels exist, everyone else records without uploading.
-    public static IReadOnlyDictionary<string, string> WithoutSecrets(IReadOnlyDictionary<string, string> profile)
+    // channel: only machines an admin owns may carry them, because any
+    // signed-in user can mint and approve a recorder key (audit B2). A
+    // secret in a key's own override block was put there for that key by
+    // the operator and always reaches it - a friend's own channel keeps
+    // working. A machine left with no token records without uploading.
+    public IReadOnlyDictionary<string, string> ProfileFor(string? agentId, bool sharedSecrets)
     {
-        var stripped = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (key, value) in profile)
+        var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in Profile)
         {
-            if (!IsSecret(key)) stripped[key] = value;
+            if (sharedSecrets || !IsSecret(key)) merged[key] = value;
         }
-        if (stripped.ContainsKey("YouTubeUpload")) stripped["YouTubeUpload"] = "false";
-        return stripped;
+        if (agentId is { Length: > 0 } && Profiles.TryGetValue(agentId, out var overrides))
+        {
+            foreach (var (key, value) in overrides)
+            {
+                if (value is { Length: > 0 }) merged[key] = value;
+            }
+        }
+        if (!merged.ContainsKey("YouTubeRefreshToken") && merged.ContainsKey("YouTubeUpload")) merged["YouTubeUpload"] = "false";
+        return merged;
     }
 
     public static bool IsSecret(string key) =>
@@ -104,7 +103,7 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
 
     public IReadOnlyDictionary<string, string> Profile => options.Value.Profile;
 
-    public IReadOnlyDictionary<string, string> ProfileFor(string? agentId) => options.Value.ProfileFor(agentId);
+    public IReadOnlyDictionary<string, string> ProfileFor(string? agentId, bool sharedSecrets) => options.Value.ProfileFor(agentId, sharedSecrets);
 
     // Override blocks that name no key: a machine name left over from when
     // overrides were keyed by name, or a typo - either way the operator
