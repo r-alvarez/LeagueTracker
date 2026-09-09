@@ -208,8 +208,7 @@ public sealed class AgentKeyStore
     // a log entry. The explicit Replace is the step CodeQL counts as sanitising.
     private static string DisplayText(string text)
     {
-        var oneLine = text.Replace("", "").Replace("
-", "");
+        var oneLine = text.Replace("\r", "").Replace("\n", "");
         var printable = new string(oneLine.Where(ch => !char.IsControl(ch)).ToArray()).Trim();
         return printable[..Math.Min(printable.Length, 64)];
     }
