@@ -3,6 +3,7 @@ using LeagueTracker.Api.Registry;
 using LeagueTracker.Api.Riot;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Npgsql;
 
 namespace LeagueTracker.Api.Accounts;
 
@@ -93,12 +94,22 @@ public sealed class AccountRegistry
         };
         lock (_gate)
         {
-            if (_bySlug.ContainsKey(account.UrlSlug)) throw new InvalidOperationException($"{account.RiotId} is already tracked");
+            if (_bySlug.ContainsKey(account.UrlSlug)) throw new AccountConflictException($"{account.RiotId} is already tracked");
             // The folder is named by the surrogate id, not the Riot ID: a rename
             // must never move data, so the name must not be something Riot changes.
             account.DataDir = Path.Combine(_root, account.Id);
+            // The registry row first: an account the database refused (the
+            // puuid already under another slug) must not stay resolvable in
+            // memory until the next restart.
+            try
+            {
+                Persist(account);
+            }
+            catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+            {
+                throw new AccountConflictException($"{account.RiotId} is already tracked under another name");
+            }
             Register(account);
-            Persist(account);
         }
         _log.LogInformation("Account added: {RiotId} ({Platform}) at {Dir}", account.RiotId, account.Platform, account.DataDir);
         return account;
@@ -304,3 +315,5 @@ public sealed class AccountContext(AccountRegistry registry)
     public string DataDir => Current.DataDir;
     public AccountRegistry Registry => registry;
 }
+
+public sealed class AccountConflictException(string message) : InvalidOperationException(message);

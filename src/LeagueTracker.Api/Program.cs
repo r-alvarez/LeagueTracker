@@ -289,7 +289,15 @@ app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry r
         }
     }
     if (registry.ByPuuid(resolved.Puuid) is { } samePlayer) return Results.Conflict(new { error = $"{samePlayer.RiotId} is already tracked (same player, renamed)", account = AccountView(samePlayer) });
-    var account = registry.Add(resolved.GameName ?? gameName, resolved.TagLine ?? tagLine, platform.Platform, request.DisplayName, resolved.Puuid);
+    Account account;
+    try
+    {
+        account = registry.Add(resolved.GameName ?? gameName, resolved.TagLine ?? tagLine, platform.Platform, request.DisplayName, resolved.Puuid);
+    }
+    catch (AccountConflictException ex)
+    {
+        return Results.Conflict(new { error = ex.Message });
+    }
     if (!initializer.EnsureReady(account))
     {
         return Results.Problem($"{account.RiotId} is registered but its database could not be initialised: {initializer.ErrorFor(account)}", statusCode: 503);
