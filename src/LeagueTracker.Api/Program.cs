@@ -259,10 +259,8 @@ static async ValueTask<object?> RequireAvailableAccount(EndpointFilterInvocation
         : Results.Problem($"{account.RiotId} is unavailable: {initializer.ErrorFor(account)}", statusCode: 503, title: "Account unavailable");
 }
 
-// One shape for every whole-file upload: refused up front when the account's
-// allowance or the disk would not take it, bounded while it streams (the
-// declared length is the client's word), and only ever visible under its
-// final name once complete.
+// The declared length is the client's word, so the cap is enforced on the
+// bytes as they arrive, not on Content-Length alone.
 static async Task<IResult> StoreUploadAsync(HttpRequest request, string target, UploadQuota quota, long cap, CancellationToken ct)
 {
     if (request.ContentLength > cap) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
@@ -294,10 +292,9 @@ AccountView ViewOf(Account a, Caller caller) => new(
     initializer.IsReady(a),
     caller.IsAdmin ? a.OwnerUserId : null);
 
-// The caller's own accounts (every account for an admin) and the region
-// table - Read data, so a visitor gets it only once PublicReads is on; the
-// SPA shows the sign-in screen on a 401. Any other account is reached by
-// name through /resolve, never by listing the population.
+// Read data, so a visitor gets it only once PublicReads is on; the SPA shows
+// the sign-in screen on a 401. Any other account is reached by name through
+// /resolve, never by listing the population.
 app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct, Caller caller) => Results.Ok(new
 {
     Default = registry.Default.Slug,
