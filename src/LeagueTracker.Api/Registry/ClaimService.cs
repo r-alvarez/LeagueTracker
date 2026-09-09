@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using LeagueTracker.Api.Accounts;
 using LeagueTracker.Api.Riot;
 using LeagueTracker.Api.Services;
@@ -16,6 +17,11 @@ public sealed class ClaimService(RegistryDatabase registry, AccountRegistry acco
     // The starter icons every account owns from level 1 (0-28); nothing the
     // player would have to buy or unlock to complete the proof.
     private const int StarterIcons = 29;
+    // A verify storm on one account is one summoner-v4 call, not one per
+    // click: the shared Riot key pays for every click otherwise.
+    private static readonly TimeSpan IconCacheLife = TimeSpan.FromSeconds(60);
+
+    private readonly ConcurrentDictionary<string, (DateTime FetchedUtc, Lazy<Task<int>> Icon)> _icons = new();
 
     public sealed record ClaimView(string Id, string AccountId, string RiotId, int IconId, DateTime ExpiresUtc, int AttemptsLeft, string State);
 
@@ -43,6 +49,7 @@ public sealed class ClaimService(RegistryDatabase registry, AccountRegistry acco
         try
         {
             currentIcon = (await SummonerAsync(account, ct)).ProfileIconId;
+            _icons.TryRemove(accountId, out _);
         }
         catch (RiotApiException ex)
         {
@@ -94,13 +101,20 @@ public sealed class ClaimService(RegistryDatabase registry, AccountRegistry acco
         }
 
         int icon;
+        bool fresh;
         try
         {
-            icon = (await SummonerAsync(account, ct)).ProfileIconId;
+            (icon, fresh) = await CachedIconAsync(account, ct);
         }
         catch (RiotApiException ex)
         {
             return (View(claim, account.RiotId), false, $"Riot answered {ex.StatusCode} - try again in a moment");
+        }
+        // A cached miss is not a try: the player is not asked to pay an
+        // attempt for an answer Riot gave before they had set the icon.
+        if (icon != claim.IconId && !fresh)
+        {
+            return (View(claim, account.RiotId), false, $"Riot showed icon {icon}, not {claim.IconId}, when we last asked - we ask again in a minute");
         }
         if (icon != claim.IconId)
         {
@@ -118,6 +132,27 @@ public sealed class ClaimService(RegistryDatabase registry, AccountRegistry acco
         accounts.Update(account, a => a.OwnerUserId = userId);
         log.LogInformation("Claim {Id} verified: {RiotId} is owned by user {User}", claim.Id, account.RiotId, userId);
         return (View(claim, account.RiotId), true, null);
+    }
+
+    // Fresh says whether Riot answered for this call or an earlier one within
+    // the cache life. A start evicts its account's entry: the icon it just
+    // read is the one the player is about to change.
+    private async Task<(int Icon, bool Fresh)> CachedIconAsync(Account account, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        // Riot's answer outlives the click that asked for it - a cancelled
+        // caller must not fault the task the other callers share.
+        var mine = (FetchedUtc: now, Icon: new Lazy<Task<int>>(async () => (await SummonerAsync(account, CancellationToken.None)).ProfileIconId));
+        var entry = _icons.AddOrUpdate(account.Id, mine, (_, existing) => now - existing.FetchedUtc < IconCacheLife ? existing : mine);
+        try
+        {
+            return (await entry.Icon.Value.WaitAsync(ct), entry.Icon == mine.Icon);
+        }
+        catch
+        {
+            _icons.TryRemove(new KeyValuePair<string, (DateTime, Lazy<Task<int>>)>(account.Id, entry));
+            throw;
+        }
     }
 
     private async Task<SummonerDto> SummonerAsync(Account account, CancellationToken ct)

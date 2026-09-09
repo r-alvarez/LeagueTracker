@@ -87,13 +87,13 @@ public static class ManagementEndpoints
         {
             var (claim, error) = await claims.StartAsync(caller.UserId!, request.AccountId, ct);
             return claim is not null ? Results.Ok(claim) : Results.BadRequest(new { error });
-        });
+        }).RequireRateLimiting(RateLimitPolicies.ClaimStart);
 
         me.MapPost("/claims/{id}/verify", async (string id, Caller caller, ClaimService claims, CancellationToken ct) =>
         {
             var (claim, verified, error) = await claims.VerifyAsync(caller.UserId!, id, ct);
             return claim is null ? Results.NotFound(new { error }) : Results.Ok(new { claim, verified, error });
-        });
+        }).RequireRateLimiting(RateLimitPolicies.ClaimVerify);
 
         // --- Admin ----------------------------------------------------------------
 
