@@ -51,9 +51,9 @@ x-lt-agent-env: &lt-agent-env
   # day for everyone together) but still to the same channel: the refresh
   # token was minted for that channel with project B's client. Blank = falls
   # back to the shared values above.
-  Agent__Profiles__60250018a226__YouTubeClientId: ${YT_BEN_CLIENT_ID:-}
-  Agent__Profiles__60250018a226__YouTubeClientSecret: ${YT_BEN_CLIENT_SECRET:-}
-  Agent__Profiles__60250018a226__YouTubeRefreshToken: ${YT_BEN_REFRESH_TOKEN:-}
+  Agent__Profiles__8b239314d4e9__YouTubeClientId: ${YT_BEN_CLIENT_ID:-}
+  Agent__Profiles__8b239314d4e9__YouTubeClientSecret: ${YT_BEN_CLIENT_SECRET:-}
+  Agent__Profiles__8b239314d4e9__YouTubeRefreshToken: ${YT_BEN_REFRESH_TOKEN:-}
   # Friends publish to YouTube and send only the small review sidecar; the
   # full multi-GB video is NOT pushed to the NAS (YouTube hosts it). Without
   # this an agent defaults to UploadVods=true and tries to upload every game's
