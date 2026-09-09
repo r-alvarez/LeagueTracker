@@ -67,6 +67,7 @@ public sealed class AgentKeyStore
     private readonly object _gate = new();
     private readonly List<AgentKeyRecord> _records;
     private readonly List<(DateTime WhenUtc, string Ip, string Code)> _attempts = [];
+    private readonly HashSet<string> _codesTaken = [];
     private readonly RegistryDatabase _registry;
     private readonly IOptions<AgentsOptions> _options;
     private readonly ILogger<AgentKeyStore> _log;
@@ -104,10 +105,22 @@ public sealed class AgentKeyStore
     public (AgentKeyRecord? Record, bool Created, EnrolRefusal? Refusal) Enroll(string key, string name, string machine, string? ip, string? joinCode)
     {
         var hash = Hash(key);
+        var presented = Normalize(joinCode);
+        bool needsCode;
         lock (_gate)
         {
-            var presented = Normalize(joinCode);
-            var code = presented is not null ? TakeJoinCode(presented) : null;
+            var known = _records.FirstOrDefault(r => r.KeyHash == hash);
+            // A stranger's flood must cost this check and nothing more: the
+            // registry query used to come first, under the store-wide lock,
+            // so an anonymous enroll storm serialised every agent call (audit N9).
+            if (known is null && ip is not null && BudgetExhausted(ip, presented ?? "")) return (null, false, EnrolRefusal.TooManyAttempts);
+            needsCode = presented is not null && known is not { IsBound: true };
+        }
+        var code = needsCode ? TakeJoinCode(presented!) : null;
+        lock (_gate)
+        {
+            // The lookup ran unlocked; a code two machines present at once binds one.
+            if (code is not null && !_codesTaken.Add(code.Code)) code = null;
             if (_records.FirstOrDefault(r => r.KeyHash == hash) is { } existing)
             {
                 existing.LastSeenUtc = DateTime.UtcNow;
@@ -161,7 +174,8 @@ public sealed class AgentKeyStore
             _records.Add(record);
             Persist(record);
             if (code is not null) MarkUsed(code, record.Id);
-            _log.LogInformation("Agent enrolment pending: {Name} ({Machine}) from {Ip}{Owner}", record.Name, record.Machine, ip, record.IsBound ? $" for user {record.OwnerUserId}" : " (unbound)");
+            _log.LogInformation("Agent enrolment pending: {Name} ({Machine}){Owner}", record.Name, record.Machine, record.IsBound ? $" for user {record.OwnerUserId}" : " (unbound)");
+            _log.LogDebug("Agent {Name} enrolled from {Ip}", record.Name, ip);
             return (record, true, null);
         }
     }
@@ -172,12 +186,17 @@ public sealed class AgentKeyStore
     // twenty tries an hour at the code space.
     private bool NoteAttempt(string ip, string code)
     {
+        if (BudgetExhausted(ip, code)) return false;
+        if (!_attempts.Any(a => a.Ip == ip && a.Code == code)) _attempts.Add((DateTime.UtcNow, ip, code));
+        return true;
+    }
+
+    private bool BudgetExhausted(string ip, string code)
+    {
         var windowStart = DateTime.UtcNow - TimeSpan.FromHours(1);
         _attempts.RemoveAll(a => a.WhenUtc < windowStart);
-        if (_attempts.Any(a => a.Ip == ip && a.Code == code)) return true;
-        if (_attempts.Count(a => a.Ip == ip) >= MaxAttemptsPerIpPerHour) return false;
-        _attempts.Add((DateTime.UtcNow, ip, code));
-        return true;
+        if (_attempts.Any(a => a.Ip == ip && a.Code == code)) return false;
+        return _attempts.Count(a => a.Ip == ip) >= MaxAttemptsPerIpPerHour;
     }
 
     // "K7Q2-9DFM", "k7q29dfm" and " K7Q2-9DFM " are one code; blank is none.

@@ -136,9 +136,38 @@ public class AgentKeyStoreEnrolTests(PostgresFixture postgres) : IDisposable
     public void A_valid_code_is_never_charged_against_the_guessing_budget()
     {
         var keys = Store();
-        for (var i = 0; i < 20; i++) Assert.Equal(EnrolRefusal.JoinCodeUnusable, keys.Enroll(Key(i), "guess", "PC", "203.0.113.5", $"WRONGCOD{i:D2}").Refusal);
+        for (var i = 0; i < 19; i++) Assert.Equal(EnrolRefusal.JoinCodeUnusable, keys.Enroll(Key(i), "guess", "PC", "203.0.113.5", $"WRONGCOD{i:D2}").Refusal);
         var code = keys.MintJoinCode("user-1", AgentRole.Recorder);
         Assert.Null(keys.Enroll(Key(50), "friend", "PC", "203.0.113.5", code.Code).Refusal);
+        Assert.Equal(EnrolRefusal.JoinCodeUnusable, keys.Enroll(Key(51), "guess", "PC", "203.0.113.5", "WRONGCOD19").Refusal);
+        Assert.Equal(EnrolRefusal.TooManyAttempts, keys.Enroll(Key(52), "guess", "PC", "203.0.113.5", "WRONGCOD20").Refusal);
+    }
+
+    // Audit N9: the budget is the first thing an unknown key meets, before
+    // the registry is asked anything - so a spent address cannot even present
+    // a good code, and the code stays open for the same person elsewhere.
+    [Fact]
+    public void A_spent_address_is_refused_before_its_code_is_looked_up()
+    {
+        var keys = Store();
+        for (var i = 0; i < 20; i++) keys.Enroll(Key(i), "guess", "PC", "203.0.113.5", $"WRONGCOD{i:D2}");
+        var code = keys.MintJoinCode("user-1", AgentRole.Recorder);
+
+        Assert.Equal(EnrolRefusal.TooManyAttempts, keys.Enroll(Key(50), "friend", "PC", "203.0.113.5", code.Code).Refusal);
+
+        Assert.Empty(keys.All);
+        Assert.Contains(keys.OpenJoinCodes("user-1"), c => c.Code == code.Code);
+        Assert.Null(keys.Enroll(Key(50), "friend", "PC", "198.51.100.7", code.Code).Refusal);
+    }
+
+    [Fact]
+    public void A_code_presented_by_two_machines_binds_only_one()
+    {
+        var keys = Store();
+        var code = keys.MintJoinCode("user-1", AgentRole.Recorder);
+        Assert.Null(keys.Enroll(Key(1), "first", "PC", "203.0.113.5", code.Code).Refusal);
+        Assert.Equal(EnrolRefusal.JoinCodeUnusable, keys.Enroll(Key(2), "second", "PC", "203.0.113.6", code.Code).Refusal);
+        Assert.Single(keys.All);
     }
 
     [Fact]

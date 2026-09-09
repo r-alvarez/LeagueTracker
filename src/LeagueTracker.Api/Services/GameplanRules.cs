@@ -65,12 +65,56 @@ public static class GameplanRules
             ["farm_rate"] = new Dictionary<string, int> { ["fromMin"] = 15, ["toMin"] = 25, ["minPerMin"] = 8 },
         };
 
+    // Params were whitelisted by name but never by value: minFights 0 divided
+    // by zero, a negative window ran backwards (audit N12). A plan file with
+    // a stray value still loads, clamped, rather than losing the point.
+    private static readonly IReadOnlyDictionary<string, (int Min, int Max)> Ranges = new Dictionary<string, (int, int)>
+    {
+        ["level"] = (1, 18),
+        ["windowSec"] = (30, 3600),
+        ["withJungler"] = (0, 1),
+        ["includeGanks"] = (0, 1),
+        ["leadSec"] = (0, 600),
+        ["nearUnits"] = (500, 15000),
+        ["isolationUnits"] = (500, 15000),
+        ["movedUnits"] = (500, 15000),
+        ["fromSec"] = (0, 7200),
+        ["toSec"] = (0, 7200),
+        ["untilSec"] = (0, 7200),
+        ["bySec"] = (0, 7200),
+        ["minPct"] = (0, 100),
+        ["minPicks"] = (0, 50),
+        ["minFights"] = (0, 50),
+        ["minDuels"] = (0, 50),
+        ["minWards"] = (0, 50),
+        ["maxDeaths"] = (0, 50),
+        ["itemId"] = (0, 999999),
+        ["fromMin"] = (0, 120),
+        ["toMin"] = (1, 120),
+        ["minPerMin"] = (0, 30),
+    };
+
     public static RuleSpec? Normalize(RuleSpec? rule)
     {
         if (rule is null || !Defaults.TryGetValue(rule.Kind, out var defaults)) return null;
-        var known = defaults.ToDictionary(kv => kv.Key, kv => rule.Params.TryGetValue(kv.Key, out var v) ? v : kv.Value);
+        var known = defaults.ToDictionary(kv => kv.Key, kv => rule.Params.TryGetValue(kv.Key, out var v) ? Clamp(kv.Key, v) : kv.Value);
         return new RuleSpec(rule.Kind, known);
     }
+
+    // What a person typing a plan is told, where Normalize would silently clamp.
+    public static string? OutOfRange(RuleSpec? rule)
+    {
+        if (rule is null || !Defaults.TryGetValue(rule.Kind, out var defaults)) return null;
+        foreach (var (key, value) in rule.Params)
+        {
+            if (!defaults.ContainsKey(key) || !Ranges.TryGetValue(key, out var range)) continue;
+            if (value < range.Min || value > range.Max) return $"{key} must be between {range.Min} and {range.Max}.";
+        }
+        return null;
+    }
+
+    private static int Clamp(string key, int value) =>
+        Ranges.TryGetValue(key, out var range) ? Math.Clamp(value, range.Min, range.Max) : value;
 
     public static int PhaseStartSec(string phase) => phase switch { "mid" => EarlyEndSec, "late" => MidEndSec, _ => 0 };
 
@@ -285,6 +329,7 @@ public static class GameplanRules
         if (ctx.AllyJungler is not { } jungler) return new(NotApplicable, "No ally jungler in this game.");
         var junglerPositions = ctx.PositionsOf(jungler.ParticipantId);
         var mine = ctx.Fights.Where(f => f.Participated && f.StartSec >= fromSec).ToList();
+        if (mine is []) return new(NotApplicable, $"No fight of yours after {Clock(fromSec)}.");
         if (mine.Count < minFights) return new(NotApplicable, $"Only {mine.Count} fight{(mine.Count == 1 ? "" : "s")} of yours after {Clock(fromSec)} - too few to judge.");
         var together = mine
             .Where(f => JunglerInFight(ctx, f, jungler.ParticipantId, junglerPositions))

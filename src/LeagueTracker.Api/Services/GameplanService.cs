@@ -72,6 +72,7 @@ public sealed class GameplanService(LeagueDbContext db, DataPaths paths)
             var phase = input.Phase?.Trim().ToLowerInvariant() ?? "";
             if (!GameplanRules.Phases.Contains(phase)) return (null, $"Phase must be one of {string.Join(", ", GameplanRules.Phases)}.");
             if (GameplanRules.Normalize(input.Rule) is not { } rule) return (null, $"\"{text}\" needs a rule - the tracker only keeps points it can score.");
+            if (GameplanRules.OutOfRange(input.Rule) is { } outOfRange) return (null, $"\"{text}\": {outOfRange}");
             // Ids survive edits so history stays comparable; unknown ids are not trusted.
             var id = input.Id is { Length: > 0 } && existingIds.Contains(input.Id) && seen.Add(input.Id) ? input.Id : NewId(seen);
             cleaned.Add(new ReferencePoint(id, phase, text, rule));

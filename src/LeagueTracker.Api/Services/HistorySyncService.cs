@@ -40,7 +40,8 @@ public sealed class HistorySyncService(
 
             var processed = 0;
             var skipped = 0;
-            var failed = 0;
+            var unprocessable = 0;
+            List<string> deferred = [];
             foreach (var matchId in ids)
             {
                 ct.ThrowIfCancellationRequested();
@@ -48,39 +49,46 @@ public sealed class HistorySyncService(
                 {
                     skipped++;
                 }
-                else
+                else if (await TryIngestAsync(matchId, puuid, includeTimeline, includeRanks, ct) is { } failure)
                 {
-                    try
+                    if (IsPermanentFailure(failure))
                     {
-                        await IngestAsync(matchId, puuid, includeTimeline, includeRanks, ct);
+                        unprocessable++;
+                        await BlacklistAsync(matchId, ct);
                     }
-                    catch (RiotApiException ex) when (ex.IsAuthFailure)
+                    else
                     {
-                        throw;   // a dead key stops the run; one broken game must not
-                    }
-                    catch (Exception ex)
-                    {
-                        // Riot occasionally serves corrupt matches (queueId 0, no
-                        // participants). Remember them so neither sync nor poller retries.
-                        failed++;
-                        logger.LogWarning(ex, "Skipping unprocessable match {MatchId}", matchId);
-                        db.ChangeTracker.Clear();
-                        if (await db.KnownMatches.FindAsync([matchId], ct) is null)
-                        {
-                            db.KnownMatches.Add(new KnownMatch { Id = matchId });
-                            await db.SaveChangesAsync(ct);
-                        }
+                        deferred.Add(matchId);
                     }
                 }
                 processed++;
-                status.Report(processed, ids.Count, $"{processed}/{ids.Count} ({skipped} already present, {failed} skipped)");
+                status.Report(processed, ids.Count, $"{processed}/{ids.Count} ({skipped} already present, {unprocessable} unprocessable, {deferred.Count} to retry)");
+            }
+
+            // A Riot wobble mid-run is usually over by the time a long sync ends.
+            List<string> failed = [];
+            foreach (var matchId in deferred)
+            {
+                ct.ThrowIfCancellationRequested();
+                status.Report(processed, ids.Count, $"retrying {matchId}");
+                if (await TryIngestAsync(matchId, puuid, includeTimeline, includeRanks, ct) is not { } failure) continue;
+                if (IsPermanentFailure(failure))
+                {
+                    unprocessable++;
+                    await BlacklistAsync(matchId, ct);
+                }
+                else
+                {
+                    failed.Add(matchId);
+                }
             }
 
             // Snapshot LP so this sync becomes a bracket for future attribution runs.
             await lp.TakeSnapshotAsync(puuid, ct);
             await AttributeLpFromLedgerAsync(ct);
 
-            status.Finish($"done - {processed} games checked, {processed - skipped - failed} downloaded, {skipped} already present, {failed} unprocessable skipped");
+            var failedNote = failed is { Count: > 0 } ? $", {failed.Count} failed twice (run the sync again): {string.Join(", ", failed)}" : "";
+            status.Finish($"done - {processed} games checked, {processed - skipped - unprocessable - failed.Count} downloaded, {skipped} already present, {unprocessable} unprocessable skipped{failedNote}");
         }
         catch (Exception ex)
         {
@@ -88,6 +96,42 @@ public sealed class HistorySyncService(
             status.Finish($"failed: {ex.Message}");
             throw;
         }
+    }
+
+    // A 503 or a reset socket used to count as permanent and hid healthy
+    // games from the poller for good (audit E4).
+    internal static bool IsPermanentFailure(Exception ex) =>
+        ex is RiotApiException { IsAuthFailure: false, StatusCode: >= 400 and < 500 } || MatchIngestService.IsUnprocessable(ex);
+
+    private async Task<Exception?> TryIngestAsync(string matchId, string puuid, bool includeTimeline, bool includeRanks, CancellationToken ct)
+    {
+        try
+        {
+            await IngestAsync(matchId, puuid, includeTimeline, includeRanks, ct);
+            return null;
+        }
+        catch (RiotApiException ex) when (ex.IsAuthFailure)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            db.ChangeTracker.Clear();
+            if (IsPermanentFailure(ex)) logger.LogWarning("Skipping unprocessable match {MatchId}: {Reason}", matchId, ex.Message);
+            else logger.LogWarning("Could not ingest {MatchId} this time: {Reason}", matchId, ex.Message);
+            return ex;
+        }
+    }
+
+    private async Task BlacklistAsync(string matchId, CancellationToken ct)
+    {
+        if (await db.KnownMatches.FindAsync([matchId], ct) is not null) return;
+        db.KnownMatches.Add(new KnownMatch { Id = matchId });
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task IngestAsync(string matchId, string puuid, bool includeTimeline, bool includeRanks, CancellationToken ct)
@@ -100,9 +144,9 @@ public sealed class HistorySyncService(
             {
                 timelineRaw = await riot.GetTimelineRawAsync(matchId, ct);
             }
-            catch (RiotApiException ex) when (!ex.IsAuthFailure)
+            catch (RiotApiException ex) when (ex.StatusCode is 404)
             {
-                logger.LogWarning("Timeline unavailable for {MatchId}: {Message}", matchId, ex.Message);
+                logger.LogWarning("No timeline for {MatchId}; the poller's repair pass will ask again", matchId);
             }
         }
 
