@@ -45,6 +45,8 @@ RestartApplications=no
 Source: "{#SourceDir}\LeagueTracker.RenderAgent.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\LeagueTracker.ReplayLauncher.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ScreenRecorderLib.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\WebView2Loader.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\review-THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ffmpeg.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceDir}\appsettings.template.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -53,7 +55,8 @@ Source: "{#SourceDir}\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreve
 Source: "{#SourceDir}\appsettings.template.json"; DestDir: "{app}"; DestName: "setup.installed"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\LeagueTracker Agent"; Filename: "{app}\LeagueTracker.RenderAgent.exe"; Parameters: "--setup"; Comment: "LeagueTracker agent settings"
+Name: "{group}\LeagueTracker Agent"; Filename: "{app}\LeagueTracker.RenderAgent.exe"; Parameters: "--review"; Comment: "Review your gameplay"
+Name: "{group}\LeagueTracker Settings"; Filename: "{app}\LeagueTracker.RenderAgent.exe"; Parameters: "--setup"; Comment: "LeagueTracker agent settings"
 Name: "{group}\Uninstall LeagueTracker Agent"; Filename: "{uninstallexe}"
 
 [Run]

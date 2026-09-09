@@ -28,4 +28,9 @@
     <ProjectReference Include="..\..\src\LeagueTracker.RenderAgent\LeagueTracker.RenderAgent.csproj" />
   </ItemGroup>
 
+  <Target Name="RemoveUnusedWebViewWpf" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="$([System.String]::Copy('%(Reference.Identity)').EndsWith('Microsoft.Web.WebView2.Wpf.dll'))" />
+    </ItemGroup>
+  </Target>
 </Project>

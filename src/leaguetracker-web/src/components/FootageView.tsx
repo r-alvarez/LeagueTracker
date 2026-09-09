@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { account } from '../account'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api'
+import { reviewHost } from '../reviewHost'
 import { clock } from './TimeLink'
 import type { FullGameStatus, MapMoment, VodStatus } from '../types'
 
@@ -66,6 +67,9 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
   const youtubeRef = useRef<HTMLIFrameElement | null>(null)
   const ytPlayerRef = useRef<{ seekTo: (s: number, allowAhead: boolean) => void; playVideo: () => void; pauseVideo: () => void } | null>(null)
   const seenSeek = useRef(0)
+  const lastPositionWrite = useRef(0)
+  const [playbackRate, setPlaybackRate] = useState(1)
+  const [playbackError, setPlaybackError] = useState(false)
   const source = footageSource(vod, fullGame)
 
   // Piecewise-linear mapping over the sampled (videoSec, gameSec) pairs. A
@@ -97,7 +101,7 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
   // happened - the official iframe_api script does it and hands back a
   // player whose seekTo/playVideo actually work.
   useEffect(() => {
-    if (source !== 'youtube' || !ytId) return
+    if (reviewHost.desktop || source !== 'youtube' || !ytId) return
     let cancelled = false
     const w = window as unknown as { YT?: { Player: new (el: HTMLIFrameElement) => unknown }; onYouTubeIframeAPIReady?: () => void }
     const create = () => {
@@ -125,7 +129,7 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
   const seekTo = (videoSec: number) => {
     if (videoRef.current) {
       videoRef.current.currentTime = videoSec
-      void videoRef.current.play()
+      void videoRef.current.play().catch(() => undefined)
       return
     }
     const player = ytPlayerRef.current
@@ -173,18 +177,43 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
 
   return (
     <div className="footage">
+      {reviewHost.desktop && ['recorded', 'render'].includes(source) && <div className="review-actions">
+        <button className="action" onClick={() => { if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10) }}>−10 seconds</button>
+        <button className="action" onClick={() => { if (videoRef.current) videoRef.current.currentTime = Math.min(videoRef.current.duration, videoRef.current.currentTime + 10) }}>+10 seconds</button>
+        <label>Speed <select aria-label="Playback speed" value={playbackRate} onChange={e => { const rate = Number(e.target.value); setPlaybackRate(rate); if (videoRef.current) videoRef.current.playbackRate = rate }}>{[0.5, 0.75, 1, 1.25, 1.5, 2].map(rate => <option key={rate} value={rate}>{rate}×</option>)}</select></label>
+      </div>}
+      {reviewHost.desktop && playbackError && <p role="alert">This video could not be played. Reopen it from the library, or check your connection for online footage.</p>}
       {source === 'recorded' && (
-        <video ref={videoRef} src={account.apiUrl(`/api/matches/${matchId}/vod`)} poster={account.apiUrl(`/api/matches/${matchId}/vod/thumb`)}
-          controls preload="metadata" className="footage-video" onLoadedMetadata={e => setVideoDuration(e.currentTarget.duration)} />
+        <video ref={videoRef} src={vod?.playbackUrl ?? account.apiUrl(`/api/matches/${matchId}/vod`)} poster={vod?.posterUrl ?? account.apiUrl(`/api/matches/${matchId}/vod/thumb`)}
+          controls preload="metadata" className="footage-video" onLoadedMetadata={e => {
+            setVideoDuration(e.currentTarget.duration)
+            setPlaybackError(false)
+            e.currentTarget.playbackRate = playbackRate
+            if (reviewHost.desktop) {
+              const saved = Number(localStorage.getItem(`review-position:${account.current.id}:${matchId}`))
+              if (saved > 0 && saved < e.currentTarget.duration - 3) e.currentTarget.currentTime = saved
+            }
+          }} onTimeUpdate={e => {
+            if (reviewHost.desktop && Date.now() - lastPositionWrite.current >= 5000) {
+              lastPositionWrite.current = Date.now()
+              try { localStorage.setItem(`review-position:${account.current.id}:${matchId}`, String(Math.floor(e.currentTarget.currentTime))) } catch { /* Playback works with full storage too. */ }
+            }
+          }} onError={() => setPlaybackError(true)} />
       )}
-      {source === 'youtube' && ytId && (
+      {source === 'youtube' && ytId && reviewHost.desktop && (
+        <div className="stage-placeholder"><b>This recording is available on YouTube.</b>
+          <p>Keep a local copy to watch here, including when you’re offline.</p>
+          <button className="action" type="button" onClick={() => reviewHost.openYouTube?.(vod!.youtubeUrl!)}>Watch on YouTube</button>
+        </div>
+      )}
+      {source === 'youtube' && ytId && !reviewHost.desktop && (
         <iframe ref={youtubeRef}
           src={`https://www.youtube.com/embed/${ytId}?enablejsapi=1&rel=0&playsinline=1&origin=${encodeURIComponent(window.location.origin)}`}
           title="Game VOD on YouTube" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen className="footage-video footage-frame" />
       )}
       {source === 'render' && (
-        <video ref={videoRef} src={account.apiUrl(`/api/matches/${matchId}/fullgame`)} controls preload="metadata" className="footage-video"
-          onLoadedMetadata={e => setVideoDuration(e.currentTarget.duration)} />
+        <video ref={videoRef} src={fullGame?.playbackUrl ?? account.apiUrl(`/api/matches/${matchId}/fullgame`)} controls preload="metadata" className="footage-video"
+          onLoadedMetadata={e => { setVideoDuration(e.currentTarget.duration); e.currentTarget.playbackRate = playbackRate; setPlaybackError(false) }} onError={() => setPlaybackError(true)} />
       )}
       {source === 'pending' && (
         <div className="stage-placeholder">
@@ -244,7 +273,7 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
       )}
 
       <div className="footage-foot">
-        {source === 'recorded' && vod?.sizeMb != null && <div className="mut sm-text">{vod.sizeMb} MB on the tracker</div>}
+        {source === 'recorded' && vod?.sizeMb != null && <div className="mut sm-text">{Math.round(vod.sizeMb)} MB {vod.local ? 'on this PC' : 'on the tracker'}</div>}
         {source === 'youtube' && clockPairs.length === 0 && <div className="mut sm-text">No recording clock map — jumps assume the video starts at the game's 0:00.</div>}
         {source === 'render' && fullGame && (
           <div className="mut sm-text">

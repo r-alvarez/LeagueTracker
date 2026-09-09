@@ -1,4 +1,9 @@
 using LeagueTracker.RenderAgent;
+using LeagueTracker.RenderAgent.Review;
+
+// A viewer is an independent, on-demand process. It must never enter the
+// recorder's setup, stop-sentinel or single-instance replacement paths.
+if (args.Contains("--review")) return ReviewApp.Run(AgentConfig.Load(), args.Contains("--last"));
 
 var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };

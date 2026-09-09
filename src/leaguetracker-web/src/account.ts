@@ -38,6 +38,9 @@ export const pathOf = (a: AccountInfo) => `/${a.region}/${encodeURIComponent(a.s
 export const slugOf = (riotIdOrSlug: string) => riotIdOrSlug.trim().replace('#', '-')
 
 export const account = {
+  useReviewAccount(value: Pick<AccountInfo, 'id' | 'region' | 'slug' | 'label' | 'riotId'>) {
+    current = { ...current, ...value, owned: false, ownerUserId: null }
+  },
   get current() { return current },
   get all() { return all },
   get regions() { return regions },

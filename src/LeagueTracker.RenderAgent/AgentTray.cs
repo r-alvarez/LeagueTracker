@@ -4,7 +4,7 @@ using System.Drawing.Drawing2D;
 
 namespace LeagueTracker.RenderAgent;
 
-/// The one piece of UI: an icon by the clock that says what the agent is
+/// An icon by the clock that says what the agent is
 /// doing and carries the off switch. Lives on its own STA thread with a
 /// WinForms message pump; the agent's async loops never touch it directly -
 /// they update AgentStatus and the tray redraws itself.
@@ -18,6 +18,7 @@ public sealed class AgentTray : IDisposable
     private ToolStripMenuItem? _statusItem;
     private ToolStripMenuItem? _pauseItem;
     private SynchronizationContext? _ui;
+    private bool _reviewNotification;
     private readonly Dictionary<string, Icon> _icons = [];
 
     public AgentTray(AgentConfig config, Action quit, Func<Task> checkForUpdates)
@@ -29,6 +30,7 @@ public sealed class AgentTray : IDisposable
         _thread.SetApartmentState(ApartmentState.STA);
         _thread.Start();
         AgentStatus.Changed += () => _ui?.Post(_ => Refresh(), null);
+        GameRecorder.RecordingReady += OnRecordingReady;
     }
 
     private void Pump()
@@ -45,6 +47,8 @@ public sealed class AgentTray : IDisposable
         menu.Items.Add(new ToolStripSeparator());
         _pauseItem = new ToolStripMenuItem("Pause", null, (_, _) => { RenderAgent.SetPaused(!RenderAgent.Paused); Refresh(); });
         menu.Items.Add(_pauseItem);
+        menu.Items.Add(new ToolStripMenuItem("Review last game", null, (_, _) => Review.ReviewApp.Launch(last: true)));
+        menu.Items.Add(new ToolStripMenuItem("Gameplay library", null, (_, _) => Review.ReviewApp.Launch()));
         menu.Items.Add(new ToolStripMenuItem("Open tracker", null, (_, _) => Open(_config.ServerUrls.FirstOrDefault() ?? "")));
         menu.Items.Add(new ToolStripMenuItem("Open recordings folder", null, (_, _) => Open(RecordingsDir())));
         menu.Items.Add(new ToolStripMenuItem("Open log", null, (_, _) => Open(Path.Combine(AppContext.BaseDirectory, "agent.log"))));
@@ -58,13 +62,15 @@ public sealed class AgentTray : IDisposable
         {
             try { await _checkForUpdates(); }
             catch (Exception ex) { Log.Warn($"Update check failed: {ex.Message}"); }
+            _reviewNotification = false;
             _icon?.ShowBalloonTip(3000, "LeagueTracker agent", AgentStatus.Current.State is "updating" ? "Update staged - restarting" : $"Up to date ({AgentConfig.Version})", ToolTipIcon.Info);
         }));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Quit", null, (_, _) => _quit()));
 
         _icon = new NotifyIcon { ContextMenuStrip = menu, Visible = true };
-        _icon.DoubleClick += (_, _) => Open(_config.ServerUrls.FirstOrDefault() ?? "");
+        _icon.DoubleClick += (_, _) => Review.ReviewApp.Launch();
+        _icon.BalloonTipClicked += (_, _) => { if (_reviewNotification) Review.ReviewApp.Launch(last: true); _reviewNotification = false; };
         Refresh();
         Application.Run();
     }
@@ -80,6 +86,12 @@ public sealed class AgentTray : IDisposable
         _icon.Text = Truncate($"LeagueTracker agent · {line}", 127);
         _icon.Icon = IconFor(paused ? "paused" : state is "starting" or "waiting" ? "waiting" : AgentStatus.LastError is not null && state is "idle" ? "warn" : state is "idle" ? "idle" : "busy");
     }
+
+    private void OnRecordingReady() => _ui?.Post(_ =>
+    {
+        _reviewNotification = true;
+        _icon?.ShowBalloonTip(5000, "Your recording is ready", "Click to review your last game.", ToolTipIcon.Info);
+    }, null);
 
     private static string Describe(string state, string? detail) => state switch
     {
@@ -165,6 +177,7 @@ public sealed class AgentTray : IDisposable
     /// process hostage.
     public void Dispose()
     {
+        GameRecorder.RecordingReady -= OnRecordingReady;
         try
         {
             using var done = new ManualResetEventSlim(false);

@@ -15,7 +15,7 @@ public sealed class SetupForm : Form
     private readonly ComboBox _role = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly TextBox _recordings = new();
     private readonly TextBox _prefix = new() { Width = ContentWidth };
-    private readonly CheckBox _review = new() { Text = "Open a post-game review on this screen", AutoSize = true };
+    private readonly CheckBox _review = new() { Text = "Automatically open replays in the League client", AutoSize = true };
     private readonly Label _verdict = new() { AutoSize = true };
     private readonly Button _test = new() { Text = "Test connection" };
     private readonly Button _save = new() { Text = "Save" };

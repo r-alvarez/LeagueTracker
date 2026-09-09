@@ -478,7 +478,7 @@ app.MapGet("/api/agent/accounts", (AccountRegistry registry, Caller caller, Agen
     var agent = caller.Agent!;
     var reachable = agent.Role is AgentRole.Renderer || (!agent.IsBound && keys.AllowUnbound)
         ? registry.All
-        : registry.OwnedBy(agent.OwnerUserId ?? "");
+        : registry.All.Where(caller.Owns);
     return Results.Ok(new
     {
         Default = reachable.FirstOrDefault()?.Slug ?? registry.Default.Slug,
