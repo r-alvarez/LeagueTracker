@@ -111,6 +111,11 @@ internal sealed class ReviewForm : Form
     private readonly CancellationTokenSource _lifetime = new();
     private readonly System.Windows.Forms.Timer _gameTimer = new() { Interval = 1500 };
     private readonly SemaphoreSlim _bridgeLimit = new(8);
+    // A match page legitimately arrives as a burst (detail, review, track,
+    // footage, clips and gameplan). Keep only eight native operations active,
+    // but let a small bounded backlog wait instead of rejecting the ninth
+    // request as if the user had done something wrong.
+    private readonly SemaphoreSlim _bridgeCapacity = new(32);
     private bool _last;
     private bool _checkingGame;
     private bool _closing;
@@ -270,13 +275,16 @@ internal sealed class ReviewForm : Form
         if (e.WebMessageAsJson.Length > 16384) return;
         string? id = null;
         var entered = false;
+        var admitted = false;
         try
         {
             var message = JsonNode.Parse(e.WebMessageAsJson)!;
             id = message["id"]?.GetValue<string>();
             if (id is null || id.Length > 64) return;
-            entered = _bridgeLimit.Wait(0);
-            if (!entered) throw new InvalidOperationException("The review window is busy. Try again shortly.");
+            admitted = _bridgeCapacity.Wait(0);
+            if (!admitted) throw new InvalidOperationException("The review window is busy. Try again shortly.");
+            await _bridgeLimit.WaitAsync(_lifetime.Token);
+            entered = true;
             var operation = message["operation"]?.GetValue<string>() ?? "";
             var argument = message["argument"] as JsonObject ?? new JsonObject();
             var result = await Task.Run(() => DispatchAsync(operation, argument, _lifetime.Token), _lifetime.Token);
@@ -287,7 +295,11 @@ internal sealed class ReviewForm : Form
             if (!_closing && id is not null)
                 _view.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { id, error = ex is UnauthorizedAccessException or ArgumentException or IOException or InvalidOperationException ? ex.Message : "The review request failed. Please try again." }));
         }
-        finally { if (entered) _bridgeLimit.Release(); }
+        finally
+        {
+            if (entered) _bridgeLimit.Release();
+            if (admitted) _bridgeCapacity.Release();
+        }
     }
 
     private async Task<object?> DispatchAsync(string operation, JsonObject arg, CancellationToken ct)

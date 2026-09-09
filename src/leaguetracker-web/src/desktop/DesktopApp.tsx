@@ -162,7 +162,7 @@ export default function DesktopApp({ openLast }: { openLast: boolean }) {
     void reload().catch(e => setNotice(String(e)))
     void invoke<{ accounts: ReviewAccount[]; offline: boolean; denied: boolean }>('accounts').then(value => {
       setRecordingContexts({})
-      setAccounts(value.accounts); setSelected(value.accounts[0] ?? null); setOffline(value.offline)
+      setAccounts(value.accounts); setOffline(value.offline)
       if (value.denied) setNotice('This machine needs access to your tracker. Check enrollment in the agent’s Settings.')
     }).catch(() => setOffline(true))
   }, [reload, openLast, openLocal])
@@ -196,15 +196,19 @@ export default function DesktopApp({ openLast }: { openLast: boolean }) {
   useEffect(() => {
     setMatches([]); setTotal(0); setPage(1)
     requests.current++
-    const force = refreshHistory.current
-    refreshHistory.current = false
     if (selected) {
       const local = localForAccountChange.current
       localForAccountChange.current = null
       selectAccount(selected, local)
-      void loadMatches(selected, 1, force)
     }
-  }, [selected, loadMatches])
+  }, [selected])
+  useEffect(() => {
+    if (!selected || (location.pathname !== '/' && location.pathname !== '/matches')) return
+    selectAccount(selected, null)
+    const force = refreshHistory.current
+    refreshHistory.current = false
+    void loadMatches(selected, 1, force)
+  }, [selected, location.pathname, loadMatches])
 
   // Match ids survive Riot ID changes. Walk each of this machine's account
   // histories in pages, then attach the real champion, result and loadout to
@@ -213,6 +217,8 @@ export default function DesktopApp({ openLast }: { openLast: boolean }) {
     const wanted = new Set((library?.recordings ?? []).filter(r => r.matchId).map(r => r.matchId!))
     if (wanted.size === 0 || accounts.length === 0) return
     let cancelled = false
+    const localPlayers = new Set((library?.recordings ?? []).map(r => r.player?.toLocaleLowerCase()).filter(Boolean))
+    const orderedAccounts = [...accounts].sort((a, b) => Number(localPlayers.has(b.riotId.toLocaleLowerCase())) - Number(localPlayers.has(a.riotId.toLocaleLowerCase())))
     const discover = async (reviewAccount: ReviewAccount) => {
       const found: Array<[string, RecordingContext]> = []
       const pageSize = 200
@@ -225,13 +231,22 @@ export default function DesktopApp({ openLast }: { openLast: boolean }) {
       }
       return found
     }
-    void Promise.all(accounts.map(discover)).then(groups => {
-      if (cancelled) return
-      const byMatch = new Map(groups.flat())
-      const contexts: Record<string, RecordingContext> = {}
-      for (const item of library!.recordings) if (item.matchId && byMatch.has(item.matchId)) contexts[item.id] = byMatch.get(item.matchId)!
-      setRecordingContexts(contexts)
-    }).catch(() => { /* Thumbnails and playback remain useful offline. */ })
+    void (async () => {
+      const byMatch = new Map<string, RecordingContext>()
+      // This is background decoration, not a reason to compete with the
+      // match the user is opening. Start with players named by local sidecars,
+      // publish each result immediately, and stop before render-only accounts
+      // once every local match has an owner.
+      for (const reviewAccount of orderedAccounts) {
+        if (cancelled) return
+        for (const [matchId, context] of await discover(reviewAccount)) if (!byMatch.has(matchId)) byMatch.set(matchId, context)
+        if (cancelled) return
+        const contexts: Record<string, RecordingContext> = {}
+        for (const item of library!.recordings) if (item.matchId && byMatch.has(item.matchId)) contexts[item.id] = byMatch.get(item.matchId)!
+        setRecordingContexts(contexts)
+        if (byMatch.size === wanted.size) break
+      }
+    })().catch(() => { /* Thumbnails and playback remain useful offline. */ })
     return () => { cancelled = true }
   }, [library, accounts])
 
@@ -246,6 +261,21 @@ export default function DesktopApp({ openLast }: { openLast: boolean }) {
   }, [accountIds, accountsByRiotId, recordingContexts])
   const permittedRecordings = useMemo(() => (library?.recordings ?? []).filter(ownerFor), [library, ownerFor])
   const available = useMemo(() => permittedRecordings.filter(r => r.available), [permittedRecordings])
+  // Review is the local player's library, not this process's render queue.
+  // The catalogue is newest-first, so the first account is the one that owns
+  // the latest game recorded on this machine.
+  const recordedAccounts = useMemo(() => {
+    const seen = new Set<string>()
+    const result: ReviewAccount[] = []
+    for (const item of permittedRecordings) {
+      const owner = ownerFor(item)
+      if (owner && !seen.has(owner.id)) { seen.add(owner.id); result.push(owner) }
+    }
+    return result
+  }, [permittedRecordings, ownerFor])
+  useEffect(() => {
+    setSelected(current => recordedAccounts.find(a => a.id === current?.id) ?? recordedAccounts[0] ?? null)
+  }, [recordedAccounts])
   useEffect(() => {
     if (!lastRequested.current || available.length === 0) return
     lastRequested.current = false
@@ -262,13 +292,18 @@ export default function DesktopApp({ openLast }: { openLast: boolean }) {
     selectAccount(owner, local); setRecording(local)
     navigate(`/matches/${matchId}`)
   }
+  const openRecording = (item: Recording) => {
+    const owner = ownerFor(item)
+    if (item.matchId && owner) showMatch(item.matchId, item, owner)
+    else openLocal(item, owner)
+  }
   const action = async (operation: string, argument: unknown) => {
     setNotice(null)
     try { await invoke(operation, argument); await reload() } catch (e) { setNotice(String(e)) }
   }
   const changeAccount = (id: string) => {
     localForAccountChange.current = null
-    setSelected(accounts.find(a => a.id === id) ?? null); setRecording(null); navigate('/matches')
+    setSelected(recordedAccounts.find(a => a.id === id) ?? null); setRecording(null); navigate('/matches')
   }
   const refresh = async () => {
     setNotice(null)
@@ -277,9 +312,7 @@ export default function DesktopApp({ openLast }: { openLast: boolean }) {
     setRecordingContexts({})
     localForAccountChange.current = null
     setAccounts(discovery.accounts); setOffline(discovery.offline)
-    const current = discovery.accounts.find(a => a.id === selected?.id) ?? discovery.accounts[0] ?? null
     refreshHistory.current = true
-    setSelected(current)
     if (discovery.denied) { navigate('/matches'); setNotice('Tracker access was refused. Check the agent’s enrollment.') }
   }
   const recordedGames = new Set(permittedRecordings.map(r => r.matchId).filter(Boolean)).size || permittedRecordings.length
@@ -289,7 +322,7 @@ export default function DesktopApp({ openLast }: { openLast: boolean }) {
   })
   return <div className="desktop-shell">
     <header className="desktop-bar"><button className="desktop-brand" onClick={() => navigate('/matches')}><img src="/favicon.svg" alt="" />LeagueTracker</button>
-      <div className="desktop-account">{accounts.length > 0 && <select aria-label="Review account" value={selected?.id ?? ''} onChange={e => changeAccount(e.target.value)}>{accounts.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}</select>}
+      <div className="desktop-account">{recordedAccounts.length > 0 && <select aria-label="Review account" value={selected?.id ?? ''} onChange={e => changeAccount(e.target.value)}>{recordedAccounts.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}</select>}
         <button className="action" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(s => !s)}>Storage</button>
         {selected && <button className="action" onClick={() => void action('openWebsite', { account: selected.id })}>Open website ↗</button>}</div>
     </header>
@@ -307,9 +340,7 @@ export default function DesktopApp({ openLast }: { openLast: boolean }) {
           {library && <p className="mut sm-text">{gb(available.reduce((n, r) => n + r.sizeBytes, 0))} of playable recordings · {library.freeGb.toFixed(0)} GB free · {library.settings.keepAll ? 'Keeping every recording' : `Keeping up to ${library.settings.keepGames} games within ${library.settings.maxGb} GB`}</p>}
           {visible.length === 0 && <div className="card review-empty"><h3>{query ? 'No recordings match your search' : 'Your next game belongs here'}</h3><p className="mut">Finished recordings appear here automatically. Previously removed videos may still be available in your match history below.</p></div>}
           <div className="recording-grid">{visible.map(r => <RecordingCard key={r.id} recording={r} context={recordingContexts[r.id]}
-            open={() => recordingContexts[r.id] && r.matchId
-              ? showMatch(r.matchId, r, recordingContexts[r.id].account)
-              : openLocal(r, ownerFor(r))} act={action} />)}</div>
+            open={() => openRecording(r)} act={action} />)}</div>
           <div className="review-library-heading"><h2>Match history</h2><span className="mut">{selected?.label ?? 'Connect your tracker to see analysis'}</span></div>
           <div className="review-matches">{matches.map(m => <button className="review-match card" key={m.id} onClick={() => showMatch(m.id, available.find(r => r.matchId === m.id) ?? null)}>
             <span className={m.win ? 'win' : 'loss'}>{m.win ? 'Victory' : 'Defeat'}</span><strong>{m.champion}</strong><span>{m.kills}/{m.deaths}/{m.assists}</span><span className="mut">{m.queueName}</span><span className="mut">{when(m.gameEndUtc)}</span><span aria-hidden>→</span>

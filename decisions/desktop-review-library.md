@@ -49,3 +49,31 @@ The local recording lookup now uses the stable match ID alone after the library
 has passed the account boundary. This supplies the local VOD to `MatchStage`, so
 Footage is the default whenever the permitted recording exists; Map remains the
 fallback when it does not.
+
+## 2026-09-09 — Render work is not a local player (follow-up)
+
+Seen on the combined gaming/renderer PC: review defaulted to HeraArgiva and
+listed Ben even though live recordings on that machine belong to Ruben's main
+and alt accounts. The agent legitimately renders replay clips for other users,
+but that processing scope says nothing about who played a live game there.
+Rendered clips do not enter `RecordingLibrary`; its finalized sidecars are the
+authoritative local-player evidence.
+
+The account picker is therefore the distinct owners of matched local sidecars,
+newest recording first. Server discovery remains a private candidate set used
+to resolve those sidecars, not the visible picker. Match-history enrichment
+tries Riot IDs named by local sidecars first, processes one account at a time,
+publishes matches incrementally and stops once the catalogue is resolved. A
+render-only account with no full-game sidecar never appears and normally never
+needs its history scanned.
+
+Preview routing no longer waits for the optional rich-card context. A permitted
+recording's own stable match ID and resolved owner open the shared match detail
+directly; only a recording without a match association uses the raw local
+player.
+
+The "review window is busy" banner was the native bridge rejecting the ninth
+request in a normal match-detail burst. Eight operations remain active at once,
+but a bounded total capacity of 32 now queues the ordinary backlog. Entering a
+detail page also stops loading the account's list page in parallel; it reloads
+when the user returns to the library.
