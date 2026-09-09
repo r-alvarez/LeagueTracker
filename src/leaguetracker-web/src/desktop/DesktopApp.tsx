@@ -149,6 +149,7 @@ export default function DesktopApp({ openLast }: { openLast: boolean }) {
   const [offline, setOffline] = useState(false)
   const [busy, setBusy] = useState(false)
   const lastRequested = useRef(openLast)
+  const localForAccountChange = useRef<Recording | null>(null)
   const requests = useRef(0)
   const refreshHistory = useRef(false)
   const reload = useCallback(async () => { const value = await invoke<Library>('library'); setLibrary(value); return value }, [])
@@ -197,7 +198,12 @@ export default function DesktopApp({ openLast }: { openLast: boolean }) {
     requests.current++
     const force = refreshHistory.current
     refreshHistory.current = false
-    if (selected) { selectAccount(selected, null); void loadMatches(selected, 1, force) }
+    if (selected) {
+      const local = localForAccountChange.current
+      localForAccountChange.current = null
+      selectAccount(selected, local)
+      void loadMatches(selected, 1, force)
+    }
   }, [selected, loadMatches])
 
   // Match ids survive Riot ID changes. Walk each of this machine's account
@@ -247,21 +253,29 @@ export default function DesktopApp({ openLast }: { openLast: boolean }) {
     openLocal(first, ownerFor(first))
   }, [available, openLocal, ownerFor])
 
-  const showMatch = (matchId: string, local: Recording | null) => {
-    if (!selected) return
-    selectAccount(selected, local); setRecording(local)
+  const showMatch = (matchId: string, local: Recording | null, owner: ReviewAccount | null = selected) => {
+    if (!owner) return
+    if (owner.id !== selected?.id) {
+      localForAccountChange.current = local
+      setSelected(owner)
+    }
+    selectAccount(owner, local); setRecording(local)
     navigate(`/matches/${matchId}`)
   }
   const action = async (operation: string, argument: unknown) => {
     setNotice(null)
     try { await invoke(operation, argument); await reload() } catch (e) { setNotice(String(e)) }
   }
-  const changeAccount = (id: string) => { setSelected(accounts.find(a => a.id === id) ?? null); setRecording(null); navigate('/matches') }
+  const changeAccount = (id: string) => {
+    localForAccountChange.current = null
+    setSelected(accounts.find(a => a.id === id) ?? null); setRecording(null); navigate('/matches')
+  }
   const refresh = async () => {
     setNotice(null)
     await reload()
     const discovery = await invoke<{ accounts: ReviewAccount[]; offline: boolean; denied: boolean }>('accounts', { refresh: true })
     setRecordingContexts({})
+    localForAccountChange.current = null
     setAccounts(discovery.accounts); setOffline(discovery.offline)
     const current = discovery.accounts.find(a => a.id === selected?.id) ?? discovery.accounts[0] ?? null
     refreshHistory.current = true
@@ -293,7 +307,9 @@ export default function DesktopApp({ openLast }: { openLast: boolean }) {
           {library && <p className="mut sm-text">{gb(available.reduce((n, r) => n + r.sizeBytes, 0))} of playable recordings · {library.freeGb.toFixed(0)} GB free · {library.settings.keepAll ? 'Keeping every recording' : `Keeping up to ${library.settings.keepGames} games within ${library.settings.maxGb} GB`}</p>}
           {visible.length === 0 && <div className="card review-empty"><h3>{query ? 'No recordings match your search' : 'Your next game belongs here'}</h3><p className="mut">Finished recordings appear here automatically. Previously removed videos may still be available in your match history below.</p></div>}
           <div className="recording-grid">{visible.map(r => <RecordingCard key={r.id} recording={r} context={recordingContexts[r.id]}
-            open={() => openLocal(r, recordingContexts[r.id]?.account)} act={action} />)}</div>
+            open={() => recordingContexts[r.id] && r.matchId
+              ? showMatch(r.matchId, r, recordingContexts[r.id].account)
+              : openLocal(r, ownerFor(r))} act={action} />)}</div>
           <div className="review-library-heading"><h2>Match history</h2><span className="mut">{selected?.label ?? 'Connect your tracker to see analysis'}</span></div>
           <div className="review-matches">{matches.map(m => <button className="review-match card" key={m.id} onClick={() => showMatch(m.id, available.find(r => r.matchId === m.id) ?? null)}>
             <span className={m.win ? 'win' : 'loss'}>{m.win ? 'Victory' : 'Defeat'}</span><strong>{m.champion}</strong><span>{m.kills}/{m.deaths}/{m.assists}</span><span className="mut">{m.queueName}</span><span className="mut">{when(m.gameEndUtc)}</span><span aria-hidden>→</span>

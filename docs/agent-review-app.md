@@ -145,8 +145,12 @@ latest 500 catalogue entries, counts retained sidecars separately from playable
 MP4s, and enriches permitted recordings from account match history by stable
 match ID. This preserves account association across Riot ID changes and lets
 the cards show thumbnails, champion, result, KDA, opponent and loadout. Very
-large keep-all archives need local pagination in a subsequent iteration.
-Retention examines the whole catalogue.
+large keep-all archives need local pagination in a subsequent iteration. A
+matched card opens the same `MatchDetail` used by the website and substitutes
+only its local `/vod/status` response; scoreboard, verdict, timeline, track,
+gameplan and clips still come through the account-scoped tracker APIs. An
+unmatched or offline-only file retains the simple local player. Retention
+examines the whole catalogue.
 
 Analysis caches are partitioned by installation and agent-key identity, keyed
 by schema and URL, capped at 128 MiB per identity. Artwork is separately capped

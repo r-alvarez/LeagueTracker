@@ -34,6 +34,12 @@ and loadout, while the existing generated JPG supplies the preview image. The
 storage editor is a modal with the same identity-scoped totals, so it no longer
 pushes the library down the page.
 
+A matched Preview opens the shared website `MatchDetail`, not a reduced local
+detail page. The local MP4 overrides only `/vod/status`; match detail, review,
+track, gameplan, full-game status and clips keep using the account-scoped
+tracker responses. Files that cannot be matched while offline retain the raw
+local player so footage is never made dependent on metadata availability.
+
 ## 2026-09-09 — Footage leads when it exists
 
 `MatchStage` already defaults an unopened game to Footage and falls back to Map
