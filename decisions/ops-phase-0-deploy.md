@@ -48,3 +48,14 @@ or `journald`. Chosen: keep `json-file` with `max-size`/`max-file`, because
 Portainer's log viewer and `docker logs` read it without a flag and the
 NAS has nothing consuming journald. 50 MB for the app is a day or two of
 its chattiest output; 6 MB per sidecar is months of theirs.
+
+### N13 — the dev database stays published, on loopback only
+
+The host-run recipe (`dotnet run` against `appsettings.json`'s
+`localhost:5432`) is how the app is developed, so dropping the port
+publication would break the daily loop. Binding it to 127.0.0.1 keeps that
+and stops a laptop on a cafe Wi-Fi from offering a Postgres with a
+well-known password to the room. The password is now
+`${POSTGRES_PASSWORD:-leaguetracker}` in both places the compose uses it;
+`appsettings.json` keeps the same default (it is under `src/`, which this
+branch does not touch) and user-secrets is the override path for a host run.

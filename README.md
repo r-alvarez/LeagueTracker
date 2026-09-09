@@ -173,8 +173,10 @@ them via import), the ranks captured at game time, and gameplans
 (`data/gameplans/*.json`), which are files from the start and never in the db.
 
 A host run needs the database from `docker compose up -d postgres`
-(localhost:5432, credentials in `appsettings.json`); the tests start their own
-in Testcontainers. A data folder from the SQLite era is brought across on the
+(published on 127.0.0.1:5432 only; `appsettings.json` carries the dev-only
+credentials, and `POSTGRES_PASSWORD` in the environment overrides the compose
+side if you change them); the tests start their own in Testcontainers. A
+data folder from the SQLite era is brought across on the
 first boot: each `leaguetracker.db` and `registry.db` is copied row for row
 into its schema, verified against the file, and kept as `*.imported` — see
 `docs/operate.md`.

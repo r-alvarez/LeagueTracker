@@ -22,9 +22,15 @@ services:
     environment:
       POSTGRES_DB: leaguetracker
       POSTGRES_USER: leaguetracker
-      POSTGRES_PASSWORD: leaguetracker
+      # DEV-ONLY default, and the one appsettings.json's host-run connection
+      # string expects. Override both together (POSTGRES_PASSWORD here, the
+      # connection string in user-secrets); the image only reads it when the
+      # volume is empty, so a change means `docker compose down -v` first.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-leaguetracker}
     ports:
-      - "5432:5432"
+      # Loopback only: a host run needs the port, the rest of the LAN gets a
+      # database with a well-known password if it is published on 0.0.0.0.
+      - "127.0.0.1:5432:5432"
     volumes:
       - leaguetracker-postgres:/var/lib/postgresql
     healthcheck:
@@ -45,7 +51,7 @@ services:
     ports:
       - "5170:5170"
     environment:
-      - ConnectionStrings__LeagueTracker=Host=postgres;Database=leaguetracker;Username=leaguetracker;Password=leaguetracker
+      - ConnectionStrings__LeagueTracker=Host=postgres;Database=leaguetracker;Username=leaguetracker;Password=${POSTGRES_PASSWORD:-leaguetracker}
       - Accounts__DataRoot=/data
       - Accounts__List__0__GameName=ImRA
       - Accounts__List__0__TagLine=87166
