@@ -8,7 +8,7 @@ namespace LeagueTracker.RenderAgent;
 /// Captures the audio of ONE process tree (the game's) via Windows' process
 /// loopback API and serves it to ffmpeg as raw PCM over a named pipe -
 /// "just League audio": Discord, Spotify and system sounds never enter the
-/// recording, which desktop-loopback recorders (Ascent's OBS included)
+/// recording, which desktop-loopback recorders
 /// cannot promise. Windows 10 2004+; anything older just records video-only.
 ///
 /// The pipe is paced against the wall clock with silence fill: process

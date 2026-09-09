@@ -48,15 +48,17 @@ public sealed record TrackerAccount(string Slug, string Label, string RiotId, st
 public sealed class TrackerClient
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private readonly HttpClient _http;
     // Keyless on purpose: the setup window pings whatever address is in the box,
     // and a typo or a pasted address must not be handed this machine's key.
     private static readonly HttpClient Anonymous = new() { Timeout = TimeSpan.FromSeconds(30) };
     private readonly string _agentName;
     private readonly string _joinCode;
 
-    private TrackerClient(string serverUrl, string api, TrackerAccount? account, AgentConfig config, bool keyed)
+    internal TrackerClient(string serverUrl, string api, TrackerAccount? account, AgentConfig config, bool keyed, HttpMessageHandler? handler = null)
     {
+        _http = handler is null ? new HttpClient() : new HttpClient(handler);
+        _http.Timeout = TimeSpan.FromMinutes(10);
         ServerUrl = serverUrl;
         Api = api;
         Account = account;
@@ -498,6 +500,9 @@ public sealed class TrackerClient
             return null;
         }
     }
+
+    internal Task<bool> HasVodBackupAsync(string matchId, long bytes, JsonElement metadata, CancellationToken ct) =>
+        VodBackup.ConfirmAsync(_http, Api, matchId, bytes, metadata, ct);
 
     public sealed record MatchAt(string Id, DateTime GameCreationUtc, DateTime GameEndUtc, long QueueId, string? Champion);
 

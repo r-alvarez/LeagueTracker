@@ -45,6 +45,8 @@ RestartApplications=no
 Source: "{#SourceDir}\LeagueTracker.RenderAgent.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\LeagueTracker.ReplayLauncher.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ScreenRecorderLib.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\WebView2Loader.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\review-THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ffmpeg.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceDir}\appsettings.template.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -53,7 +55,8 @@ Source: "{#SourceDir}\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreve
 Source: "{#SourceDir}\appsettings.template.json"; DestDir: "{app}"; DestName: "setup.installed"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\LeagueTracker Agent"; Filename: "{app}\LeagueTracker.RenderAgent.exe"; Parameters: "--setup"; Comment: "LeagueTracker agent settings"
+Name: "{group}\LeagueTracker Agent"; Filename: "{app}\LeagueTracker.RenderAgent.exe"; Parameters: "--review"; Comment: "Review your gameplay"
+Name: "{group}\LeagueTracker Settings"; Filename: "{app}\LeagueTracker.RenderAgent.exe"; Parameters: "--setup"; Comment: "LeagueTracker agent settings"
 Name: "{group}\Uninstall LeagueTracker Agent"; Filename: "{uninstallexe}"
 
 [Run]
@@ -73,3 +76,19 @@ Type: files; Name: "{app}\paused"
 Type: filesandordirs; Name: "{app}\update"
 ; agent.key, appsettings.json and youtube-token.json are deliberately kept:
 ; a reinstall picks the machine's identity and settings back up.
+
+[Code]
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    WizardForm.StatusLabel.Caption := 'Preparing gameplay review...';
+    if not Exec(ExpandConstant('{app}\LeagueTracker.RenderAgent.exe'), '--ensure-webview2',
+      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      ResultCode := 1;
+    if ResultCode <> 0 then
+      SuppressibleMsgBox('Gameplay review could not be prepared. Check your internet connection. LeagueTracker will retry automatically when you open review; recording can continue.', mbInformation, MB_OK, IDOK);
+  end;
+end;

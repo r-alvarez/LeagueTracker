@@ -1,4 +1,7 @@
 using LeagueTracker.Api.Accounts;
+using LeagueTracker.Api.Auth;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Registry;
 using LeagueTracker.Api.Riot;
@@ -15,12 +18,55 @@ public class AgentKeyStoreEnrolTests(PostgresFixture postgres) : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "lt-tests", Guid.NewGuid().ToString("N"));
     private readonly DatabaseServer _server = postgres.NewServer();
+    private RegistryDatabase _registry = null!;
 
     private AgentKeyStore Store(bool allowUnbound = false)
     {
         var registry = new RegistryDatabase(_server, Options.Create(new AccountsOptions { DataRoot = _root }), Options.Create(new RiotOptions()), new TestEnv(_root));
         registry.Migrate(NullLogger.Instance);
+        _registry = registry;
         return new AgentKeyStore(registry, Options.Create(new AgentsOptions { AllowUnbound = allowUnbound }), NullLogger<AgentKeyStore>.Instance);
+    }
+
+    [Fact]
+    public void Discovery_includes_shared_pc_grants_and_observes_their_removal()
+    {
+        const AgentRole role = AgentRole.Recorder;
+        var keys = Store();
+        var code = keys.MintJoinCode("owner", role);
+        var agent = keys.Enroll(Key(1), "shared-pc", "PC", "203.0.113.5", code.Code).Record!;
+        keys.Decide(agent.Id, AgentKeyStatus.Approved);
+        keys.Assign(agent.Id, "owner", role, ["shared"]);
+        var caller = CallerFor(keys, agent);
+        Account[] accounts = [new() { Id = "mine", OwnerUserId = "owner" }, new() { Id = "shared", OwnerUserId = "friend" }, new() { Id = "unrelated", OwnerUserId = "stranger" }];
+
+        Assert.Equal(new[] { "mine", "shared" }, caller.DiscoverAgentAccounts(accounts).Select(a => a.Id));
+        keys.Assign(agent.Id, "owner", role, []);
+        Assert.Equal(new[] { "mine" }, caller.DiscoverAgentAccounts(accounts).Select(a => a.Id));
+    }
+
+    [Theory]
+    [InlineData(AgentRole.Renderer, false, 2)]
+    [InlineData(AgentRole.Recorder, true, 2)]
+    [InlineData(AgentRole.Recorder, false, 0)]
+    public void Discovery_preserves_renderer_and_unbound_rollout_scope(AgentRole role, bool allowUnbound, int expected)
+    {
+        var keys = Store(allowUnbound);
+        var code = keys.MintJoinCode("owner", role);
+        var agent = keys.Enroll(Key(1), "pc", "PC", "203.0.113.5", code.Code).Record!;
+        keys.Decide(agent.Id, AgentKeyStatus.Approved);
+        keys.Assign(agent.Id, null, role);
+        Account[] accounts = [new() { Id = "one", OwnerUserId = "owner" }, new() { Id = "two", OwnerUserId = "friend" }];
+        Assert.Equal(expected, CallerFor(keys, agent).DiscoverAgentAccounts(accounts).Count());
+    }
+
+    private Caller CallerFor(AgentKeyStore keys, AgentKeyRecord agent)
+    {
+        var http = new HttpContextAccessor
+        {
+            HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(TrackerClaims.AgentId, agent.Id)], AgentKeyAuthenticationHandler.SchemeName)) },
+        };
+        return new Caller(http, keys, new UserStore(_registry, Options.Create(new AuthOptions()), NullLogger<UserStore>.Instance));
     }
 
     public void Dispose()

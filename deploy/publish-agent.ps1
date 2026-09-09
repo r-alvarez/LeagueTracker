@@ -41,7 +41,9 @@ $version = "{0}.{1}.{2}.{3}" -f $now.Year, ($now.Month * 100 + $now.Day), ($now.
 $out = Join-Path $root "src\LeagueTracker.RenderAgent\bin\publish-$version"
 
 Write-Host "Publishing agent $version"
-dotnet publish (Join-Path $root "src\LeagueTracker.RenderAgent") -c Release -o $out -p:Version=$version --nologo -v q
+& (Join-Path $PSScriptRoot 'build-review-ui.ps1')
+& (Join-Path $PSScriptRoot 'get-webview-bootstrapper.ps1')
+dotnet publish (Join-Path $root "src\LeagueTracker.RenderAgent") -c Release -o $out -p:Version=$version -p:RequireReviewAssets=true --nologo -v q
 if ($LASTEXITCODE -ne 0) { throw "agent publish failed" }
 dotnet publish (Join-Path $root "src\LeagueTracker.ReplayLauncher") -c Release -o $out -p:Version=$version --nologo -v q
 if ($LASTEXITCODE -ne 0) { throw "replay launcher publish failed" }

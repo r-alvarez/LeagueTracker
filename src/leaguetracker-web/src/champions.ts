@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { assetUrl } from './reviewHost'
+
+const assetFetch = (url: string) => fetch(assetUrl(url))
 
 export interface ItemInfo {
   name: string
@@ -34,18 +37,18 @@ let cache: Assets | null = null
 let inflight: Promise<Assets> | null = null
 
 async function load(): Promise<Assets> {
-  const versions = (await fetch('https://ddragon.leagueoflegends.com/api/versions.json').then(r => r.json())) as string[]
+  const versions = (await assetFetch('https://ddragon.leagueoflegends.com/api/versions.json').then(r => r.json())) as string[]
   const v = versions[0]
   const cdn = `https://ddragon.leagueoflegends.com/cdn/${v}`
 
-  const champ = (await fetch(`${cdn}/data/en_US/champion.json`).then(r => r.json())) as {
+  const champ = (await assetFetch(`${cdn}/data/en_US/champion.json`).then(r => r.json())) as {
     data: Record<string, { id: string; name: string; key: string }>
   }
   const champs: Record<string, string> = {}
   const champNames: Record<number, string> = {}
   const champIds: Record<string, string> = {}
   for (const c of Object.values(champ.data)) {
-    const url = `${cdn}/img/champion/${c.id}.png`
+    const url = assetUrl(`${cdn}/img/champion/${c.id}.png`)
     // Alternate-mode variant sets ("Jade_Ezreal", "Strawberry_Briar") share
     // the real champion's display name; canonical ids never contain "_".
     // Variants may fill an empty slot but never overwrite the real champion.
@@ -61,26 +64,26 @@ async function load(): Promise<Assets> {
     champIds[norm(c.id)] = c.id
   }
 
-  const summ = (await fetch(`${cdn}/data/en_US/summoner.json`).then(r => r.json())) as {
+  const summ = (await assetFetch(`${cdn}/data/en_US/summoner.json`).then(r => r.json())) as {
     data: Record<string, { key: string; image: { full: string } }>
   }
   const spells: Record<number, string> = {}
   for (const s of Object.values(summ.data)) {
-    spells[parseInt(s.key, 10)] = `${cdn}/img/spell/${s.image.full}`
+    spells[parseInt(s.key, 10)] = assetUrl(`${cdn}/img/spell/${s.image.full}`)
   }
 
   // Rune trees: styles and every perk, keyed by id. Icon paths are served from
   // the version-less img root.
-  const trees = (await fetch(`${cdn}/data/en_US/runesReforged.json`).then(r => r.json())) as Array<{
+  const trees = (await assetFetch(`${cdn}/data/en_US/runesReforged.json`).then(r => r.json())) as Array<{
     id: number; icon: string; name: string
     slots: Array<{ runes: Array<{ id: number; icon: string; name: string }> }>
   }>
   const runes: Record<number, { icon: string; name: string }> = {}
   for (const tree of trees) {
-    runes[tree.id] = { icon: `https://ddragon.leagueoflegends.com/cdn/img/${tree.icon}`, name: tree.name }
+    runes[tree.id] = { icon: assetUrl(`https://ddragon.leagueoflegends.com/cdn/img/${tree.icon}`), name: tree.name }
     for (const slot of tree.slots) {
       for (const r of slot.runes) {
-        runes[r.id] = { icon: `https://ddragon.leagueoflegends.com/cdn/img/${r.icon}`, name: r.name }
+        runes[r.id] = { icon: assetUrl(`https://ddragon.leagueoflegends.com/cdn/img/${r.icon}`), name: r.name }
       }
     }
   }
@@ -90,12 +93,12 @@ async function load(): Promise<Assets> {
   const perks: Record<number, PerkInfo> = {}
   try {
     const cdragon = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/'
-    const raw = (await fetch(`${cdragon}v1/perks.json`).then(r => r.json())) as Array<{
+    const raw = (await assetFetch(`${cdragon}v1/perks.json`).then(r => r.json())) as Array<{
       id: number; name: string; iconPath: string; shortDesc: string
     }>
     for (const p of raw) {
       perks[p.id] = {
-        icon: cdragon + p.iconPath.replace(/^\/lol-game-data\/assets\//i, '').toLowerCase(),
+        icon: assetUrl(cdragon + p.iconPath.replace(/^\/lol-game-data\/assets\//i, '').toLowerCase()),
         name: p.name,
         desc: stripTags(p.shortDesc ?? ''),
       }
@@ -105,7 +108,7 @@ async function load(): Promise<Assets> {
   // Item names, cost and stat lines for in-game-style tooltips.
   const items: Record<number, ItemInfo> = {}
   try {
-    const itemData = (await fetch(`${cdn}/data/en_US/item.json`).then(r => r.json())) as {
+    const itemData = (await assetFetch(`${cdn}/data/en_US/item.json`).then(r => r.json())) as {
       data: Record<string, { name: string; gold: { total: number }; description: string }>
     }
     for (const [id, item] of Object.entries(itemData.data)) {
@@ -126,7 +129,7 @@ const abilityInflight: Record<string, Promise<void>> = {}
 
 async function loadAbilities(version: string, ddragonId: string): Promise<void> {
   try {
-    const raw = (await fetch(`https://ddragon.leagueoflegends.com/cdn/${version}/data/en_US/champion/${ddragonId}.json`)
+    const raw = (await assetFetch(`https://ddragon.leagueoflegends.com/cdn/${version}/data/en_US/champion/${ddragonId}.json`)
       .then(r => r.json())) as {
       data: Record<string, { spells: Array<{ id: string; name: string }>; passive: { name: string } }>
     }
@@ -271,7 +274,7 @@ export function useItemCatalog(): Array<{ id: number; name: string; gold: number
 // Summoner's Rift's minimap at the patch the icons come from.
 export function useMinimapUrl(): string | null {
   const assets = useAssets()
-  return assets?.version ? `https://ddragon.leagueoflegends.com/cdn/${assets.version}/img/map/map11.png` : null
+  return assets?.version ? assetUrl(`https://ddragon.leagueoflegends.com/cdn/${assets.version}/img/map/map11.png`) : null
 }
 
 export function useLoadoutIcons(): {
@@ -284,7 +287,7 @@ export function useLoadoutIcons(): {
   const assets = useAssets()
   return useMemo(() => ({
     item: (id: number) => (assets && assets.version && id > 0
-      ? `https://ddragon.leagueoflegends.com/cdn/${assets.version}/img/item/${id}.png`
+      ? assetUrl(`https://ddragon.leagueoflegends.com/cdn/${assets.version}/img/item/${id}.png`)
       : null),
     itemInfo: (id: number) => assets?.items[id] ?? null,
     spell: (id: number) => assets?.spells[id] ?? null,

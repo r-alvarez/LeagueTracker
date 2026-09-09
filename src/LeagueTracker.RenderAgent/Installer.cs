@@ -30,7 +30,7 @@ public static class Installer
     public static Process? OtherInstance(string exe) =>
         Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exe)).FirstOrDefault(p =>
         {
-            if (p.Id == Environment.ProcessId) return false;
+            if (p.Id == Environment.ProcessId || Review.ReviewApp.IsViewer(p)) return false;
             try { return string.Equals(p.MainModule?.FileName, exe, StringComparison.OrdinalIgnoreCase); }
             catch { return false; }
         });
@@ -133,10 +133,10 @@ public static class Installer
             var shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
             dynamic shortcut = ((dynamic)shell).CreateShortcut(ShortcutPath);
             shortcut.TargetPath = ExePath;
-            shortcut.Arguments = "--setup";
+            shortcut.Arguments = "--review";
             shortcut.WorkingDirectory = AppContext.BaseDirectory;
             shortcut.IconLocation = ExePath + ",0";
-            shortcut.Description = "LeagueTracker agent settings";
+            shortcut.Description = "Review your gameplay";
             shortcut.Save();
         }
         catch (Exception ex) { Log.Warn($"Could not create the Start Menu shortcut: {ex.Message}"); }

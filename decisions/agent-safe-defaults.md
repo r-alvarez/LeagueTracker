@@ -42,6 +42,12 @@ next recording, which is the one failure the owner would not choose.
 Rejected: pushing `MaxRecordingsGb=0` in the profile for keepers. It works
 today and breaks the day someone sets one without the other.
 
+Updated by the desktop review library: keep-all now disables every automatic
+eviction, including the free-space pass. The next recording is refused below
+the full `MinFreeGb` floor on either the recordings or scratch drive; admission
+previously used half that floor. Users can remove games from the library or
+choose bounded retention to make room. The settings UI describes this behaviour.
+
 ## 2026-08-26 — Post-game review is opt-in (G-N3)
 
 703b4b7 turned the review on for every recording agent. Thirty seconds

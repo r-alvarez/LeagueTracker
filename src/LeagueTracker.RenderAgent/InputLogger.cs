@@ -14,8 +14,8 @@ namespace LeagueTracker.RenderAgent;
 /// happened on screen, this shows what the hands were doing.
 ///
 /// The CSV schema (t_ms,event_type,input_name,value_a,value_b) deliberately
-/// matches Ascent's events.csv.gz, so old Ascent telemetry and ours can be
-/// read by the same review code. Written gzip-streamed next to the video.
+/// preserves compatibility with legacy events.csv.gz telemetry. Written
+/// gzip-streamed next to the video.
 public sealed class InputLogger : IDisposable
 {
     private readonly ConcurrentQueue<string> _pending = new();

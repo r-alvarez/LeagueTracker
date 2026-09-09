@@ -42,6 +42,25 @@ public class VodTelemetryBoundsTests : IDisposable
     private static IEnumerable<string> Actions(int count, long spacingMs = 100) =>
         Enumerable.Range(0, count).Select(i => $"{i * spacingMs},key_down,Q,0,0");
 
+    [Fact]
+    public void Backup_status_exposes_exact_bytes_and_sidecars_alone_are_not_a_video()
+    {
+        var vods = Vods();
+        var metadata = vods.TargetPath(MatchId, "meta.json")!;
+        Directory.CreateDirectory(Path.GetDirectoryName(metadata)!);
+        File.WriteAllText(metadata, """{"videoFile":"game.mp4"}""");
+        var sidecars = JsonSerializer.SerializeToElement(vods.Status(MatchId, includeApm: false));
+        Assert.False(sidecars.GetProperty("exists").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, sidecars.GetProperty("sizeBytes").ValueKind);
+
+        File.WriteAllBytes(vods.TargetPath(MatchId, "vod.mp4")!, new byte[1025]);
+        var uploaded = JsonSerializer.SerializeToElement(vods.Status(MatchId, includeApm: false));
+        Assert.True(uploaded.GetProperty("exists").GetBoolean());
+        Assert.Equal(1025, uploaded.GetProperty("sizeBytes").GetInt64());
+        Assert.Equal(0, uploaded.GetProperty("sizeMb").GetInt64());
+        Assert.Equal("game.mp4", uploaded.GetProperty("meta").GetProperty("videoFile").GetString());
+    }
+
     private Task<VodService.TelemetryRejection?> Store(Stream body) =>
         Vods().StoreTelemetryAsync(MatchId, body, GameSec, CancellationToken.None);
 

@@ -207,8 +207,8 @@ does not justify HLS streaming + a control relay for a single-user tool.
 
 ## 2026-07-09 — The Lens (Phase C, rescoped from per-match curves)
 
-**Per-match metric curves were demoted mid-phase** on user direction — dpm.lol's
-Lens (fight-level coaching scores) is the model, not u.gg's line charts. The
+**Per-match metric curves were demoted mid-phase** on user direction — the
+Lens prioritizes fight-level coaching scores over per-match line charts. The
 /api/matches/{id}/series endpoint was kept (built and cheap) but has no UI.
 
 **Fight detection is ours, from stored data**: kill events chain into a fight
@@ -415,7 +415,7 @@ mislabel, not on the plea. Existing rows keep old tags until a
 cards of dense numbers became six headline figures (record, KDA, DPM, CS@10,
 lane gold@10, deaths/game) with one context line each, and everything
 second-order (phase splits, vision, multikills, skillshots) behind a "More
-detail" expander. Modeled on how dpm.lol/tracker.gg front a summary strip:
+detail" expander. The summary strip uses progressive disclosure:
 the reader gets the state of the account in one glance and digs only on
 intent. LP deltas left off the tiles — the profile header already owns them.
 
@@ -455,17 +455,17 @@ Challenges stay only as the detail card's labeled lifetime-context strip.
 The footnote now states the box numbers are self-relative and never
 comparable between accounts.
 
-**LP history back-fill: one-time import from dpm.lol, maintenance endpoint
+**LP history back-fill: one-time third-party import, maintenance endpoint
 only.** Riot's API serves current LP and never history, so the months before
 this tracker existed can only come from a tracker that was already watching.
-dpm.lol's rank-history widget serves one closing tier/division/LP per active
+The source's rank-history widget serves one closing tier/division/LP per active
 day back to 2026-05-17; POST /api/lp/backfill (no UI, same pattern as
 /api/ranks/backfill) imports those days strictly before our earliest real
 snapshot, mirrors them to lp-history.csv, and is idempotent. Imported rows
 carry Wins=0/Losses=0 deliberately: per-game attribution requires the
 win+loss counter to move by exactly one across a bracket, so back-filled
 rows can extend the chart but can never mint a per-game LP delta. Per-game
-LP does not exist anywhere in dpm's API (lp field null account-wide,
+LP does not exist in the source's API (lp field null account-wide,
 verified on two accounts) - day-level resolution is the honest ceiling.
 
 **Missing per-game LP is shown, not hidden.** The LP-per-game chart used to
@@ -531,17 +531,14 @@ writes, so the park read-back just returns the world-reload corner.)
 render loop: when the local LCU gameflow phase turns `InProgress` (a real
 game - replay renders report `WatchInProgress`, so the two can never
 confuse each other), capture the game window and stop when the game ends.
-Chosen over a separate recorder app (Ascent et al) because the agent
+Chosen over a separate recorder app because the agent
 already owns every needed ingredient: LCU polling, window geometry,
-ffmpeg, and residency on the gaming PC. Inspecting Ascent's local install
-showed its recorder is a bundled headless OBS driven the same way - there
-is no secret in the capture, only in being resident and phase-aware.
+ffmpeg, and residency on the gaming PC.
 
 **Capture is ddagrab straight into NVENC, no CPU round-trip.** ffmpeg's
 ddagrab hands out D3D11 frames; h264_nvenc consumes them on the GPU, so
 recording while playing costs a hardware encode session and nothing else.
-Verified vs Ascent's own settings (1080p30 @ 5 Mbps CBR); ours records the
-native window at vbr cq26 (~1.5-3 GB per game at 1440p60), 60fps default
+The agent records the native window at vbr cq26 (~1.5-3 GB per game at 1440p60), 60fps default
 because mechanics review reads better at 60. One x264 fallback attempt if
 NVENC refuses to init, then the game is sat out (a broken encoder is
 deterministic - retrying every pass would spam ffmpeg all game).
@@ -711,8 +708,7 @@ moment-jumps assume the video starts at game clock 0:00 and say so
 
 **Why a second engine exists**: ddagrab's fragility is structural - Desktop
 Duplication sessions die on exclusive-fullscreen display switches, and ffmpeg
-has no recovery. Ascent never breaks because it bundles OBS (ascent-obs.exe =
-rebranded libobs), whose capture is composition/hook based. Segments make
+has no recovery. Composition-based capture offers another approach. Segments make
 ddagrab's deaths cosmetic, but Ruben's trust needs an engine where they don't
 happen at all - available BEFORE the next failure, not engineered after it.
 
@@ -721,7 +717,7 @@ through ScreenRecorderLib 6.6 (Windows Graphics Capture -> Media Foundation
 hardware H264, fragmented mp4) - DWM-composited capture that mode switches and
 alt-tab cannot interrupt. Video only: game-process-only audio stays ours
 (ProcessAudioCapture), paced PCM written beside the segment and muxed to AAC
-at finalize - whole-desktop loopback (Ascent included) can't promise
+at finalize - whole-desktop loopback can't promise
 Discord-free audio. Everything downstream (segments, naming ledger, inflight
 resume, telemetry merge, uploads) is engine-agnostic and unchanged; WGC
 startup failure falls back to ddagrab per segment. MF quality = 96 - cq
@@ -735,8 +731,8 @@ ScreenRecorderLib.dll.
 
 **Rejected:** replacing ddagrab outright (a week-hardened path traded for an
 unsoaked one); WGC frames piped raw into ffmpeg (~900MB/s memcpy tax at
-1440p60 vs ScreenRecorderLib's all-GPU pipeline); bundling headless OBS like
-Ascent (heaviest dependency for the same capture class WGC provides).
+1440p60 vs ScreenRecorderLib's all-GPU pipeline); bundling headless OBS
+(heaviest dependency for the same capture class WGC provides).
 
 ## 2026-08-04 — Recordings publish themselves to YouTube
 
@@ -1172,7 +1168,7 @@ rather than wraps (two rows of chips would push every page's content
 further down). The VOD moment strip stays proportional to video time even
 though close moments overlap on a 300px strip - the strip *is* the timeline.
 
-## 2026-08-15 — The dpm.lol back-fill leaves the repo
+## 2026-08-15 — The third-party LP back-fill leaves the repo
 
 **`DpmLpBackfillService` and `POST /api/lp/backfill` are deleted.** They were
 a one-time import of daily LP history from an unofficial third-party source
@@ -1226,7 +1222,7 @@ which would need a shared DB.
 **Frozen frames were the recordings drive, not the game.** Game 3 that day
 froze for 0.3-0.9s some twenty times in its first seven minutes (freezedetect
 on the local file: 55 back-to-back 124-byte duplicate frames at 108.0s while
-the game ran at 119 fps), yet Ascent's capture of the same game had none. The
+the game ran at 119 fps), yet a reference capture of the same game had none. The
 recordings folder sits on a spinning SMR disk that was, at capture start,
 still absorbing Game 2's 2.2 GB remux and its YouTube read - and the encoder's
 sink writer blocks on every write, so a disk stall is a run of duplicated
@@ -1236,7 +1232,7 @@ only the finished mp4 lands in RecordingsDir. Segment lookups resolve to
 whichever dir has the file, so parts left on the old path still finalize.
 
 **The colour shift on YouTube was a missing tag.** Decoded as BT.709, the WGC
-file's HUD colours match Ascent's tagged capture within a few levels, but the
+file's HUD colours match the tagged reference capture within a few levels, but the
 Media Foundation encoder leaves the matrix untagged and browsers/YouTube read
 untagged 1440p as BT.601 - lifted, yellowed greens. The finalize remux now adds
 `matrix_coefficients=1` when (and only when) the source carries no matrix tag;
@@ -1448,7 +1444,7 @@ this list, not on the next bug.
 
 **What still holds.** ScreenRecorderLib is MIT: clean to link in-process, no
 obligations. libobs is GPLv2, so it can only sit behind a process boundary
-(Ascent's `ascent-obs.exe`, Streamlabs) with the host process itself GPL'd and
+with the host process itself GPL'd and
 its source offered. But that is already our posture: the agent zip ships
 gyan's GPL ffmpeg as a separate exe. Commercially fine and common, but a
 commercial release owes third-party notices and a source offer for the GPL
@@ -1469,7 +1465,7 @@ Download weight stops mattering (+100 MB is normal for a game recorder).
 - *Keep ScreenRecorderLib, patch as needed.* Right for now; the HDR fork (FP16
   frame pool on HDR monitors + SDR-white/Reinhard shader, ~200 lines
   C++/HLSL) is a stopgap worth weeks, not a direction.
-- *libobs host process, Ascent-style* - recommended strategic move. Inherits
+- *libobs host process* - recommended strategic move. Inherits
   game-hook capture, HDR->SDR tone-mapping, per-application audio (OBS 28+,
   would retire ProcessAudioCapture), every vendor encoder. Host = a few
   hundred lines of C++ (GPL, sources offered) driven over IPC; the agent stays
@@ -1493,8 +1489,8 @@ source-offer obligation before anything ships to a paying customer.
 An HDR ultrawide, WGC in use, and the VOD is the 8-bit clamp of an Auto HDR
 game. Ruben's brief: the agent must work on that PC as it is - Ben "wouldn't
 know" about HDR settings and neither will customers - so the 17 Aug warning
-becomes a fix. Ascent gets this from its bundled OBS (28+ requests FP16 from
-WGC and tone-maps with SDR white + Reinhard); we get it from a patch on
+becomes a fix. OBS 28+ requests FP16 from
+WGC and tone-maps with SDR white + Reinhard; we get it from a patch on
 ScreenRecorderLib.
 
 **How.** `deploy/screenrecorderlib/hdr-tonemap.patch` on upstream v6.6.0
@@ -1674,7 +1670,6 @@ uploads paused whenever a game process existed (protecting the game, never
 finishing between back-to-back games), and delivery ran inline on the
 recording loop, so the recorder was not even watching for the next game while
 a multi-GB upload ran - a bug nobody had hit because nobody queued that fast.
-Ascent's "right away" is mostly small files (1080p30 @ 5 Mbps).
 
 **Delivery is its own loop.** Catch-up pass at start, a pass when a game
 finalizes, one every ten minutes regardless. The recorder hands off and is

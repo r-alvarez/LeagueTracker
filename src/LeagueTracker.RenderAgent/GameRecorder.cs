@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace LeagueTracker.RenderAgent;
 
-/// Records live games, Ascent-style: when the local player enters a real game
+/// Records live games: when the local player enters a real game
 /// (LCU gameflow "InProgress" - replay renders are "WatchInProgress" and never
 /// trigger this), the desktop is captured cropped to the game window and
 /// encoded on the GPU (NVENC), so playing cost is a video encode the graphics
@@ -30,6 +30,7 @@ namespace LeagueTracker.RenderAgent;
 /// Live Client API while recording.
 public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagueRoot, IReadOnlyList<TrackerClient> trackers)
 {
+    public static event Action? RecordingReady;
     private const string GameProcessName = "League of Legends";
 
     /// Phases where a game is imminent - poll fast so recording starts with
@@ -238,15 +239,16 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         }
 
         var record = ShouldRecord(session, out var skipReason);
-        if (record && config.MinFreeGb > 0)
+        if (record)
         {
-            // Better no recording than one that dies mid-game with the disk
-            // full: make room first, and skip if that was not enough.
-            if (FreeGb(RecordingsDir) < config.MinFreeGb / 2) EnforceDiskBudget();
-            if (FreeGb(RecordingsDir) is var free && free < config.MinFreeGb / 2)
+            var library = new Review.RecordingLibrary(RecordingsDir);
+            var policy = library.Settings(config);
+            EnforceDiskBudget();
+            var free = Math.Min(Review.RecordingLibrary.FreeGb(RecordingsDir), Review.RecordingLibrary.FreeGb(PartsDir));
+            if (free < policy.MinFreeGb)
             {
                 record = false;
-                skipReason = $"only {free:0.0} GB free on the recordings drive (needs {config.MinFreeGb / 2:0.0} GB)";
+                skipReason = $"only {free:0.0} GB free on a recording drive (needs {policy.MinFreeGb:0.0} GB); free space or unpin old recordings";
                 AgentStatus.LastError = $"not recording: {skipReason}";
             }
         }
@@ -435,6 +437,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             // YouTube, link, retention) - this loop goes straight back to
             // watching for the next game.
             if (deliverable) _deliverySignal.Release();
+            RecordingReady?.Invoke();
         }
         else
         {
@@ -632,6 +635,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     private async Task TryUploadVodAsync(string matchId, string baseName, CancellationToken ct)
     {
         string M(string ext) => Path.Combine(MetaDir, baseName + ext);
+        var includeVideo = config.UploadVods;
         foreach (var tracker in TrackersFor(baseName))
         {
             if (_refusedTrackers.Contains(tracker.Name)) continue;
@@ -641,11 +645,12 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                         File.Exists(M(".json")) ? M(".json") : null,
                         File.Exists(M(".events.csv.gz")) ? M(".events.csv.gz") : null,
                         File.Exists(M(".jpg")) ? M(".jpg") : null,
-                        includeVideo: config.UploadVods, ct))
+                        includeVideo: includeVideo, ct))
                 {
                     continue; // tracker doesn't know this match - not its account
                 }
                 File.WriteAllText(M(".uploaded"), tracker.Name);
+                if (includeVideo) File.WriteAllText(M(".review-published"), DateTime.UtcNow.ToString("O"));
                 Log.Info($"VOD {matchId} uploaded to {tracker.Name}");
                 return;
             }
@@ -820,44 +825,47 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         }
     }
 
-    /// Once a game is safely elsewhere - on YouTube (uploaded, processed by
-    /// YouTube, linked on the tracker) or, without YouTube, fully on the
-    /// tracker - the local mp4 is redundant and goes; the small sidecars
-    /// stay. Off on machines that keep files for debugging.
-    private async Task PruneIfSafeAsync(string baseName, CancellationToken ct)
+    internal async Task MarkPublishedIfSafeAsync(string baseName, CancellationToken ct)
     {
-        if (config.KeepRecordingsAfterPublish) return;
-        string M(string ext) => Path.Combine(MetaDir, baseName + ext);
-        var mp4 = Path.Combine(RecordingsDir, baseName + ".mp4");
-        if (!File.Exists(mp4) || File.Exists(M(".pruned"))) return;
+        try { await ConfirmPublicationAsync(baseName, ct); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            Log.Warn($"Could not verify backup for {baseName}: {ex.Message}");
+        }
+    }
 
-        bool safe;
+    private async Task ConfirmPublicationAsync(string baseName, CancellationToken ct)
+    {
+        string M(string ext) => Path.Combine(MetaDir, baseName + ext);
+        if (File.Exists(M(".review-published")) || File.Exists(M(".inflight.json"))) return;
+        if (!File.Exists(Path.Combine(RecordingsDir, baseName + ".mp4"))) return;
+        using var video = new FileStream(Path.Combine(RecordingsDir, baseName + ".mp4"), FileMode.Open, FileAccess.Read, FileShare.Read);
+        var safe = false;
         if (_youtube.Enabled)
         {
-            if (!File.Exists(M(".youtube.txt")) || !File.Exists(M(".linked"))) return;
-            var url = File.ReadAllText(M(".youtube.txt")).Trim();
-            if (YouTubeUploader.VideoIdOf(url) is not { } id) return;
-            safe = await _youtube.IsProcessedAsync(id, ct) is true;
+            if (File.Exists(M(".youtube.txt")) && File.Exists(M(".linked")))
+            {
+                var url = File.ReadAllText(M(".youtube.txt")).Trim();
+                if (YouTubeUploader.VideoIdOf(url) is { } id)
+                    safe = await _youtube.IsProcessedAsync(id, ct) is true;
+            }
         }
-        else
+        if (!safe && File.Exists(M(".uploaded")))
         {
-            safe = config.UploadVods && File.Exists(M(".uploaded"));
+            using var metadataFile = new FileStream(M(".json"), FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var metadata = await JsonDocument.ParseAsync(metadataFile, cancellationToken: ct);
+            if (metadata.RootElement.ValueKind == JsonValueKind.Object
+                && metadata.RootElement.TryGetProperty("matchId", out var match) && match.ValueKind == JsonValueKind.String && match.GetString() is { Length: > 0 } matchId)
+                foreach (var tracker in TrackersFor(baseName).Where(t => !_refusedTrackers.Contains(t.Name)))
+                    if (await tracker.HasVodBackupAsync(matchId, video.Length, metadata.RootElement, ct))
+                    {
+                        File.WriteAllText(M(".review-published"), DateTime.UtcNow.ToString("O"));
+                        return;
+                    }
         }
-        if (!safe) return;
-
-        var sizeMb = new FileInfo(mp4).Length / 1024 / 1024;
-        try
-        {
-            File.Delete(mp4);
-            TryDelete(Path.ChangeExtension(mp4, ".pcm"));
-            TryDelete(M(".ytsession.json"));
-            File.WriteAllText(M(".pruned"), DateTime.UtcNow.ToString("O"));
-            Log.Info($"Recording {baseName}.mp4 ({sizeMb} MB) removed - safely on {(_youtube.Enabled ? "YouTube" : "the tracker")}; sidecars kept");
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"Could not remove {baseName}.mp4: {ex.Message} (next pass retries)");
-        }
+        // Publication is a library attribute now, not permission to immediately
+        // delete the video. Only the bounded retention pass evicts old games.
+        if (safe) File.WriteAllText(M(".review-published"), DateTime.UtcNow.ToString("O"));
     }
 
     /// A finished mp4 with no sidecar is footage the sweep cannot see: no
@@ -952,79 +960,20 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         }
     }
 
-    /// Whether a game is already somewhere other than this disk: published
-    /// to YouTube and linked on the tracker, or (no YouTube) fully uploaded.
-    private bool IsElsewhere(string baseName)
-    {
-        string M(string ext) => Path.Combine(MetaDir, baseName + ext);
-        return _youtube.Enabled
-            ? File.Exists(M(".youtube.txt")) && File.Exists(M(".linked"))
-            : File.Exists(M(".uploaded"));
-    }
-
-    private static double FreeGb(string dir)
-    {
-        try { return new DriveInfo(Path.GetPathRoot(Path.GetFullPath(dir))!).AvailableFreeSpace / 1024d / 1024 / 1024; }
-        catch { return double.PositiveInfinity; }
-    }
-
-    /// The disk is a friend's: recordings never grow past MaxRecordingsGb or
-    /// eat into the last MinFreeGb. Oldest first, games that are safely
-    /// elsewhere before games that are not - and dropping one of those is
-    /// said out loud on the Data page, not just in the log.
     private void EnforceDiskBudget()
     {
-        // KeepRecordingsAfterPublish is the owner saying these files stay,
-        // so the ceiling is off for them; only the free-space floor remains,
-        // because a full disk kills the next recording (audit G-N2).
-        var ceilingGb = config.KeepRecordingsAfterPublish ? 0 : config.MaxRecordingsGb;
-        if (ceilingGb <= 0 && config.MinFreeGb <= 0) return;
-        if (!Directory.Exists(RecordingsDir)) return;
-        // Only what this agent recorded counts, and only that is ever removed
-        // - the folder may be the person's own Videos (audit G-N1).
-        var files = new DirectoryInfo(RecordingsDir).GetFiles("*.mp4")
-            .Where(f => !f.Name.EndsWith(".part.mp4", StringComparison.OrdinalIgnoreCase) && RecordingLedger.IsOurs(MetaDir, Path.GetFileNameWithoutExtension(f.Name)))
-            .OrderBy(f => f.LastWriteTimeUtc).ToList();
-        var totalGb = files.Sum(f => f.Length) / 1024d / 1024 / 1024;
-        bool Over() => (ceilingGb > 0 && totalGb > ceilingGb)
-                    || (config.MinFreeGb > 0 && FreeGb(RecordingsDir) < config.MinFreeGb);
-        if (!Over()) return;
-
-        // A file written in the last few minutes may still be finalizing on
-        // the recorder loop; the delivery loop (this one) owns the uploads.
-        var settled = DateTime.UtcNow.AddMinutes(-10);
-        var dropped = 0;
-        foreach (var pass in new[] { true, false })   // elsewhere first, then not
+        try
         {
-            foreach (var f in files.ToList())
-            {
-                if (!Over()) break;
-                var baseName = Path.GetFileNameWithoutExtension(f.Name);
-                if (f.LastWriteTimeUtc > settled || IsElsewhere(baseName) != pass) continue;
-                try
-                {
-                    var mb = f.Length / 1024 / 1024;
-                    f.Delete();
-                    TryDelete(Path.ChangeExtension(f.FullName, ".pcm"));
-                    TryDelete(Path.Combine(MetaDir, baseName + ".ytsession.json"));
-                    File.WriteAllText(Path.Combine(MetaDir, baseName + (pass ? ".pruned" : ".dropped")), DateTime.UtcNow.ToString("O"));
-                    files.Remove(f);
-                    totalGb -= mb / 1024d;
-                    if (pass) Log.Info($"Recording {baseName}.mp4 ({mb} MB) removed to stay within the disk budget - it is safely elsewhere");
-                    else
-                    {
-                        dropped++;
-                        Log.Warn($"Recording {baseName}.mp4 ({mb} MB) DROPPED UNPUBLISHED to stay within the disk budget ({ceilingGb:0} GB / {config.MinFreeGb:0} GB free) - uploads are not keeping up");
-                    }
-                }
-                catch (Exception ex) { Log.Warn($"Could not remove {f.Name}: {ex.Message}"); }
-            }
+            var library = new Review.RecordingLibrary(RecordingsDir);
+            var removed = library.Prune(library.Settings(config), config.UploadVods || _youtube.Enabled);
+            if (removed > 0) Log.Info($"Recording library: removed {removed} old unpinned recording(s)");
         }
-        if (dropped > 0) AgentStatus.LastError = $"disk budget: {dropped} unpublished recording(s) dropped - uploads are not keeping up with games (raise MaxRecordingsGb or check YouTube/tracker uploads)";
+        catch (Exception ex) { Log.Warn($"Recording library cleanup: {ex.Message}"); }
     }
 
     private async Task SweepUnuploadedAsync(CancellationToken ct)
     {
+        EnforceDiskBudget(); // Local-only libraries rotate too.
         if (!config.UploadVods && !config.UploadVodSidecars && !_youtube.Enabled) return;
         // Catch-up uploads run unattended (typically right after a wake) -
         // a multi-GB VOD upload must not lose the machine halfway.
@@ -1035,12 +984,14 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         foreach (var sidecar in Directory.EnumerateFiles(MetaDir, "*.json").OrderBy(f => f))
         {
             if (sidecar.EndsWith(".inflight.json", StringComparison.OrdinalIgnoreCase)
+                || sidecar.EndsWith(".apm.json", StringComparison.OrdinalIgnoreCase)
+                || Path.GetFileName(sidecar) == "library-settings.json"
                 || sidecar.EndsWith(".ytsession.json", StringComparison.OrdinalIgnoreCase)) continue;
             var baseName = Path.GetFileNameWithoutExtension(sidecar);
             var delivered = File.Exists(Path.Combine(MetaDir, baseName + ".uploaded"));
             if (delivered && !_youtube.Enabled)
             {
-                await PruneIfSafeAsync(baseName, ct); // nothing left owed for this game but the file itself
+                await MarkPublishedIfSafeAsync(baseName, ct);
                 continue;
             }
             string? matchId;
@@ -1095,7 +1046,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 await TryUploadVodAsync(matchId, baseName, ct);
             }
             if (youtubeGo) youtubeGo = await TryPublishToYouTubeAsync(matchId, baseName, ct);
-            await PruneIfSafeAsync(baseName, ct);
+            await MarkPublishedIfSafeAsync(baseName, ct);
         }
     }
 
@@ -1639,6 +1590,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         // The content changed (or is brand new) - any earlier upload of this
         // game's first chunk is stale now.
         TryDelete(Path.Combine(MetaDir, state.BaseName + ".uploaded"));
+        TryDelete(Path.Combine(MetaDir, state.BaseName + ".review-published"));
+        TryDelete(Path.Combine(MetaDir, state.BaseName + ".apm.json"));
         CleanupInflight(state);
     }
 
@@ -2094,7 +2047,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var pcm = Path.ChangeExtension(src, ".pcm");
         // NVENC stamps sRGB transfer (YouTube darkens for it) and a genuine
         // BT.601 matrix; the Media Foundation (WGC) encoder leaves the matrix
-        // untagged although it converts BT.709 (measured against Ascent's
+        // untagged although it converts BT.709 (measured against a reference
         // tagged capture of the same game, 15 Aug 2026) - untagged 1440p is
         // read as BT.601 by browsers/YouTube's transcoder, which lifts and
         // yellows the greens. Tag what each encoder actually did.

@@ -102,7 +102,7 @@ rendered clip on this PC to see; it is the same one-line rule.
 Ruben's review of the merged stage against the old VOD card ("our clean
 version"): the current-moment line was out of place under the Footage tab
 wherever it went; the viewer and the list split the card half and half;
-and the marker strip under the video, the Ascent-like timeline of the
+and the marker strip under the video, the timeline of the
 whole game, had gone with VodReview.
 
 - The viewer column is two thirds (`2fr` / `1fr`, list at least 280px).

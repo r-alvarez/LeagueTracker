@@ -5,7 +5,6 @@
          writes agent.log next to the exe instead. -->
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
-    <!-- WinForms only for the tray icon (NotifyIcon) and the install message box. -->
     <UseWindowsForms>true</UseWindowsForms>
     <!-- deploy/publish-agent.ps1 stamps the real version (yyyy.Mdd.HHmm.ss)
          (UTC, to the second); a dev build is 0.0.0.0 and never self-updates over a published one. -->
@@ -23,6 +22,8 @@
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
     <ApplicationIcon>Assets/app.ico</ApplicationIcon>
+    <ReviewUiArchive Condition="'$(ReviewUiArchive)' == ''">Assets\review-ui.zip</ReviewUiArchive>
+    <WebViewBootstrapper Condition="'$(WebViewBootstrapper)' == ''">Assets\MicrosoftEdgeWebview2Setup.exe</WebViewBootstrapper>
   </PropertyGroup>
 
   <ItemGroup>
@@ -35,14 +36,34 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="LeagueTracker.RenderAgent.Tests" />
+    <InternalsVisibleTo Include="LeagueTracker.ReviewSmoke" />
     <PackageReference Include="ScreenRecorderLib" Version="6.6.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <EmbeddedResource Include="$(ReviewUiArchive)" LogicalName="review-ui.zip" Condition="Exists('$(ReviewUiArchive)')" />
+    <EmbeddedResource Include="$(WebViewBootstrapper)" LogicalName="webview2-bootstrapper.exe" Condition="Exists('$(WebViewBootstrapper)')" />
+    <None Update="Assets\review-THIRD-PARTY-NOTICES.md" Link="review-THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <Target Name="RequireReviewAssets" BeforeTargets="PrepareForBuild;PrepareForPublish" Condition="'$(RequireReviewAssets)' == 'true'">
+    <Error Condition="!Exists('$(ReviewUiArchive)')" Text="Build the desktop UI with deploy/build-review-ui.ps1 before publishing." />
+    <Error Condition="!Exists('$(WebViewBootstrapper)')" Text="Run deploy/get-webview-bootstrapper.ps1 before publishing." />
+  </Target>
+
+  <!-- The SDK supplies WPF references as well; this host only uses WinForms. -->
+  <Target Name="RemoveUnusedWebViewWpf" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="$([System.String]::Copy('%(Reference.Identity)').EndsWith('Microsoft.Web.WebView2.Wpf.dll'))" />
+    </ItemGroup>
+  </Target>
 
   <!-- ScreenRecorderLib is a mixed-mode (C++/CLI) image: it cannot load out
        of a single-file bundle (BadImageFormatException) and must ship as a
        loose dll next to the exe - deploys copy it alongside. -->
   <Target Name="KeepMixedModeAssembliesLoose" AfterTargets="ComputeResolvedFilesToPublishList">
     <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.RelativePath)' == 'runtimes\win-x64\native\WebView2Loader.dll' Or '%(ResolvedFileToPublish.Filename)' == 'aspnetcorev2_inprocess'" />
       <ResolvedFileToPublish Condition="'%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'ScreenRecorderLib.dll'">
         <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       </ResolvedFileToPublish>

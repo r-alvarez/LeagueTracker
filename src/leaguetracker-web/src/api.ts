@@ -5,7 +5,11 @@ import type { AdminUsers, AgentKey, AnalyticsSummary, BuildVersion, ClaimInfo, I
 /// Every API call goes through here: account-scoped URL rewriting, the
 /// session cookie, and the CSRF header on writes. Bare fetch() elsewhere is
 /// a bug waiting to 403.
+let reviewTransport: ((url: string, init: RequestInit) => Promise<Response>) | null = null
+export function setReviewTransport(transport: (url: string, init: RequestInit) => Promise<Response>) { reviewTransport = transport }
+
 export function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  if (reviewTransport) return reviewTransport(url, init)
   const method = (init.method ?? 'GET').toUpperCase()
   const headers = new Headers(init.headers)
   if (method !== 'GET' && method !== 'HEAD') for (const [k, v] of Object.entries(csrfHeaders)) headers.set(k, v)

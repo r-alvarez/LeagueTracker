@@ -473,12 +473,10 @@ app.MapGet("/api/agent/ping", (Caller caller) =>
 // puuids, so "who was playing" is matched on the identity that never
 // renames), a renderer gets everyone's. An unbound key gets everyone's only
 // while the rollout flag says so.
-app.MapGet("/api/agent/accounts", (AccountRegistry registry, Caller caller, AgentKeyStore keys) =>
+app.MapGet("/api/agent/accounts", (AccountRegistry registry, Caller caller) =>
 {
     var agent = caller.Agent!;
-    var reachable = agent.Role is AgentRole.Renderer || (!agent.IsBound && keys.AllowUnbound)
-        ? registry.All
-        : registry.OwnedBy(agent.OwnerUserId ?? "");
+    var reachable = caller.DiscoverAgentAccounts(registry.All).ToArray();
     return Results.Ok(new
     {
         Default = reachable.FirstOrDefault()?.Slug ?? registry.Default.Slug,
@@ -777,8 +775,8 @@ owner.MapDelete("/matches/{id}/clips/{index:int}", (string id, int index, ClipSe
 
 // --- Live-game VODs (recorded by the agent while the player was in game) ---------
 
-media.MapGet("/matches/{id}/vod/status", (string id, VodService vods) =>
-    Results.Ok(vods.Status(id)));
+media.MapGet("/matches/{id}/vod/status", (string id, bool? includeApm, VodService vods) =>
+    Results.Ok(vods.Status(id, includeApm ?? true)));
 
 media.MapGet("/matches/{id}/vod", (string id, VodService vods) =>
     vods.VideoPath(id) is { } path

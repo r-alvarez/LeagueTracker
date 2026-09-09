@@ -517,6 +517,7 @@ export interface RenderQueueRow {
 }
 
 export interface FullGameStatus {
+  playbackUrl?: string
   state: 'none' | 'requested' | 'rendering' | 'done' | 'failed'
   keep: boolean
   sizeMb: number | null
@@ -557,6 +558,9 @@ export interface VodApm {
 }
 
 export interface VodStatus {
+  playbackUrl?: string
+  posterUrl?: string
+  local?: boolean
   exists: boolean
   sizeMb: number | null
   youtubeUrl: string | null

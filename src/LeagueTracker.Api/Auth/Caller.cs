@@ -32,6 +32,9 @@ public sealed class Caller(IHttpContextAccessor http, AgentKeyStore keys, UserSt
 
     public bool IsAuthenticated => IsUser || IsAgent;
 
+    public IEnumerable<Accounts.Account> DiscoverAgentAccounts(IEnumerable<Accounts.Account> accounts) =>
+        Agent?.Role is Registry.AgentRole.Renderer ? accounts : accounts.Where(Owns);
+
     // The owner test every policy reduces to: admin, or the account's owner,
     // or an agent whose owner is the account's owner - or that carries an
     // explicit grant for this account (the shared-PC case: a friend's games
