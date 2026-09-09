@@ -70,6 +70,7 @@ builder.Services.AddScoped<ReviewService>();
 builder.Services.AddScoped<ReviewReelService>();
 builder.Services.AddScoped<GameplanService>();
 builder.Services.AddPerAccount<RenderLeaseService>();
+builder.Services.AddSingleton<RenderPendingCount>();
 builder.Services.AddSingleton<AgentRegistry>();
 builder.Services.AddSingleton<AgentKeyStore>();
 builder.Services.AddHttpClient("github", c =>
@@ -449,22 +450,11 @@ app.MapPost("/api/agent/heartbeat", (AgentHeartbeat beat, Caller caller, AgentRe
 app.MapGet("/api/agent/agents", (AgentRegistry agents) => Results.Ok(agents.Snapshot())).RequireAuthorization(Policies.Agent);
 
 // The waker on the NAS needs one bit - is render work waiting anywhere -
-// and it has no identity; counts only, across every account.
-app.MapGet("/api/render/pending", async (AccountRegistry registry, AccountScopes scopes, AccountInitializer initializer, CancellationToken ct) =>
-{
-    var pending = 0;
-    foreach (var account in registry.All.Where(initializer.IsReady))
-    {
-        using var scope = scopes.Create(account);
-        var leases = scope.ServiceProvider.GetRequiredService<RenderLeaseService>();
-        var rows = (await scope.ServiceProvider.GetRequiredService<ClipService>().QueueAsync(leases, ct))
-            .Concat(await scope.ServiceProvider.GetRequiredService<FullGameService>().QueueRowsAsync(leases, ct));
-        // The queue rows are the anonymous shapes the Data page renders; the
-        // status is the one field this needs.
-        pending += rows.Count(r => System.Text.Json.JsonSerializer.SerializeToElement(r).GetProperty("Status").GetString() is "pending" or "partial");
-    }
-    return Results.Ok(new { pending });
-});
+// counted across every account. It knocks with an agent key like any other
+// machine: anonymous, this was a full-population scan for anyone on the
+// internet to trigger in a loop (audit A5).
+app.MapGet("/api/render/pending", async (RenderPendingCount count, CancellationToken ct) =>
+    Results.Ok(new { pending = await count.GetAsync(ct) })).RequireAuthorization(Policies.Agent);
 
 app.MapGet("/api/agent/release", (AgentRegistry agents) =>
     agents.Latest() is { } release ? Results.Ok(release) : Results.NoContent());
