@@ -33,12 +33,16 @@ is not in front of this deployment yet. Deploy-side decisions are in
   (`AddedByUserId`, migration `AccountAddedBy`); the tenancy work was asked
   to avoid a second migration so the snapshot merged clean.
 
-## B2a - secrets only to the operator's machines
+## B2a - shared secrets only to the operator's machines
 - Rather than stripping *Secret*/*Token* for everyone (the audit's
-  stop-gap, which turns YouTube off for the household too), the profile
-  keeps them for keys bound to an admin. Everyone else gets the profile with
-  YouTubeUpload=false so their agent records without failing uploads. The
-  refresh-token rotation is Ruben's manual step.
+  stop-gap, which turns YouTube off for the household too), the SHARED
+  profile secrets go to keys bound to an admin only. A secret in a key's own
+  `Agent__Profiles__<keyid>__*` block was assigned to that key on purpose
+  and always reaches it (Ben's own channel keeps working). A machine left
+  with no refresh token gets YouTubeUpload=false so it records without
+  failing uploads. The refresh-token rotation is Ruben's manual step.
+- Gotcha: Ruben's own recorder key must be BOUND to his admin user on the
+  Machines page, or it stops receiving the shared token.
 
 ## A6 - resolve endpoint now, search UI later
 - Trimming `/api/accounts` to the caller's own accounts broke client-side
