@@ -86,6 +86,43 @@ public class MatchIngestResilienceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_repaired_timeline_lands_in_the_raw_file_and_on_the_match()
+    {
+        var ingest = Ingest();
+        var match = await ingest.BuildMatchAsync(MatchJson(), null, Me, withRanks: false, ranksAtGameTime: false, CancellationToken.None);
+        match.RawPath = await ingest.SaveRawAsync(match.Id, MatchJson(), null, CancellationToken.None);
+        var stored = (await ingest.ReadStoredAsync(match, CancellationToken.None))!;
+        Assert.Null(stored.TimelineRaw);
+
+        await ingest.ApplyRepairedTimelineAsync(match, stored.MatchRaw, TimelineJson(60_000L), Me, CancellationToken.None);
+
+        Assert.True(match.HasTimeline);
+        Assert.NotNull((await ingest.ReadStoredAsync(match, CancellationToken.None))!.TimelineRaw);
+    }
+
+    [Fact]
+    public async Task A_timeline_the_analyzer_refuses_is_still_kept_on_disk_for_a_reprocess()
+    {
+        var ingest = Ingest();
+        var match = await ingest.BuildMatchAsync(MatchJson(), null, Me, withRanks: false, ranksAtGameTime: false, CancellationToken.None);
+        match.RawPath = await ingest.SaveRawAsync(match.Id, MatchJson(), null, CancellationToken.None);
+
+        await ingest.ApplyRepairedTimelineAsync(match, MatchJson(), TimelineJson("not-a-number"), Me, CancellationToken.None);
+
+        Assert.False(match.HasTimeline);
+        Assert.NotNull((await ingest.ReadStoredAsync(match, CancellationToken.None))!.TimelineRaw);
+    }
+
+    [Fact]
+    public async Task A_match_whose_raw_file_is_gone_cannot_be_repaired()
+    {
+        var ingest = Ingest();
+        var match = await ingest.BuildMatchAsync(MatchJson(), null, Me, withRanks: false, ranksAtGameTime: false, CancellationToken.None);
+
+        Assert.Null(await ingest.ReadStoredAsync(match, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task A_match_without_participants_is_unprocessable_for_good()
     {
         var ex = await Assert.ThrowsAsync<UnprocessableMatchException>(() =>

@@ -32,6 +32,13 @@ public sealed class MatchPollerService(
     private static readonly TimeSpan MaxSleep = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan MinSleep = TimeSpan.FromSeconds(1);
 
+    // Riot keeps match-v5 data for about two years; a timeline older than
+    // that is gone and not worth a call. A 404 inside the window is asked
+    // about again a day later - Riot has published timelines late before.
+    private static readonly TimeSpan TimelineRetention = TimeSpan.FromDays(730);
+    private static readonly TimeSpan TimelineRecheck = TimeSpan.FromHours(24);
+    private const int TimelineRepairsPerPass = 5;
+
     private readonly RiotOptions _options = options.Value;
     // Per-account pass state: first pass, the retention and alias clocks, and
     // when each account is next due.
@@ -39,6 +46,7 @@ public sealed class MatchPollerService(
     private readonly Dictionary<string, DateTime> _lastRetentionSweepUtc = [];
     private readonly Dictionary<string, DateTime> _lastAliasCheckUtc = [];
     private readonly Dictionary<string, DateTime> _nextDueUtc = [];
+    private readonly Dictionary<string, DateTime> _timelineRetryAfterUtc = [];
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -289,6 +297,69 @@ public sealed class MatchPollerService(
             live.CaptureArrived();
             await scope.ServiceProvider.GetRequiredService<ReplayArchiveService>().SweepAsync(puuid, ct);
         }
+
+        await RepairTimelinesAsync(account, live, puuid, db, riot, ingest, ct);
+    }
+
+    // Idle passes only: five calls a pass is noise on the key's budget, but at
+    // the live cadence it would not be, and the live banner is the product.
+    private async Task RepairTimelinesAsync(
+        Account account, LiveGameState live, string puuid, LeagueDbContext db, RiotApiClient riot,
+        MatchIngestService ingest, CancellationToken ct)
+    {
+        if (live.Current is not null || live.FastCapturePending) return;
+
+        var cutoff = DateTime.UtcNow - TimelineRetention;
+        var timelineLess = await db.Matches
+            .Where(m => !m.HasTimeline && m.GameEndUtc >= cutoff)
+            .OrderByDescending(m => m.GameEndUtc)
+            .Select(m => m.Id)
+            .ToListAsync(ct);
+        var now = DateTime.UtcNow;
+        var due = timelineLess.Where(id => _timelineRetryAfterUtc.GetValueOrDefault(id) <= now).Take(TimelineRepairsPerPass).ToList();
+
+        var repaired = 0;
+        foreach (var matchId in due)
+        {
+            var match = await db.Matches.Include(m => m.Participants).FirstAsync(m => m.Id == matchId, ct);
+            if (await ingest.ReadStoredAsync(match, ct) is not { } stored)
+            {
+                logger.LogWarning("No raw file for {MatchId}; its timeline cannot be repaired", matchId);
+                _timelineRetryAfterUtc[matchId] = now + TimelineRecheck;
+                continue;
+            }
+            string timelineRaw;
+            try
+            {
+                // A timeline already on disk is one the analyzer refused last
+                // time - retrying it costs no Riot call.
+                timelineRaw = stored.TimelineRaw ?? await riot.GetTimelineRawAsync(matchId, ct);
+            }
+            catch (RiotApiException ex) when (ex.StatusCode is 404)
+            {
+                _timelineRetryAfterUtc[matchId] = now + TimelineRecheck;
+                continue;
+            }
+            catch (RiotApiException ex) when (!ex.IsAuthFailure)
+            {
+                logger.LogWarning("Timeline repair for {Account} stops for this pass: Riot answered {Status}", account.Slug, ex.StatusCode);
+                break;
+            }
+            try
+            {
+                await ingest.ApplyRepairedTimelineAsync(match, stored.MatchRaw, timelineRaw, puuid, ct);
+                await db.SaveChangesAsync(ct);
+                if (match.HasTimeline) repaired++;
+                else _timelineRetryAfterUtc[matchId] = now + TimelineRecheck;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Timeline repair failed for {MatchId}", matchId);
+                _timelineRetryAfterUtc[matchId] = now + TimelineRecheck;
+            }
+            db.ChangeTracker.Clear();   // a timeline's position samples run to thousands of rows
+        }
+        if (repaired > 0) logger.LogInformation("Repaired the timeline of {Count} match(es) for {Account}", repaired, account.Slug);
     }
 
     private async Task IngestNewMatchAsync(
@@ -301,9 +372,10 @@ public sealed class MatchPollerService(
         {
             timelineRaw = await riot.GetTimelineRawAsync(matchId, ct);
         }
-        catch (RiotApiException ex) when (!ex.IsAuthFailure)
+        catch (RiotApiException ex) when (ex.StatusCode is 404)
         {
-            logger.LogWarning("Timeline unavailable for {MatchId}: {Message}", matchId, ex.Message);
+            // A 5xx here used to store the match without its timeline for good (audit E3).
+            logger.LogWarning("No timeline for {MatchId} yet; the repair pass will ask again", matchId);
         }
 
         var match = await ingest.BuildMatchAsync(matchRaw, timelineRaw, puuid, withRanks: true, ranksAtGameTime: true, ct);

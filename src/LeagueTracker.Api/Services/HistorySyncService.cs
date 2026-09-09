@@ -144,9 +144,9 @@ public sealed class HistorySyncService(
             {
                 timelineRaw = await riot.GetTimelineRawAsync(matchId, ct);
             }
-            catch (RiotApiException ex) when (!ex.IsAuthFailure)
+            catch (RiotApiException ex) when (ex.StatusCode is 404)
             {
-                logger.LogWarning("Timeline unavailable for {MatchId}: {Message}", matchId, ex.Message);
+                logger.LogWarning("No timeline for {MatchId}; the poller's repair pass will ask again", matchId);
             }
         }
 
