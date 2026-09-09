@@ -1664,6 +1664,10 @@ a.signin-cta { display: block; }
 .index-account:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .index-label { font-weight: 650; font-size: 15px; }
 .index-account .mut, .notfound-accounts .mut { font-size: 12.5px; }
+.index-heading { align-self: flex-start; margin: 0 0 8px; font-size: 12.5px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.index-accounts + .index-open { margin-top: 14px; }
+.index-open .account-add { display: flex; }
+.index-open .account-add input { flex: 1 1 140px; width: auto; }
 .notfound-accounts { margin-top: 4px; }
 .notfound-accounts a { display: block; padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; text-decoration: none; color: var(--ink); background: var(--surface-inset); }
 .notfound-accounts a:hover { border-color: var(--border-strong); }
