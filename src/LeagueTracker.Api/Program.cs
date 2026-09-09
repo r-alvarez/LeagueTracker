@@ -87,6 +87,7 @@ builder.Services.AddHttpClient(Auth0ManagementClient.HttpClientName, c => c.Time
 builder.Services.AddSingleton<Auth0ManagementClient>();
 builder.Services.AddScoped<VodService>();
 builder.Services.AddPerAccount<LiveGameState>();
+builder.Services.AddSingleton<PollerHeartbeat>();
 builder.Services.AddHostedService<MatchPollerService>();
 
 // Vite dev server origin - Development only: with a session cookie in play a
@@ -384,6 +385,29 @@ app.MapGet("/api/version", () => Results.Ok(new
     StartedUtc = BuildStamp.StartedUtc,
     app.Environment.EnvironmentName,
 }));
+
+// Probes for Docker and whoever runs the stack: liveness is "the process
+// answers", readiness adds the registry database and a recent poll pass. Both
+// anonymous on purpose - a probe has no cookie, and a 401 is not a health
+// verdict.
+app.MapGet("/healthz", () => Results.Text("ok"));
+app.MapGet("/readyz", async (DatabaseServer server, PollerHeartbeat poller, CancellationToken ct) =>
+{
+    List<string> problems = [];
+    try
+    {
+        await using var connection = await server.DataSource.OpenConnectionAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1";
+        await command.ExecuteScalarAsync(ct);
+    }
+    catch (Exception ex)
+    {
+        problems.Add($"database: {ex.GetBaseException().Message}");
+    }
+    if (!poller.IsFresh) problems.Add($"poller: no pass since {poller.LastPassUtc:O}");
+    return problems is [] ? Results.Ok(new { ready = true }) : Results.Json(new { ready = false, problems }, statusCode: StatusCodes.Status503ServiceUnavailable);
+});
 
 app.MapPost("/api/agent/enroll", (EnrollRequest request, HttpContext http, AgentKeyStore keys) =>
 {
