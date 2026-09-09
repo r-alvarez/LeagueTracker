@@ -35,7 +35,7 @@ public static class Reports
                 var v = verdicts.GetValueOrDefault(m.Id);
                 return new[]
                 {
-                    m.Id, m.GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), m.IsRanked.ToString(), (m.DurationSec < 300).ToString(),
+                    m.Id, m.GameCreationUtc.ToString("yyyy-MM-ddTHH:mm'Z'"), m.IsRanked.ToString(), (m.DurationSec < 300).ToString(),
                     m.QueueName, m.QueueId.ToString(), m.GameMode, Math.Round(durMin, 1).ToString(i), m.Champion, m.Position, m.Win.ToString(),
                     m.OpponentChampion ?? "", m.AllyJungler ?? "", m.EnemyJungler ?? "",
                     m.Kills.ToString(), m.Deaths.ToString(), m.Assists.ToString(),
@@ -89,7 +89,7 @@ public static class Reports
         var headers = prefix.Concat(keyList).ToArray();
         return Csv(headers, parsed.Select(p => (string[])
             [
-                p.M.Id, p.M.GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), p.M.Champion, p.M.Position, p.M.Win.ToString(),
+                p.M.Id, p.M.GameCreationUtc.ToString("yyyy-MM-ddTHH:mm'Z'"), p.M.Champion, p.M.Position, p.M.Win.ToString(),
                 .. keyList.Select(k => p.Fields.TryGetValue(k, out var v) ? v : ""),
             ]));
     }
@@ -112,7 +112,7 @@ public static class Reports
             foreach (var c in points)
             {
                 rows.Add([
-                    m.Id, m.GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), m.Champion, m.OpponentChampion ?? "",
+                    m.Id, m.GameCreationUtc.ToString("yyyy-MM-ddTHH:mm'Z'"), m.Champion, m.OpponentChampion ?? "",
                     $"{c.Min}:00", c.Gold.ToString(), c.Xp.ToString(), c.Cs.ToString(), c.Level.ToString(),
                     c.MyCs.ToString(), c.MyLevel.ToString(), c.OppCs.ToString(), c.OppLevel.ToString(),
                     string.Join(' ', c.MyItems), string.Join(' ', c.OppItems),
@@ -140,7 +140,7 @@ public static class Reports
             ["MatchId", "Date", "At", "TimeSec", "Kind", "SubKind", "ByMyTeam", "KillerChampion"],
             rows.Select(x => new[]
             {
-                x.o.MatchId, x.m.GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
+                x.o.MatchId, x.m.GameCreationUtc.ToString("yyyy-MM-ddTHH:mm'Z'"),
                 $"{x.o.TimeSec / 60:00}:{x.o.TimeSec % 60:00}", x.o.TimeSec.ToString(),
                 x.o.Kind, x.o.SubKind, x.o.ByMyTeam.ToString(),
                 lookup.GetValueOrDefault((x.o.MatchId, x.o.KillerParticipantId), ""),
@@ -186,7 +186,7 @@ public static class Reports
              "FollowTeammate", "FollowTeammateRole", "FollowSecondsAfter", "FollowDistance", "FollowAlliesDownBefore", "FollowPureLoss", "FollowTeamGoldDiff"],
             rows.Select(x => new[]
             {
-                x.d.MatchId, x.m.GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), x.m.Champion, x.m.Position,
+                x.d.MatchId, x.m.GameCreationUtc.ToString("yyyy-MM-ddTHH:mm'Z'"), x.m.Champion, x.m.Position,
                 $"{x.d.TimeSec / 60:00}:{x.d.TimeSec % 60:00}", x.d.TimeSec.ToString(), x.d.X.ToString(), x.d.Y.ToString(),
                 x.d.KilledBy, x.d.AssistedBy,
                 (x.d.AssistedBy.Length > 0 ? x.d.AssistedBy.Split(", ").Length : 0).ToString(),
@@ -215,7 +215,7 @@ public static class Reports
              "Summoner1Id", "Summoner2Id", "KeystoneId", "PrimaryStyleId", "SubStyleId", "ItemIds"],
             rows.Select(x => new[]
             {
-                x.p.MatchId, x.m.GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), x.m.QueueName,
+                x.p.MatchId, x.m.GameCreationUtc.ToString("yyyy-MM-ddTHH:mm'Z'"), x.m.QueueName,
                 x.p.IsMe ? "Me" : x.p.IsAlly ? "Ally" : "Enemy", x.p.Position, x.p.RiotId, x.p.Champion, x.p.Win.ToString(),
                 x.p.Kills.ToString(), x.p.Deaths.ToString(), x.p.Assists.ToString(), x.p.Cs.ToString(),
                 x.p.Gold.ToString(), x.p.DamageToChampions.ToString(), x.p.VisionScore.ToString(),
@@ -516,8 +516,8 @@ public static class Reports
                 Wins = wins,
                 Losses = matches.Count - wins,
                 WinRate = matches is { Count: > 0 } ? Math.Round(wins / (double)matches.Count, 3) : 0,
-                DateFrom = chrono is { Count: > 0 } ? chrono[0].GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd") : null,
-                DateTo = chrono is { Count: > 0 } ? chrono[^1].GameCreationUtc.ToLocalTime().ToString("yyyy-MM-dd") : null,
+                DateFrom = chrono is { Count: > 0 } ? chrono[0].GameCreationUtc.ToString("yyyy-MM-dd") : null,
+                DateTo = chrono is { Count: > 0 } ? chrono[^1].GameCreationUtc.ToString("yyyy-MM-dd") : null,
                 Champions = matches.Select(m => m.Champion).Distinct().Count(),
             },
             Overall = overall,

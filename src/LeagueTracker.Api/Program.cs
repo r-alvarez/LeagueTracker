@@ -546,8 +546,8 @@ read.MapGet("/status", async (AccountContext acct, Caller caller, LeagueDbContex
         LpSnapshots = await db.LpSnapshots.CountAsync(ct),
         Replays = replays.ArchivedMatchIds().Count,
         Patches = await Reports.PatchesAsync(db, ct),
-        DateFrom = hasMatches ? (await db.Matches.MinAsync(m => m.GameCreationUtc, ct)).ToLocalTime().ToString("yyyy-MM-dd") : null,
-        DateTo = hasMatches ? (await db.Matches.MaxAsync(m => m.GameCreationUtc, ct)).ToLocalTime().ToString("yyyy-MM-dd") : null,
+        DateFrom = hasMatches ? (await db.Matches.MinAsync(m => m.GameCreationUtc, ct)).ToString("yyyy-MM-dd") : null,
+        DateTo = hasMatches ? (await db.Matches.MaxAsync(m => m.GameCreationUtc, ct)).ToString("yyyy-MM-dd") : null,
         HideLp = acct.Current.HideLp,
         Ranks = new[] { solo, flex }.Where(s => s is not null && !acct.Current.HideLp).Select(s => new
         {
@@ -1222,7 +1222,7 @@ read.MapGet("/gameplans", (GameplanService svc) => Results.Ok(svc.List()));
 read.MapGet("/gameplans/rules/defaults", () => Results.Ok(GameplanRules.Defaults));
 owner.MapGet("/gameplans/export", (GameplanService svc) =>
     Results.File(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(svc.Export(), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web) { WriteIndented = true }),
-        "application/json", $"gameplans-{DateTime.Now:yyyyMMdd-HHmm}.json"));
+        "application/json", $"gameplans-{DateTime.UtcNow:yyyyMMdd-HHmm}.json"));
 owner.MapPost("/gameplans/import", (GameplanBundle bundle, GameplanService svc) => Results.Ok(svc.Import(bundle)));
 read.MapGet("/gameplans/{champion}", (string champion, GameplanService svc) =>
     svc.Get(champion) is { } plan ? Results.Ok(plan) : Results.NotFound());
@@ -1486,7 +1486,7 @@ owner.MapGet("/export/all.zip", async (AccountContext acct, LeagueDbContext db, 
         await AddAsync("dashboard.json", System.Text.Json.JsonSerializer.Serialize(dashboard, jsonOpts));
         await AddAsync("summary.json", System.Text.Json.JsonSerializer.Serialize(summary, jsonOpts));
     }
-    return Results.File(ms.ToArray(), "application/zip", $"leaguetracker-export-{DateTime.Now:yyyyMMdd-HHmm}.zip");
+    return Results.File(ms.ToArray(), "application/zip", $"leaguetracker-export-{DateTime.UtcNow:yyyyMMdd-HHmm}.zip");
 });
 }
 
