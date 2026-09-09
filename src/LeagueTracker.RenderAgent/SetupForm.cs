@@ -18,7 +18,7 @@ public sealed class SetupForm : Form
     private readonly CheckBox _review = new() { Text = "Open a post-game review on this screen", AutoSize = true };
     private readonly Label _verdict = new() { AutoSize = true };
     private readonly Button _test = new() { Text = "Test connection" };
-    private readonly Button _save = new() { Text = "Save", DialogResult = DialogResult.OK };
+    private readonly Button _save = new() { Text = "Save" };
 
     private static readonly (string Label, bool Record, bool Render)[] Roles =
     [
@@ -101,11 +101,11 @@ public sealed class SetupForm : Form
         var root = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(24, 20, 24, 20), BackColor = Page };
         root.Controls.Add(Header());
         root.Controls.Add(Card("Join",
-            Fields(("Join code", _join, "The code from the tracker's Data page (\"Add a machine\") - eight letters like K7Q2-9DFM, or the one-line paste that also fills in the address. It makes this machine yours when it enrols."))));
+            Fields(("Join code", _join, "The code from the tracker's Data page (\"Add a machine\") - eight letters like K7Q2-9DFM, or the one-line paste that also fills in the address. It makes this machine yours when it enrols (Save does that)."))));
         _join.TextChanged += (_, _) => ApplyJoinCode(_join.Text);
         root.Controls.Add(Card("Tracker",
             Fields(
-                ("Tracker URL", _server, "Your tracker's address, e.g. https://league.rjav-tech.co.uk (several: comma-separated)."))));
+                ("Tracker URL", _server, "Your tracker's https address, e.g. https://league.rjav-tech.co.uk (several: comma-separated). Plain http is only accepted for localhost: this machine's key and its YouTube credentials travel on every call."))));
         root.Controls.Add(Card("This machine",
             Fields(
                 ("Role", _role, "Recorder for a player's PC; Renderer for the box that cuts replay clips; Both for one machine doing everything."),
@@ -119,11 +119,7 @@ public sealed class SetupForm : Form
         AcceptButton = _save;
 
         _test.Click += async (_, _) => await TestAsync();
-        _save.Click += (_, e) =>
-        {
-            if (Validate(out var problem)) Save();
-            else { _verdict.ForeColor = Bad; _verdict.Text = problem; DialogResult = DialogResult.None; }
-        };
+        _save.Click += async (_, _) => await SaveAndEnrolAsync();
     }
 
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
@@ -254,67 +250,62 @@ public sealed class SetupForm : Form
         button.Margin = new Padding(8, 0, 0, 0);
     }
 
-    /// lt2:<base64url json> - {server, code, role} from the Data page's "Add
-    /// a machine" (lt1: was the older shape; its address/role still apply, its
-    /// token fields are ignored). One paste fills the address and leaves the
-    /// code in the box; a bare eight-letter code just stays as typed.
     private void ApplyJoinCode(string text)
     {
-        // Whitespace anywhere, not just at the ends: a one-line paste that
-        // travelled through mail or chat comes back wrapped, and a blob with a
-        // newline in the middle of it is not base64 any more.
-        var code = new string([.. text.Where(c => !char.IsWhiteSpace(c))]);
-        if (!IsPaste(code)) return;
+        JoinPaste? paste;
         try
         {
-            var b64 = code[4..].Replace('-', '+').Replace('_', '/');
-            b64 = b64.PadRight(b64.Length + (4 - b64.Length % 4) % 4, '=');
-            using var doc = JsonDocument.Parse(Convert.FromBase64String(b64));
-            var root = doc.RootElement;
-            string? Get(string name) => root.TryGetProperty(name, out var v) && v.ValueKind is JsonValueKind.String ? v.GetString() : null;
-            if (Get("server") is { Length: > 0 } server) _server.Text = server;
-            if (Get("role") is { Length: > 0 } role)
-            {
-                var index = role.ToLowerInvariant() switch { "recorder" => 0, "renderer" => 1, "both" or "full" => 2, _ => -1 };
-                if (index >= 0) _role.SelectedIndex = index;
-            }
-            if (Get("prefix") is { } prefix) _prefix.Text = prefix;
-            if (Get("recordings") is { Length: > 0 } rec) _recordings.Text = rec;
-            // Leave the bare code in the box (TextChanged re-enters and returns
-            // at once - a bare code is not a paste). The box visibly shrinking
-            // to eight letters reads as a half-finished paste, so the verdict
-            // says out loud that the rest was unpacked, not lost.
-            var kept = Get("code") is { Length: > 0 } joinCode ? joinCode : null;
-            if (kept is not null) _join.Text = kept;
-            _verdict.ForeColor = Good;
-            _verdict.Text = kept is not null
-                ? $"Join code {Pretty(kept)} and the tracker address came out of that paste - press Test connection, then Save."
-                : "Tracker address applied - type the join code as well, then press Test connection.";
+            paste = SetupInput.ParsePaste(text);
         }
         catch (Exception ex) when (ex is FormatException or JsonException)
         {
             _verdict.ForeColor = Bad;
             _verdict.Text = "That join code is not readable - ask for it again.";
+            return;
         }
+        if (paste is null) return;
+
+        var serverApplied = paste.Server is { } server && ApplyPastedServer(server);
+        if (paste.Role is { } role)
+        {
+            var index = role.ToLowerInvariant() switch { "recorder" => 0, "renderer" => 1, "both" or "full" => 2, _ => -1 };
+            if (index >= 0) _role.SelectedIndex = index;
+        }
+        if (paste.Prefix is { } prefix) _prefix.Text = prefix;
+        if (paste.Recordings is { } rec) _recordings.Text = rec;
+        // Leave the bare code in the box (TextChanged re-enters and returns
+        // at once - a bare code is not a paste). The box visibly shrinking
+        // to eight letters reads as a half-finished paste, so the verdict
+        // says out loud that the rest was unpacked, not lost.
+        if (paste.Code is { } kept) _join.Text = kept;
+        _verdict.ForeColor = Good;
+        var address = serverApplied ? $"the tracker address ({SetupInput.Host(_server.Text)})" : "the tracker address was left as it is";
+        _verdict.Text = paste.Code is { } code
+            ? $"Join code {SetupInput.Pretty(code)} came out of that paste and {address} - Save enrols this machine."
+            : $"That paste carried no code, {address} - type the join code as well, then Save.";
     }
 
-    /// The two shapes the Data page hands out, and the only text the code box
-    /// unpacks instead of sending as a code.
-    private static bool IsPaste(string text) =>
-        text.StartsWith("lt2:", StringComparison.OrdinalIgnoreCase) || text.StartsWith("lt1:", StringComparison.OrdinalIgnoreCase);
-
-    /// K7Q29DFM -> K7Q2-9DFM, the way the Data page shows it.
-    private static string Pretty(string code) => code.Length == 8 ? $"{code[..4]}-{code[4..]}" : code;
+    // The address in a paste is where this machine sends its key from then
+    // on, and a paste is one line from wherever it was handed over - so it
+    // never replaces an address already in the box without being asked.
+    private bool ApplyPastedServer(string server)
+    {
+        var current = _server.Text.Trim();
+        if (current is { Length: > 0 } && !string.Equals(current.TrimEnd('/'), server.Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+        {
+            var answer = MessageBox.Show(this,
+                $"This join code points at a different tracker:\n\n    {SetupInput.Host(server)}\n    ({server})\n\nThe box currently says {SetupInput.Host(current)}. Use the pasted address?",
+                "Change the tracker address?", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+            if (answer is not DialogResult.Yes) return false;
+        }
+        _server.Text = server;
+        return true;
+    }
 
     private bool Validate(out string problem)
     {
-        problem = "";
-        if (_server.Text.Trim() is not { Length: > 0 } || !_server.Text.Split(',').All(u => Uri.TryCreate(u.Trim(), UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"))
-        {
-            problem = "Tracker URL must be one or more http(s) addresses.";
-            return false;
-        }
-        return true;
+        problem = SetupInput.ServerUrlProblem(_server.Text) ?? "";
+        return problem is not { Length: > 0 };
     }
 
     private AgentConfig Draft()
@@ -323,7 +314,7 @@ public sealed class SetupForm : Form
         return new AgentConfig
         {
             ServerUrl = string.Join(",", _server.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)),
-            JoinCode = IsPaste(_join.Text.Trim()) ? "" : _join.Text.Trim().Replace("-", ""),
+            JoinCode = SetupInput.IsPaste(_join.Text.Trim()) ? "" : _join.Text.Trim().Replace("-", ""),
             RecordGames = record,
             RenderReplays = render,
             RecordingsDir = _recordings.Text.Trim(),
@@ -332,6 +323,9 @@ public sealed class SetupForm : Form
         };
     }
 
+    // Test only asks whether the address answers. Enrolling here would hand
+    // the machine's key to whatever the box says before the person has
+    // decided to keep it (a wrong or pasted address) - that is Save's job.
     private async Task TestAsync()
     {
         if (!Validate(out var problem)) { _verdict.ForeColor = Bad; _verdict.Text = problem; return; }
@@ -339,34 +333,56 @@ public sealed class SetupForm : Form
         _verdict.ForeColor = Muted;
         _verdict.Text = "Contacting the tracker…";
         var draft = Draft();
-        var results = new List<string>();
+        List<string> results = [];
         foreach (var url in draft.ServerUrls)
         {
             var client = TrackerClient.ForServer(url, draft);
-            var reachable = await client.PingAnonymousAsync(CancellationToken.None) || await client.PingAsync(CancellationToken.None);
-            if (!reachable) { results.Add($"{url}: no answer - wrong address, or not reachable from here"); continue; }
-            // Enrol right here: the machine shows up on the owner's Data page
-            // as pending while the person is still looking at this window.
-            var status = await client.EnrollAsync(CancellationToken.None);
-            if (status is "approved") client.MarkKeyed();
-            var accounts = await client.GetAccountsAsync(CancellationToken.None);
-            var profile = status is "approved" ? await client.GetProfileAsync(CancellationToken.None) : null;
-            var who = accounts is { Count: > 0 } ? $" - {accounts.Count} account(s): {string.Join(", ", accounts.Select(a => a.RiotId))}" : "";
-            var youtube = profile is { Count: > 0 } ? $" (YouTube {(profile.ContainsKey("YouTubeRefreshToken") ? "ready" : "not configured")})" : "";
-            results.Add(status switch
-            {
-                "approved" => $"{url}: OK - this machine is approved{who}{youtube}",
-                "pending" => $"{url}: OK - reachable; this machine is waiting for approval on the site's Data page (Save now, it starts by itself once approved){who}",
-                "revoked" => $"{url}: reachable, but this machine was revoked - ask the owner to re-approve it",
-                { } refused when refused.StartsWith("refused:", StringComparison.Ordinal) => $"{url}: reachable, but it refused this machine - {refused[8..]}",
-                _ => $"{url}: reachable, but it offers no enrolment - is this a LeagueTracker server?",
-            });
+            results.Add(await client.PingAnonymousAsync(CancellationToken.None)
+                ? $"{url}: OK - a LeagueTracker server answers; Save enrols this machine there"
+                : await client.PingAsync(CancellationToken.None)
+                    ? $"{url}: OK - reachable, though it offers no agent enrolment; is the tracker up to date?"
+                    : $"{url}: no answer - wrong address, or not reachable from here");
         }
-        var allOk = results.All(r => r.Contains(": OK"));
-        _verdict.ForeColor = allOk ? Good : Bad;
+        _verdict.ForeColor = results.All(r => r.Contains(": OK")) ? Good : Bad;
         _verdict.Text = string.Join("\n", results);
         _test.Enabled = true;
     }
+
+    // Written first, then enrolled: the agent that starts afterwards re-announces
+    // itself from the same file and key, so a failed or pending enrolment here
+    // only costs the person the early "waiting for approval" line.
+    private async Task SaveAndEnrolAsync()
+    {
+        if (!Validate(out var problem)) { _verdict.ForeColor = Bad; _verdict.Text = problem; return; }
+        _save.Enabled = false;
+        _test.Enabled = false;
+        Save();
+        _verdict.ForeColor = Muted;
+        _verdict.Text = "Saved - enrolling this machine…";
+        var draft = Draft();
+        List<string> results = [];
+        foreach (var url in draft.ServerUrls)
+        {
+            var client = TrackerClient.ForServer(url, draft);
+            results.Add(await client.EnrollAsync(CancellationToken.None) switch
+            {
+                "approved" => $"{url}: this machine is approved",
+                "pending" => $"{url}: this machine is waiting for approval on the site's Data page - it starts by itself once approved",
+                "revoked" => $"{url}: this machine was revoked - ask the owner to re-approve it",
+                { } refused when refused.StartsWith("refused:", StringComparison.Ordinal) => $"{url}: enrolment refused - {refused[8..]}",
+                _ => $"{url}: no enrolment answer - the agent keeps trying once it runs",
+            });
+        }
+        EnrolmentVerdict = string.Join("\n", results);
+        Log.Info($"Enrolment on save: {EnrolmentVerdict.Replace('\n', ' ')}");
+        // Cancel during the enrolment round-trip already closed the window.
+        if (IsDisposed) return;
+        DialogResult = DialogResult.OK;
+        Close();
+    }
+
+    // For the caller's summary: the window is gone by the time it reads this.
+    public string? EnrolmentVerdict { get; private set; }
 
     /// Rewrites only its own keys; anything else already in the file (a
     /// hand-tuned install like the owner's) survives - the comments do not,

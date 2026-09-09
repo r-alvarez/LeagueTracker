@@ -49,6 +49,9 @@ public sealed class TrackerClient
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    // Keyless on purpose: the setup window pings whatever address is in the box,
+    // and a typo or a pasted address must not be handed this machine's key.
+    private static readonly HttpClient Anonymous = new() { Timeout = TimeSpan.FromSeconds(30) };
     private readonly string _agentName;
     private readonly string _joinCode;
 
@@ -111,7 +114,7 @@ public sealed class TrackerClient
     {
         try
         {
-            using var resp = await _http.GetAsync($"{ServerUrl}/api/agent/ping", ct);
+            using var resp = await Anonymous.GetAsync($"{ServerUrl}/api/agent/ping", ct);
             return resp.IsSuccessStatusCode && IsJson(resp);
         }
         catch (Exception) when (!ct.IsCancellationRequested)
