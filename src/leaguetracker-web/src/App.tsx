@@ -25,6 +25,8 @@ import Footer from './components/Footer'
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null)
   const resolution = account.resolution
+  // Someone else's page counts: the visitor's own account is somewhere to go.
+  const switchable = account.canAdd || account.all.some(a => a.slug !== account.current.slug)
 
   useEffect(() => {
     if (!auth.canRead || resolution.kind !== 'account') return
@@ -56,7 +58,7 @@ export default function App() {
     <div className="shell">
       <header className="topbar">
         <h1><img className="brand-mark" src="/favicon.svg" alt="" />LeagueTracker</h1>
-        {account.all.length > 1 || account.canAdd ? <AccountSwitch /> : status && <span className="player">{status.riotId}</span>}
+        {switchable ? <AccountSwitch /> : status && <span className="player">{status.riotId}</span>}
         {scope && <span className="sub" title={patches.length > 1 ? `patches ${patches.join(', ')}` : undefined}>{scope}</span>}
         <UserMenu />
       </header>
@@ -72,8 +74,8 @@ export default function App() {
 
       {!account.current.available && (
         <div className="card" role="alert" style={{ marginBottom: 16, borderLeft: '3px solid var(--warn)' }}>
-          <b>This account's data is unavailable right now</b> — its database could not be opened
-          {account.current.unavailable ? ` (${account.current.unavailable})` : ''}. The tracker retries every minute; the other accounts are unaffected.
+          <b>This account's data is unavailable right now</b> — its database could not be opened.
+          The tracker retries every minute; the other accounts are unaffected.
         </div>
       )}
       <LiveGameBanner />

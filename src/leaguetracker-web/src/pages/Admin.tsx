@@ -85,7 +85,7 @@ export default function Admin() {
   }
   const noticeIn = (where: 'people' | 'accounts') => notice?.where === where && <p className={`invite-notice ${notice.kind}`}>{notice.text}</p>
 
-  const emailOf = (userId: string | null) => users?.find(u => u.id === userId)?.email ?? ''
+  const emailOf = (userId: string | null | undefined) => users?.find(u => u.id === userId)?.email ?? ''
   const when = (s: string | null) => (s ? new Date(s).toLocaleString() : 'never')
   const whenShort = (s: string) => new Date(s).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
