@@ -1,4 +1,4 @@
-FROM python:3.13-alpine
+FROM python:3.14-alpine
 ENV PYTHONUNBUFFERED=1
 COPY waker.py /app/waker.py
 # The container runs as an unprivileged user (compose: 568:568) and COPY keeps
