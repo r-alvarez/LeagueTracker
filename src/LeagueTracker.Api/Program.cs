@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 using Match = LeagueTracker.Api.Data.Match;
 
 var builder = WebApplication.CreateBuilder(args);
+const string PublicReadCache = "public-read";
 
 builder.Services.AddWindowsService(o => o.ServiceName = "LeagueTracker");
 builder.Services.Configure<RiotOptions>(builder.Configuration.GetSection("Riot"));
@@ -21,6 +22,7 @@ builder.Services.Configure<AccountsOptions>(builder.Configuration.GetSection("Ac
 builder.Services.Configure<AgentsOptions>(builder.Configuration.GetSection("Agents"));
 builder.Services.Configure<ProxyOptions>(builder.Configuration.GetSection("Proxy"));
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth"));
+builder.Services.Configure<UploadsOptions>(builder.Configuration.GetSection("Uploads"));
 
 // One PostgreSQL database: the registry (users, the accounts they own, the
 // machines they enrolled) in its own schema, every tracked account in its own.
@@ -38,7 +40,7 @@ builder.Services.AddScoped<AccountContext>();
 builder.Services.AddSingleton<AccountScopes>();
 builder.Services.AddSingleton<AccountInitializer>();
 builder.Services.AddDbContext<LeagueDbContext>((sp, o) =>
-    o.UseNpgsql(sp.GetRequiredService<DatabaseServer>().ForSchema(DatabaseServer.AccountSchema(sp.GetRequiredService<AccountContext>().Current))));
+    sp.GetRequiredService<DatabaseServer>().Configure(o, DatabaseServer.AccountSchema(sp.GetRequiredService<AccountContext>().Current)));
 
 builder.Services.AddSingleton<RiotRateLimiter>();
 builder.Services.AddSingleton<IRiotKeyProvider, RiotKeyProvider>();
@@ -70,6 +72,7 @@ builder.Services.AddScoped<ReviewService>();
 builder.Services.AddScoped<ReviewReelService>();
 builder.Services.AddScoped<GameplanService>();
 builder.Services.AddPerAccount<RenderLeaseService>();
+builder.Services.AddSingleton<RenderPendingCount>();
 builder.Services.AddSingleton<AgentRegistry>();
 builder.Services.AddSingleton<AgentKeyStore>();
 builder.Services.AddHttpClient("github", c =>
@@ -84,7 +87,10 @@ builder.Services.AddHostedService<AgentReleaseSyncService>();
 builder.Services.AddHttpClient(Auth0ManagementClient.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddSingleton<Auth0ManagementClient>();
 builder.Services.AddScoped<VodService>();
+builder.Services.AddScoped<UploadQuota>();
+builder.Services.AddHostedService<TempFileSweeper>();
 builder.Services.AddPerAccount<LiveGameState>();
+builder.Services.AddSingleton<PollerHeartbeat>();
 builder.Services.AddHostedService<MatchPollerService>();
 
 // Vite dev server origin - Development only: with a session cookie in play a
@@ -112,6 +118,9 @@ builder.Services.AddDataProtection()
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    // Once reads are public, a script with no credentials must not be able to
+    // saturate the NAS (audit D7).
+    o.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(RateLimitPolicies.GlobalPartition);
     o.AddPolicy("account-add", http => System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
         http.User.FindFirst(TrackerClaims.UserId)?.Value ?? http.Connection.RemoteIpAddress?.ToString() ?? "anon",
         _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromHours(1), SegmentsPerWindow = 4, QueueLimit = 0 }));
@@ -121,6 +130,7 @@ builder.Services.AddRateLimiter(o =>
     o.AddPolicy("invite", http => System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
         http.User.FindFirst(TrackerClaims.UserId)?.Value ?? http.Connection.RemoteIpAddress?.ToString() ?? "anon",
         _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromHours(1), SegmentsPerWindow = 4, QueueLimit = 0 }));
+    o.AddClaimRateLimits();
 });
 
 // Behind Traefik (and Cloudflare in front of it) the socket peer is always the
@@ -136,6 +146,12 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
     o.KnownIPNetworks.Clear();
     o.KnownProxies.Clear();
 });
+
+// The heavy public reads (a match with four includes, the lens, the
+// fundamentals) are identical for every anonymous visitor within a short
+// window; a signed-in owner's requests are never cached, so their own edits
+// show at once.
+builder.Services.AddOutputCache(o => o.AddPolicy(PublicReadCache, p => p.Expire(TimeSpan.FromSeconds(30)).SetVaryByQuery("*")));
 
 // Compress JSON app-side: the Traefik deployment doesn't compress (the old
 // Caddy proxy did), and this way every proxy setup gets it for free.
@@ -200,6 +216,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 app.UseCsrfGuard();
+app.UseOutputCache();
 app.UseResponseCompression();
 // Hashed bundles never change; everything else (index.html above all) must
 // revalidate every load - without an explicit Cache-Control, browsers apply
@@ -233,19 +250,47 @@ static async ValueTask<object?> RequireAvailableAccount(EndpointFilterInvocation
         : Results.Problem($"{account.RiotId} is unavailable: {initializer.ErrorFor(account)}", statusCode: 503, title: "Account unavailable");
 }
 
-object AccountView(Account a) => new
+// The declared length is the client's word (and a chunked body declares
+// none), so the budget is enforced on the bytes as they arrive.
+static async Task<IResult> StoreUploadAsync(HttpRequest request, string target, UploadQuota quota, long cap, CancellationToken ct)
 {
-    a.Id, a.Slug, a.Label, a.RiotId, a.GameName, a.TagLine, a.HideLp, a.Platform,
-    Region = a.RegionCode, Path = a.UrlPath, a.FromConfig,
-    Owned = a.IsOwned, a.OwnerUserId, a.MediaPublic,
-    PreviousSlugs = a.PreviousSlugList,
-    Available = initializer.IsReady(a),
-    Unavailable = initializer.ErrorFor(a),
-};
+    using var reservation = quota.Reserve(request.ContentLength, cap);
+    if (reservation.Refusal is { } refused) return Refuse(refused);
+    request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = cap;
 
-// The list is Riot IDs and who owns them - Read data, so a visitor gets it
-// only once PublicReads is on; the SPA shows the sign-in screen on a 401.
-app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct) => Results.Ok(new
+    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+    var temp = target + ".tmp";
+    await using (var file = File.Create(temp))
+    {
+        if (!await UploadQuota.CopyWithinAsync(request.Body, file, reservation.Budget, ct))
+        {
+            file.Close();
+            File.Delete(temp);
+            return Refuse(reservation.Exceeded);
+        }
+    }
+    File.Move(temp, target, overwrite: true);
+    return Results.Ok(new { bytes = new FileInfo(target).Length });
+}
+
+static IResult Refuse(UploadRefusal refusal) => Results.Json(
+    new { error = UploadQuota.Describe(refusal) },
+    statusCode: refusal is UploadRefusal.TooLarge ? StatusCodes.Status413PayloadTooLarge : StatusCodes.Status507InsufficientStorage);
+
+// The public shape of an account: no rename history (names a player left
+// behind), no owner id unless an admin asks (links a main to a smurf), no
+// database error text (audit A6).
+AccountView ViewOf(Account a, Caller caller) => new(
+    a.Id, a.Slug, a.Label, a.RiotId, a.GameName, a.TagLine, a.HideLp, a.Platform,
+    a.RegionCode, a.UrlPath, a.FromConfig,
+    a.IsOwned, caller.IsUser && a.OwnerUserId == caller.UserId, a.MediaPublic,
+    initializer.IsReady(a),
+    caller.IsAdmin ? a.OwnerUserId : null);
+
+// Read data, so a visitor gets it only once PublicReads is on; the SPA shows
+// the sign-in screen on a 401. Any other account is reached by name through
+// /resolve, never by listing the population.
+app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct, Caller caller) => Results.Ok(new
 {
     Default = registry.Default.Slug,
     // The account this request is bound to (the default, since the global
@@ -253,20 +298,36 @@ app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct) => R
     Current = acct.Slug,
     registry.CanAdd,
     Regions = Platforms.All.Select(p => new { Code = p.Code, p.Label, p.Platform }),
-    Accounts = registry.All.Select(AccountView),
+    Accounts = (caller.IsAdmin ? registry.All : caller.UserId is { } user ? registry.OwnedBy(user) : []).Select(a => ViewOf(a, caller)),
 })).RequireAuthorization(Policies.Read);
+
+// What a URL names: the current slug or one from before a rename, in the
+// region given (a bare /{slug} from the one-site build gives none). A slug
+// that exists in another region is a suggestion, not a match.
+app.MapGet("/api/accounts/resolve", (string slug, string? region, AccountRegistry registry, Caller caller) =>
+{
+    var found = registry.BySlug(slug) ?? registry.ByPreviousSlug(slug);
+    if (found is null) return Results.NotFound(new { error = $"No account named {slug}", suggestion = (AccountView?)null });
+    if (region is { Length: > 0 } && !found.RegionCode.Equals(region, StringComparison.OrdinalIgnoreCase))
+        return Results.NotFound(new { error = $"No account named {slug} in {region}", suggestion = ViewOf(found, caller) });
+    return Results.Ok(new { account = ViewOf(found, caller), canonical = "/" + found.UrlPath });
+}).RequireAuthorization(Policies.Read);
 
 // The "add account" box: a Riot ID typed by a person, checked against Riot
 // (account-v1 answers with the canonical casing and the puuid), then given a
 // folder, a database and a place in the poller's round - no redeploy.
-app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry registry, AccountScopes scopes, AccountInitializer initializer, IRiotKeyProvider keys, CancellationToken ct) =>
+app.MapPost("/api/accounts", async (AddAccountRequest request, Caller caller, AccountRegistry registry, AccountScopes scopes, AccountInitializer initializer, IRiotKeyProvider keys, CancellationToken ct) =>
 {
     if (!registry.CanAdd) return Results.Problem("This deployment takes accounts from configuration only (Accounts:DataRoot is not set)", statusCode: 409);
+    // Checked before the Riot call as well as inside Add: a full tracker
+    // should not spend key budget confirming a Riot ID it will refuse.
+    if (registry.AtCapacity) return Results.Problem("This tracker is full - no more accounts can be added right now", statusCode: 409);
+    if (registry.AtCapacityFor(caller.UserId!)) return Results.Problem("You already track the most accounts allowed here - untrack one to add another", statusCode: 409);
     var (gameName, tagLine) = ParseRiotId(request.RiotId);
     if (gameName is null || tagLine is null) return Results.BadRequest(new { error = "Type the Riot ID as GameName#TAG" });
     var platform = Platforms.ByCode(request.Region) ?? Platforms.ByPlatform(request.Region);
     if (platform is null) return Results.BadRequest(new { error = $"Unknown region '{request.Region}'" });
-    if (registry.BySlug($"{gameName}-{tagLine}") is { } existing) return Results.Conflict(new { error = $"{existing.RiotId} is already tracked", account = AccountView(existing) });
+    if (registry.BySlug($"{gameName}-{tagLine}") is { } existing) return Results.Conflict(new { error = $"{existing.RiotId} is already tracked", account = ViewOf(existing, caller) });
     if (keys.GetKey() is null) return Results.Problem("No Riot API key configured - the account cannot be verified", statusCode: 503);
 
     // Resolve through a scope bound to a throwaway account with the target
@@ -288,8 +349,16 @@ app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry r
             return Results.Problem($"Riot answered {ex.StatusCode} while checking the account{(ex.IsAuthFailure ? " - the API key is invalid or expired" : "")}", statusCode: 502);
         }
     }
-    if (registry.ByPuuid(resolved.Puuid) is { } samePlayer) return Results.Conflict(new { error = $"{samePlayer.RiotId} is already tracked (same player, renamed)", account = AccountView(samePlayer) });
-    var account = registry.Add(resolved.GameName ?? gameName, resolved.TagLine ?? tagLine, platform.Platform, request.DisplayName, resolved.Puuid);
+    if (registry.ByPuuid(resolved.Puuid) is { } samePlayer) return Results.Conflict(new { error = $"{samePlayer.RiotId} is already tracked (same player, renamed)", account = ViewOf(samePlayer, caller) });
+    Account account;
+    try
+    {
+        account = registry.Add(resolved.GameName ?? gameName, resolved.TagLine ?? tagLine, platform.Platform, request.DisplayName, resolved.Puuid, caller.UserId);
+    }
+    catch (InvalidOperationException ex) when (ex is AccountConflictException or AccountQuotaException)
+    {
+        return Results.Conflict(new { error = ex.Message });
+    }
     if (!initializer.EnsureReady(account))
     {
         return Results.Problem($"{account.RiotId} is registered but its database could not be initialised: {initializer.ErrorFor(account)}", statusCode: 503);
@@ -298,16 +367,16 @@ app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry r
     {
         await scope.ServiceProvider.GetRequiredService<TrackedPlayerService>().StorePuuidAsync(resolved.Puuid, ct);
     }
-    return Results.Created($"/{account.UrlPath}/", AccountView(account));
+    return Results.Created($"/{account.UrlPath}/", ViewOf(account, caller));
 }).RequireAuthorization(Policies.User).RequireRateLimiting("account-add");
 
 // Untrack (the folder stays on the NAS). Configured accounts say no; so
-// does anyone but the owner or an admin.
+// does anyone but the owner, an admin, or the adder of an unclaimed one.
 app.MapDelete("/api/accounts/{idOrSlug}", (string idOrSlug, Caller caller, AccountRegistry registry, AccountInitializer initializer) =>
 {
     var decoded = Uri.UnescapeDataString(idOrSlug);
     if ((registry.ById(decoded) ?? registry.BySlug(decoded)) is not { } account) return Results.NotFound();
-    if (!caller.Owns(account)) return Results.Forbid();
+    if (!registry.MayUntrack(account, caller.UserId, caller.IsAdmin)) return Results.Forbid();
     if (!registry.Remove(account.Id)) return Results.Conflict(new { error = "configured accounts are removed from the compose, not here" });
     initializer.Forget(account.Id);
     return Results.NoContent();
@@ -351,6 +420,29 @@ app.MapGet("/api/version", () => Results.Ok(new
     StartedUtc = BuildStamp.StartedUtc,
     app.Environment.EnvironmentName,
 }));
+
+// Probes for Docker and whoever runs the stack: liveness is "the process
+// answers", readiness adds the registry database and a recent poll pass. Both
+// anonymous on purpose - a probe has no cookie, and a 401 is not a health
+// verdict.
+app.MapGet("/healthz", () => Results.Text("ok"));
+app.MapGet("/readyz", async (DatabaseServer server, PollerHeartbeat poller, CancellationToken ct) =>
+{
+    List<string> problems = [];
+    try
+    {
+        await using var connection = await server.DataSource.OpenConnectionAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1";
+        await command.ExecuteScalarAsync(ct);
+    }
+    catch (Exception ex)
+    {
+        problems.Add($"database: {ex.GetBaseException().Message}");
+    }
+    if (!poller.IsFresh) problems.Add($"poller: no pass since {poller.LastPassUtc:O}");
+    return problems is [] ? Results.Ok(new { ready = true }) : Results.Json(new { ready = false, problems }, statusCode: StatusCodes.Status503ServiceUnavailable);
+});
 
 app.MapPost("/api/agent/enroll", (EnrollRequest request, HttpContext http, AgentKeyStore keys) =>
 {
@@ -405,7 +497,12 @@ app.MapManagementEndpoints();
 // (Agent__Profiles__<key id>__...) - by its id, never by the name it chose
 // at enrol: any user can mint a key and name it after another machine
 // (audit T-N1).
-app.MapGet("/api/agent/profile", (Caller caller, AgentRegistry agents) => Results.Ok(agents.ProfileFor(caller.Agent!.Id))).RequireAuthorization(Policies.Agent);
+app.MapGet("/api/agent/profile", (Caller caller, AgentRegistry agents, UserStore users) =>
+{
+    var agent = caller.Agent!;
+    var operatorsMachine = agent.IsBound && users.ById(agent.OwnerUserId)?.IsAdmin is true;
+    return Results.Ok(agents.ProfileFor(agent.Id, sharedSecrets: operatorsMachine));
+}).RequireAuthorization(Policies.Agent);
 
 // The agent's side of "sendlog": the tail of agent.log, filed under the key
 // that authenticated - only an approved agent writes here, only as itself.
@@ -428,25 +525,12 @@ app.MapPost("/api/agent/heartbeat", (AgentHeartbeat beat, Caller caller, AgentRe
     return Results.Ok(new { latest = agents.Latest()?.Version, command = pending?.Command, commandToken = pending?.Token });
 }).RequireAuthorization(Policies.Agent);
 
-app.MapGet("/api/agent/agents", (AgentRegistry agents) => Results.Ok(agents.Snapshot())).RequireAuthorization(Policies.Agent);
-
 // The waker on the NAS needs one bit - is render work waiting anywhere -
-// and it has no identity; counts only, across every account.
-app.MapGet("/api/render/pending", async (AccountRegistry registry, AccountScopes scopes, AccountInitializer initializer, CancellationToken ct) =>
-{
-    var pending = 0;
-    foreach (var account in registry.All.Where(initializer.IsReady))
-    {
-        using var scope = scopes.Create(account);
-        var leases = scope.ServiceProvider.GetRequiredService<RenderLeaseService>();
-        var rows = (await scope.ServiceProvider.GetRequiredService<ClipService>().QueueAsync(leases, ct))
-            .Concat(await scope.ServiceProvider.GetRequiredService<FullGameService>().QueueRowsAsync(leases, ct));
-        // The queue rows are the anonymous shapes the Data page renders; the
-        // status is the one field this needs.
-        pending += rows.Count(r => System.Text.Json.JsonSerializer.SerializeToElement(r).GetProperty("Status").GetString() is "pending" or "partial");
-    }
-    return Results.Ok(new { pending });
-});
+// counted across every account. It knocks with an agent key like any other
+// machine: anonymous, this was a full-population scan for anyone on the
+// internet to trigger in a loop (audit A5).
+app.MapGet("/api/render/pending", async (RenderPendingCount count, CancellationToken ct) =>
+    Results.Ok(new { pending = await count.GetAsync(ct) })).RequireAuthorization(Policies.Agent);
 
 app.MapGet("/api/agent/release", (AgentRegistry agents) =>
     agents.Latest() is { } release ? Results.Ok(release) : Results.NoContent());
@@ -528,8 +612,8 @@ read.MapGet("/status", async (AccountContext acct, Caller caller, LeagueDbContex
         LpSnapshots = await db.LpSnapshots.CountAsync(ct),
         Replays = replays.ArchivedMatchIds().Count,
         Patches = await Reports.PatchesAsync(db, ct),
-        DateFrom = hasMatches ? (await db.Matches.MinAsync(m => m.GameCreationUtc, ct)).ToLocalTime().ToString("yyyy-MM-dd") : null,
-        DateTo = hasMatches ? (await db.Matches.MaxAsync(m => m.GameCreationUtc, ct)).ToLocalTime().ToString("yyyy-MM-dd") : null,
+        DateFrom = hasMatches ? (await db.Matches.MinAsync(m => m.GameCreationUtc, ct)).ToString("yyyy-MM-dd") : null,
+        DateTo = hasMatches ? (await db.Matches.MaxAsync(m => m.GameCreationUtc, ct)).ToString("yyyy-MM-dd") : null,
         HideLp = acct.Current.HideLp,
         Ranks = new[] { solo, flex }.Where(s => s is not null && !acct.Current.HideLp).Select(s => new
         {
@@ -746,32 +830,25 @@ recorder.MapPost("/matches/{id}/vod/link", async (string id, HttpRequest request
 // Agent-facing uploads. The mp4 is only accepted for a match this tracker
 // knows - the one agent serves several trackers and offers each VOD to all
 // of them; the owning tracker is the one whose db has the match.
-recorder.MapPut("/vods/{matchId}", async (string matchId, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+recorder.MapPut("/vods/{matchId}", async (string matchId, HttpRequest request, VodService vods, UploadQuota quota, LeagueDbContext db, CancellationToken ct) =>
 {
     if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
     if (vods.TargetPath(matchId, "vod.mp4") is not { } target) return Results.BadRequest();
-
-    // A 1440p60 game runs to ~3GB; lift the body cap accordingly.
-    request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
-        .MaxRequestBodySize = 8L * 1024 * 1024 * 1024;
-
-    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-    var temp = target + ".tmp";
-    await using (var file = File.Create(temp))
-    {
-        await request.Body.CopyToAsync(file, ct);
-    }
-    File.Move(temp, target, overwrite: true);
-    return Results.Ok(new { bytes = new FileInfo(target).Length });
+    return await StoreUploadAsync(request, target, quota, quota.MaxVodBytes, ct);
 });
 
 // Chunked variant of the mp4 upload: Cloudflare caps request bodies around
 // 100MB, so a multi-GB VOD arrives as ordered 64MB pieces appended at their
 // offset, then an atomic commit that checks the assembled size.
-recorder.MapPut("/vods/{matchId}/chunk", async (string matchId, long offset, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+recorder.MapPut("/vods/{matchId}/chunk", async (string matchId, long offset, HttpRequest request, VodService vods, UploadQuota quota, LeagueDbContext db, CancellationToken ct) =>
 {
     if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
     if (vods.TargetPath(matchId, "vod.mp4.part") is not { } part) return Results.BadRequest();
+    if (offset < 0 || offset >= quota.MaxVodBytes) return Refuse(UploadRefusal.TooLarge);
+    // The assembled file, not the chunk, is what the cap bounds: appends at
+    // offset <= length were otherwise open-ended.
+    using var reservation = quota.Reserve(request.ContentLength, quota.MaxVodBytes - offset);
+    if (reservation.Refusal is { } refused) return Refuse(refused);
 
     request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
         .MaxRequestBodySize = 256L * 1024 * 1024;
@@ -780,7 +857,11 @@ recorder.MapPut("/vods/{matchId}/chunk", async (string matchId, long offset, Htt
     await using var file = new FileStream(part, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
     if (offset > file.Length) return Results.Conflict(new { expected = file.Length });
     file.Seek(offset, SeekOrigin.Begin);
-    await request.Body.CopyToAsync(file, ct);
+    if (!await UploadQuota.CopyWithinAsync(request.Body, file, reservation.Budget, ct))
+    {
+        file.SetLength(0);
+        return Refuse(reservation.Exceeded);
+    }
     return Results.Ok(new { length = file.Length });
 });
 
@@ -799,7 +880,7 @@ recorder.MapPost("/vods/{matchId}/commit", (string matchId, long size, VodServic
 // Sidecar pieces (small): recording metadata, input telemetry, thumbnail.
 // Accepted for any known match WITHOUT requiring the mp4 - in the
 // YouTube-hosted mode these are the only bytes the tracker ever stores.
-recorder.MapPut("/vods/{matchId}/{file}", async (string matchId, string file, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+recorder.MapPut("/vods/{matchId}/{file}", async (string matchId, string file, HttpRequest request, VodService vods, UploadQuota quota, LeagueDbContext db, CancellationToken ct) =>
 {
     var name = file switch
     {
@@ -808,18 +889,27 @@ recorder.MapPut("/vods/{matchId}/{file}", async (string matchId, string file, Ht
         "thumb" => "thumb.jpg",
         _ => null,
     };
-    if (name is null || !await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
-    var target = vods.TargetPath(matchId, name)!;
-    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-    var temp = target + ".tmp";
-    await using (var f = File.Create(temp))
+    var match = await db.Matches.AsNoTracking().Where(m => m.Id == matchId).Select(m => new { m.DurationSec }).FirstOrDefaultAsync(ct);
+    if (name is null || match is null) return Results.NotFound();
+    // Telemetry is checked line by line against the recording's length on the
+    // way in (audit N16); the other sidecars are just bounded files.
+    if (name is "events.csv.gz")
     {
-        await request.Body.CopyToAsync(f, ct);
+        using var reservation = quota.Reserve(request.ContentLength, quota.MaxSidecarBytes);
+        if (reservation.Refusal is { } refused) return Refuse(refused);
+        request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = quota.MaxSidecarBytes;
+        try
+        {
+            return await vods.StoreTelemetryAsync(matchId, new BudgetedStream(request.Body, reservation.Budget), match.DurationSec, ct) is { } rejected
+                ? Results.BadRequest(new { error = rejected.Error })
+                : Results.Ok();
+        }
+        catch (UploadBudgetExceededException)
+        {
+            return Refuse(reservation.Exceeded);
+        }
     }
-    File.Move(temp, target, overwrite: true);
-    // Telemetry replaced = derived series stale; recomputed on next read.
-    if (name is "events.csv.gz" && vods.TargetPath(matchId, "apm.json") is { } apm && File.Exists(apm)) File.Delete(apm);
-    return Results.Ok();
+    return await StoreUploadAsync(request, vods.TargetPath(matchId, name)!, quota, quota.MaxSidecarBytes, ct);
 });
 
 // --- Full-game renders (opt-in per match; retention-swept unless kept) ----------
@@ -955,43 +1045,18 @@ render.MapPost("/render/next", async (AccountContext acct, ClipService clips, Fu
     return Results.NoContent();
 });
 
-render.MapPut("/render/{matchId}/full", async (string matchId, HttpRequest request, FullGameService full, LeagueDbContext db, CancellationToken ct) =>
+render.MapPut("/render/{matchId}/full", async (string matchId, HttpRequest request, FullGameService full, UploadQuota quota, LeagueDbContext db, CancellationToken ct) =>
 {
     if (full.VideoTargetPath(matchId) is not { } target) return Results.NotFound();
     if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
-
-    // A full game runs to ~500MB; lift the body cap accordingly.
-    request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
-        .MaxRequestBodySize = 4L * 1024 * 1024 * 1024;
-
-    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-    var temp = target + ".tmp";
-    await using (var file = File.Create(temp))
-    {
-        await request.Body.CopyToAsync(file, ct);
-    }
-    File.Move(temp, target, overwrite: true);
-    return Results.Ok(new { bytes = new FileInfo(target).Length });
+    return await StoreUploadAsync(request, target, quota, quota.MaxRenderBytes, ct);
 });
 
-render.MapPut("/render/{matchId}/clips/{index:int}", async (string matchId, int index, HttpRequest request, ClipService clips, CancellationToken ct) =>
+render.MapPut("/render/{matchId}/clips/{index:int}", async (string matchId, int index, HttpRequest request, ClipService clips, UploadQuota quota, CancellationToken ct) =>
 {
     var plan = await clips.LoadPlanAsync(matchId, ct);
     if (plan is null || index < 0 || index >= plan.Windows.Count) return Results.NotFound();
-
-    // Clips run tens of MB; lift the default 30MB body cap for this request only.
-    request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
-        .MaxRequestBodySize = 512L * 1024 * 1024;
-
-    var target = clips.ClipTargetPath(matchId, index);
-    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-    var temp = target + ".tmp";
-    await using (var file = File.Create(temp))
-    {
-        await request.Body.CopyToAsync(file, ct);
-    }
-    File.Move(temp, target, overwrite: true);
-    return Results.Ok(new { index, bytes = new FileInfo(target).Length });
+    return await StoreUploadAsync(request, clips.ClipTargetPath(matchId, index), quota, quota.MaxClipBytes, ct);
 });
 
 render.MapPost("/render/{matchId}/complete", (string matchId, RenderLeaseService leases, ClipService clips, FullGameService full, string kind = "clips") =>
@@ -1159,7 +1224,7 @@ read.MapGet("/matches/{id}", async (AccountContext acct, string id, LeagueDbCont
         }),
         ItemEvents = match.ItemEvents.Select(i => new { i.TimeSec, i.Kind, i.ItemId }),
     });
-});
+}).CacheOutput(PublicReadCache);
 
 // Collapse-focused death analytics over the recent ranked games with timelines.
 // Deliberately centred on collapse count and contest quality, not KDA cosmetics.
@@ -1177,22 +1242,22 @@ read.MapGet("/matches/{id}/track", async (string id, MatchTrackService track, Ca
 // The Lens: coaching scores for the recent window vs the player's own history,
 // optionally scoped to one role (TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY).
 read.MapGet("/lens", async (LensService lens, int window = 20, int? days = null, string? role = null, CancellationToken ct = default) =>
-    await lens.GetAsync(window, days, role, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+    await lens.GetAsync(window, days, role, ct) is { } result ? Results.Ok(result) : Results.NoContent()).CacheOutput(PublicReadCache);
 
 // Ladder percentiles (Challenges-V1) - how the player ranks vs everyone, the
 // external benchmark the wins-vs-losses analysis can't provide.
 read.MapGet("/challenges/percentiles", async (ChallengesBenchmarkService svc, CancellationToken ct) =>
-    await svc.GetAsync(ct) is { } result ? Results.Ok(result) : Results.NoContent());
+    await svc.GetAsync(ct) is { } result ? Results.Ok(result) : Results.NoContent()).CacheOutput(PublicReadCache);
 
 // The Fundamentals ladder: curriculum skills pinned to rank tiers, each scored
 // by self-percentile and anchored on Riot's own challenge levels where mapped.
 read.MapGet("/fundamentals", async (FundamentalsService svc, int window = 20, int? days = null, string? role = null, CancellationToken ct = default) =>
-    await svc.GetAsync(window, days, role, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+    await svc.GetAsync(window, days, role, ct) is { } result ? Results.Ok(result) : Results.NoContent()).CacheOutput(PublicReadCache);
 
 // The three questions, answered per game and blind to the result: out-dueled
 // my lane / fights bought the map / stepped with the enemy accounted for.
 read.MapGet("/matches/{id}/review", async (string id, ReviewService svc, CancellationToken ct) =>
-    await svc.GetAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+    await svc.GetAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent()).CacheOutput(PublicReadCache);
 
 // The between-games review: the moments the player was in, as replay
 // timestamps, for the agent to drive the game client through.
@@ -1204,7 +1269,7 @@ read.MapGet("/gameplans", (GameplanService svc) => Results.Ok(svc.List()));
 read.MapGet("/gameplans/rules/defaults", () => Results.Ok(GameplanRules.Defaults));
 owner.MapGet("/gameplans/export", (GameplanService svc) =>
     Results.File(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(svc.Export(), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web) { WriteIndented = true }),
-        "application/json", $"gameplans-{DateTime.Now:yyyyMMdd-HHmm}.json"));
+        "application/json", $"gameplans-{DateTime.UtcNow:yyyyMMdd-HHmm}.json"));
 owner.MapPost("/gameplans/import", (GameplanBundle bundle, GameplanService svc) => Results.Ok(svc.Import(bundle)));
 read.MapGet("/gameplans/{champion}", (string champion, GameplanService svc) =>
     svc.Get(champion) is { } plan ? Results.Ok(plan) : Results.NotFound());
@@ -1223,7 +1288,7 @@ read.MapGet("/matches/{id}/gameplan", async (string id, GameplanService svc, Can
 // Verdict triples for a page of matches (the list rows' process chips).
 read.MapGet("/reviews", async (string ids, ReviewService svc, CancellationToken ct) =>
     Results.Ok(await svc.VerdictsAsync(
-        ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(100).ToArray(), ct)));
+        ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(100).ToArray(), ct))).CacheOutput(PublicReadCache);
 
 // The dashboard aggregate: coach-style stats over recent ranked games.
 // lastGames takes precedence over days; neither = whole history.
@@ -1245,7 +1310,7 @@ owner.MapPost("/ranks/backfill", (AccountScopes scopes, AccountContext acct, Job
         }
     });
     return Results.Accepted($"/api/a/{acct.UrlSegment}/jobs/status", jobs.Snapshot());
-});
+}).CacheOutput(PublicReadCache);
 
 owner.MapPost("/analytics/reprocess", (AccountScopes scopes, AccountContext acct, JobStatusService jobs) =>
 {
@@ -1468,7 +1533,7 @@ owner.MapGet("/export/all.zip", async (AccountContext acct, LeagueDbContext db, 
         await AddAsync("dashboard.json", System.Text.Json.JsonSerializer.Serialize(dashboard, jsonOpts));
         await AddAsync("summary.json", System.Text.Json.JsonSerializer.Serialize(summary, jsonOpts));
     }
-    return Results.File(ms.ToArray(), "application/zip", $"leaguetracker-export-{DateTime.Now:yyyyMMdd-HHmm}.zip");
+    return Results.File(ms.ToArray(), "application/zip", $"leaguetracker-export-{DateTime.UtcNow:yyyyMMdd-HHmm}.zip");
 });
 }
 
@@ -1507,6 +1572,13 @@ static object MatchListItem(Match m, string? items = null, int? summoner1Id = nu
 
 static IResult CsvFile(string fileName, string csv) =>
     Results.File(Encoding.UTF8.GetBytes(csv), "text/csv", fileName);
+
+// OwnerUserId is admin-only and null otherwise; the serializer drops nulls
+// so a visitor never sees the property at all.
+public sealed record AccountView(
+    string Id, string Slug, string Label, string RiotId, string GameName, string TagLine, bool HideLp, string Platform,
+    string Region, string Path, bool FromConfig, bool Owned, bool Mine, bool MediaPublic, bool Available,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? OwnerUserId);
 
 public sealed record AddAccountRequest(string RiotId, string Region, string? DisplayName);
 

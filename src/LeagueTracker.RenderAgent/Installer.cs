@@ -39,7 +39,7 @@ public static class Installer
     /// running agent, touches nothing else.
     public static int Setup(AgentConfig config)
     {
-        if (!ShowSetup(config)) return 1;
+        if (ShowSetup(config) is null) return 1;
         if (OtherInstance(ExePath) is not null) AgentSupervisor.RestartRunningAgent();
         return 0;
     }
@@ -47,27 +47,29 @@ public static class Installer
     /// The setup window on its own STA thread: Program.cs is an async Main
     /// (MTA), and the shell dialogs the form opens (Browse… is a
     /// FolderBrowserDialog) refuse to run outside a single-threaded apartment.
-    private static bool ShowSetup(AgentConfig config)
+    // Null when the person cancelled; otherwise what enrolment answered on
+    // Save ("" when it said nothing).
+    private static string? ShowSetup(AgentConfig config)
     {
-        var ok = false;
+        string? enrolment = null;
         var ui = new Thread(() =>
         {
             Application.EnableVisualStyles();
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             using var setup = new SetupForm(config);
-            ok = setup.ShowDialog() == DialogResult.OK;
+            if (setup.ShowDialog() == DialogResult.OK) enrolment = setup.EnrolmentVerdict ?? "";
         }) { Name = "setup", IsBackground = false };
         ui.SetApartmentState(ApartmentState.STA);
         ui.Start();
         ui.Join();
-        return ok;
+        return enrolment;
     }
 
     public static int Install(AgentConfig config)
     {
         // The setup window first: --install is what a friend double-clicks,
         // and it must be able to start from a bare zip.
-        if (!ShowSetup(config)) return 1;
+        if (ShowSetup(config) is not { } enrolment) return 1;
         config = AgentConfig.Load();
 
         var problems = new List<string>();
@@ -89,6 +91,7 @@ public static class Installer
 
         var summary = $"LeagueTracker agent {AgentConfig.Version} installed - it now starts with Windows and is {(alreadyRunning ? "restarting with the new settings" : "starting now")}.\n\n" +
                       $"Role: {config.Role}\nTracker: {config.ServerUrl}\n\n" +
+                      (enrolment is { Length: > 0 } ? enrolment + "\n\n" : "") +
                       "Look for the icon in the tray next to the clock: right-click for pause/resume, the log, and quit.";
         if (problems is { Count: > 0 }) summary += "\n\nNeeds attention:\n - " + string.Join("\n - ", problems);
         MessageBox.Show(summary, "LeagueTracker agent", MessageBoxButtons.OK, problems is { Count: > 0 } ? MessageBoxIcon.Warning : MessageBoxIcon.Information);

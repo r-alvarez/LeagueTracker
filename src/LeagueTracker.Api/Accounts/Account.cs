@@ -14,6 +14,10 @@ public sealed class Account
     // The User who proved this is their Riot account; null = an unowned
     // public profile (Riot-derived data only, nothing to mutate).
     public string? OwnerUserId { get; set; }
+    // The signed-in user who typed this Riot ID into the add box: they may
+    // untrack it again while nobody has claimed it. Null for config-seeded
+    // and pre-registry accounts.
+    public string? AddedByUserId { get; set; }
     // Owner setting: recordings, clips and renders on the public profile.
     // Off by default - a stranger's footage is private until they say so.
     public bool MediaPublic { get; set; }
@@ -75,4 +79,10 @@ public sealed class AccountsOptions
     /// The account "/" shows and account-less requests without a mapped host
     /// fall back to. Blank = the first.
     public string Default { get; set; } = "";
+    // Every account is a permanent poller slot, a schema and a warm
+    // connection: the site stops taking new ones at these ceilings. Config
+    // accounts count towards MaxAccounts; a user's total counts what they
+    // own plus what they added and nobody claimed.
+    public int MaxAccounts { get; set; } = 200;
+    public int MaxAccountsPerUser { get; set; } = 5;
 }

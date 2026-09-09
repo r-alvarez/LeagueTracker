@@ -40,7 +40,7 @@ public sealed class UserStore(RegistryDatabase registry, IOptions<AuthOptions> a
         {
             user = new User { Id = Ids.New(), Email = key, DisplayName = DefaultDisplayName(key), CreatedUtc = DateTime.UtcNow, IsAdmin = admin ?? false };
             db.Users.Add(user);
-            log.LogInformation("User {Email} created from configuration{Admin}", key, user.IsAdmin ? " (admin)" : "");
+            log.LogInformation("User {UserId} created from configuration{Admin}", user.Id, user.IsAdmin ? " (admin)" : "");
         }
         else if (admin is { } a && user.IsAdmin != a)
         {
@@ -69,7 +69,7 @@ public sealed class UserStore(RegistryDatabase registry, IOptions<AuthOptions> a
         };
         db.Users.Add(user);
         db.SaveChanges();
-        log.LogInformation("User {Email} invited by {By}", key, invitedByUserId);
+        log.LogInformation("User {UserId} invited by {By}", user.Id, invitedByUserId);
         return user;
     }
 
@@ -94,7 +94,7 @@ public sealed class UserStore(RegistryDatabase registry, IOptions<AuthOptions> a
         db.UserLogins.Where(l => l.UserId == userId).ExecuteDelete();
         db.Users.Remove(user);
         db.SaveChanges();
-        log.LogInformation("User {Email}: invite removed", user.Email);
+        log.LogInformation("User {UserId}: invite removed", user.Id);
         return true;
     }
 
@@ -116,7 +116,7 @@ public sealed class UserStore(RegistryDatabase registry, IOptions<AuthOptions> a
             // about the email.
             user = invited;
             db.UserLogins.Add(new UserLogin { UserId = user.Id, Issuer = issuer, Subject = subject, CreatedUtc = now, LastUsedUtc = now });
-            log.LogInformation("User {Email}: invited person signed in from {Issuer}", user.Email, issuer);
+            log.LogInformation("User {UserId}: invited person signed in from {Issuer}", user.Id, issuer);
         }
         else if (emailVerified && Normalize(email) is { } key && db.Users.Include(u => u.Logins).FirstOrDefault(u => u.Email == key) is { } byEmail)
         {
@@ -124,7 +124,7 @@ public sealed class UserStore(RegistryDatabase registry, IOptions<AuthOptions> a
             // existing row - never a second user for the same person.
             user = byEmail;
             db.UserLogins.Add(new UserLogin { UserId = user.Id, Issuer = issuer, Subject = subject, CreatedUtc = now, LastUsedUtc = now });
-            log.LogInformation("User {Email}: linked login from {Issuer}", user.Email, issuer);
+            log.LogInformation("User {UserId}: linked login from {Issuer}", user.Id, issuer);
         }
         var created = false;
         if (user is null)
@@ -148,7 +148,7 @@ public sealed class UserStore(RegistryDatabase registry, IOptions<AuthOptions> a
             db.Users.Add(user);
             db.UserLogins.Add(new UserLogin { UserId = user.Id, Issuer = issuer, Subject = subject, CreatedUtc = now, LastUsedUtc = now });
             created = true;
-            log.LogInformation("User {Email} created on first login from {Issuer}", user.Email, issuer);
+            log.LogInformation("User {UserId} created on first login from {Issuer}", user.Id, issuer);
         }
         if (displayName is { Length: > 0 } && user.DisplayName == DefaultDisplayName(user.Email)) user.DisplayName = displayName;
         user.LastSeenUtc = now;
@@ -164,7 +164,7 @@ public sealed class UserStore(RegistryDatabase registry, IOptions<AuthOptions> a
         if (db.Users.FirstOrDefault(u => u.Id == userId) is not { } user) return false;
         user.DisplayName = displayName?.Trim() is { Length: > 0 } name ? name[..Math.Min(name.Length, 64)] : DefaultDisplayName(user.Email);
         db.SaveChanges();
-        log.LogInformation("User {Email}: display name set to {Name}", user.Email, user.DisplayName);
+        log.LogInformation("User {UserId}: display name set to {Name}", user.Id, user.DisplayName);
         return true;
     }
 

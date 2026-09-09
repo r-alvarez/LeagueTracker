@@ -23,7 +23,7 @@ public sealed class RegistryBootstrap(AccountRegistry accounts, UserStore users,
                 if (account.OwnerUserId != owner.Id)
                 {
                     accounts.Update(account, a => a.OwnerUserId = owner.Id);
-                    log.LogInformation("Account {RiotId}: owner {Email} (from configuration)", account.RiotId, owner.Email);
+                    log.LogInformation("Account {RiotId}: owner {UserId} (from configuration)", account.RiotId, owner.Id);
                 }
             }
             if (account.Puuid is null && initializer.IsReady(account)) HoistPuuid(account);

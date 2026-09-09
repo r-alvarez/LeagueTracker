@@ -88,12 +88,14 @@ export default function Machines() {
   const whenShort = (s: string | null) => (s
     ? new Date(s).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
     : '—')
-  const seen = (k: AgentKey) => k.live?.seenUtc ?? k.lastSeenUtc
+  const seen = (k: AgentKey) => k.live?.seenUtc ?? k.lastSeenUtc ?? null
   // One badge carries both facts: can the key talk to us, and is the agent
   // behind it alive. Approved + no heartbeat is the plain word.
   const statusOf = (k: AgentKey): { cls: string; text: string; title: string } => {
     if (k.status !== 'approved') return { cls: k.status === 'pending' ? 'remake' : 'loss', text: k.status === 'pending' ? 'waiting' : k.status, title: k.status === 'pending' ? 'Waiting for approval' : 'Key revoked - the machine is cut off' }
     const live = k.live
+    // Someone else's renderer: the server says up or not, nothing more.
+    if (live === undefined) return k.online ? { cls: 'win', text: 'online', title: 'Approved and reporting' } : { cls: 'loss', text: 'offline', title: 'Approved; not reporting right now' }
     if (!live) return { cls: 'remake', text: 'approved', title: 'Approved; the agent has not reported yet' }
     if (!live.online) return { cls: 'loss', text: 'offline', title: 'Approved; the agent has stopped reporting' }
     return live.paused ? { cls: 'remake', text: 'paused', title: 'Approved; paused from its tray icon' } : { cls: 'win', text: 'online', title: 'Approved and reporting' }
@@ -164,6 +166,8 @@ export default function Machines() {
               <tbody>
                 {keys.map(k => {
                   const live = k.live
+                  const logs = k.logs ?? []
+                  const alsoFor = k.actsForRiotIds ?? []
                   const outdated = !!(live && latest && live.version !== latest && live.version !== '0.0.0.0')
                   const status = statusOf(k)
                   const assignOpen = assigning?.id === k.id
@@ -175,14 +179,14 @@ export default function Machines() {
                         <strong>{k.name}</strong>
                         {k.machine && k.machine !== k.name && <span className="mut sm-text"> · {k.machine}</span>}
                         <span className="mut sm-text"> · {k.role}</span>
-                        {k.actsForRiotIds?.length > 0 && <span className="mut sm-text"> · also {k.actsForRiotIds.join(', ')}</span>}
+                        {alsoFor.length > 0 && <span className="mut sm-text"> · also {alsoFor.join(', ')}</span>}
                         {auth.isAdmin && <span className="mut sm-text" title="Key id - what Agent__Profiles__<id>__* overrides are keyed by"> · <code>{k.id}</code></span>}
-                        {!k.bound && <span className="warn-text sm-text"> · not tied to anyone</span>}
-                        {k.logs.length > 0 && (
+                        {k.bound === false && <span className="warn-text sm-text"> · not tied to anyone</span>}
+                        {logs.length > 0 && (
                           <div className="sm-text">
-                            <a href={`/api/me/agents/${k.id}/logs/${k.logs[0].file}`} target="_blank" rel="noreferrer"
-                              title={`agent.log tail shipped ${when(k.logs[0].whenUtc)} (${Math.round(k.logs[0].sizeBytes / 1024)} KB)${k.logs.length > 1 ? ` · ${k.logs.length - 1} older` : ''}`}>
-                              log · {whenShort(k.logs[0].whenUtc)}
+                            <a href={`/api/me/agents/${k.id}/logs/${logs[0].file}`} target="_blank" rel="noreferrer"
+                              title={`agent.log tail shipped ${when(logs[0].whenUtc)} (${Math.round(logs[0].sizeBytes / 1024)} KB)${logs.length > 1 ? ` · ${logs.length - 1} older` : ''}`}>
+                              log · {whenShort(logs[0].whenUtc)}
                             </a>
                           </div>
                         )}
@@ -210,7 +214,7 @@ export default function Machines() {
                               {live.lastRecordingUtc && <div className="mut sm-text" title={when(live.lastRecordingUtc)}>last recording {whenShort(live.lastRecordingUtc)}</div>}
                             </>
                           : k.status === 'pending'
-                            ? <span className="mut sm-text">asked {whenShort(k.createdUtc)}</span>
+                            ? <span className="mut sm-text">asked {whenShort(k.createdUtc ?? null)}</span>
                             : <span className="mut sm-text">no heartbeat</span>}
                       </td>
                       <td title={when(seen(k))}>{whenShort(seen(k))}</td>
@@ -227,7 +231,7 @@ export default function Machines() {
                               disabled={busy === k.id} onClick={() => act(k.id, 'restart')}>Restart</button>
                             <button className="action sm-action" title="Ask this agent to send the tail of its agent.log - it arrives on the next heartbeat (about a minute)"
                               disabled={busy === k.id || !!logAsked[k.id]} onClick={() => askLog(k.id)}>
-                              {logAsked[k.id] && !(k.logs[0] && new Date(k.logs[0].whenUtc).getTime() > logAsked[k.id]) ? 'Log asked…' : 'Log'}
+                              {logAsked[k.id] && !(logs[0] && new Date(logs[0].whenUtc).getTime() > logAsked[k.id]) ? 'Log asked…' : 'Log'}
                             </button>
                           </>}
                           <button className="action sm-action" disabled={busy === k.id} onClick={() => act(k.id, 'revoke')}>Revoke</button>

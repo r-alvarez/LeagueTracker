@@ -20,6 +20,10 @@ RUN dotnet publish LeagueTracker.Api -c Release -o /app/publish --no-restore
 
 # --- Runtime ------------------------------------------------------------------
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
+# The aspnet image ships no curl/wget and `dotnet` cannot make an HTTP call
+# by itself, so the probe below needs a client; curl is the one every
+# compose healthcheck override and hand check can reuse.
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # chown beats whatever restrictive mode the build context arrived with (the
 # deploy clone's umask leaks into publish output via preserved source perms).
@@ -37,4 +41,8 @@ ENV Urls=http://+:5170 \
     Riot__DataDir=/data \
     Riot__ApiKeyFile=/data/riot-api-key.txt
 EXPOSE 5170
+# Liveness only: the process answers. Readiness (/readyz: database reachable,
+# poller passing) belongs to the compose that knows the deployment.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:5170/healthz || exit 1
 ENTRYPOINT ["dotnet", "LeagueTracker.Api.dll"]

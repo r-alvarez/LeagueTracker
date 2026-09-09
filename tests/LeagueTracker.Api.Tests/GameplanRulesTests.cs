@@ -30,6 +30,34 @@ public class GameplanRulesTests
         Assert.Null(GameplanRules.Normalize(Rule("free_form_expression")));
     }
 
+    [Fact]
+    public void Normalize_clamps_a_param_outside_its_range()
+    {
+        var spec = GameplanRules.Normalize(Rule("jungler_fights", ("minPct", 250), ("fromSec", -60)))!;
+
+        Assert.Equal(100, spec.Params["minPct"]);
+        Assert.Equal(0, spec.Params["fromSec"]);
+    }
+
+    [Fact]
+    public void Saving_names_the_param_that_is_out_of_range()
+    {
+        Assert.Null(GameplanRules.OutOfRange(Rule("jungler_fights", ("minPct", 60))));
+        Assert.Contains("minPct must be between 0 and 100", GameplanRules.OutOfRange(Rule("jungler_fights", ("minPct", 250))));
+    }
+
+    // minFights 0 with no fights used to divide zero by zero and round the NaN.
+    [Fact]
+    public void Jungler_fights_with_no_fights_at_all_is_not_applicable_whatever_the_minimum()
+    {
+        var ctx = new Scenario().Duration(1800).Build();
+
+        var result = GameplanRules.Evaluate(Rule("jungler_fights", ("minFights", 0)), ctx);
+
+        Assert.Equal(GameplanRules.NotApplicable, result.Status);
+        Assert.Contains("No fight of yours", result.Detail);
+    }
+
     // --- at 6, look for a 2v2 with the jungler ---------------------------------------
 
     [Fact]

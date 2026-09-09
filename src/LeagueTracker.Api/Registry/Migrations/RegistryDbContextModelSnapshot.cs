@@ -27,6 +27,9 @@ namespace LeagueTracker.Api.Registry.Migrations
                     b.Property<string>("Id")
                         .HasColumnType("text");
 
+                    b.Property<string>("AddedByUserId")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("timestamp with time zone");
 

@@ -12,7 +12,7 @@ The container sees one volume, `/data` = `/mnt/MediaPool/apps/leaguetracker`.
 | Path | What it holds | Rebuildable? |
 | --- | --- | --- |
 | `postgres/` | The PostgreSQL cluster (the `postgres` service's volume, `/var/lib/postgresql` inside). One database, `leaguetracker`: the `registry` schema holds users and their Auth0 logins, tracked accounts (surrogate id, puuid, owner, settings, folder), agent keys, join codes, ownership claims; one `acct_<id>` schema per account holds that account's index (below) | The registry: **no**, it must never be lost. The account schemas: mostly — see §3 |
-| `backups/` | `leaguetracker-<utc stamp>.dump`: a nightly `pg_dump` of the whole database by the `pg-backup` service, 14 kept | Yes, every night; the copy that restores on any host |
+| `backups/` | `leaguetracker-<utc stamp>.dump`: a `pg_dump` of the whole database by the `pg-backup` service at 02:00 UTC every day (`BACKUP_AT` in the compose), 14 days kept | Yes, every night; the copy that restores on any host |
 | `registry.db.imported`, `<account>/leaguetracker.db.imported` (+ `-wal`, `-shm`) | The SQLite era's files, kept after their verified one-time import into the schemas (§6) | Disposable once a dump exists |
 | `keys/` | ASP.NET Data Protection keys: session cookies are signed with them | No, but losing them only signs everyone out. As sensitive as a session cookie |
 | `main/riot-api-key.txt` | The Riot API key (`Riot__ApiKeyFile`) | Re-issue at developer.riotgames.com |
@@ -130,6 +130,33 @@ new ids.
   is fixed (Portainer's "re-pull image" must be on for that path).
 - `GET /api/version` identifies what is running: informational version,
   image build time, process start.
+- Every clock in the stack is UTC: no container sets `TZ`, the `postgres`
+  service is started with `timezone=UTC`/`log_timezone=UTC` (its cluster
+  was initialised under Europe/London and `postgresql.conf` still says so;
+  the flags win), dump names and every log line carry a `Z`. Anything that
+  shows local time does it in the browser.
+- `pg-backup` dumps at a fixed wall-clock time (02:00 UTC), not "24 h
+  after the container started": every push redeploys the stack, so a
+  sleep-based interval reset on each deploy and the "nightly" dump landed
+  whenever the last push happened. The sidecar logs `next run at 02:00Z, in
+  Ns` on start and after each dump, so the Portainer log shows the schedule
+  is armed. A redeploy during the dump loses that run (the `.partial` file
+  is discarded), the next one is 02:00 the day after.
+- Container logs are capped (`logging:` in the compose): the app keeps
+  5 x 10 MB, each sidecar 3 x 2 MB, rotated by Docker. Older lines are
+  gone; anything worth keeping longer than a day or two belongs in the
+  database or a file under `/data`.
+- Health: `GET /healthz` answers 200 whenever the process is up (the
+  image's own `HEALTHCHECK`, for `docker run` and the dev compose);
+  `GET /readyz` answers 200 only while the registry database is reachable
+  and the poller has completed a pass recently, 503 otherwise. The TrueNAS
+  stack probes `/readyz` every 30 s (3 misses = unhealthy, 3 min grace after
+  a start for migrations and the first poll pass), so Portainer shows a
+  wedged poller as unhealthy without anyone reading logs. Both endpoints
+  are anonymous. Docker does **not** restart an unhealthy container: the
+  state is a signal, the fix is `docker restart leaguetracker` (or a
+  redeploy) once the log says why. The waker starts only after the tracker
+  is healthy, so on a redeploy it is the last container up.
 - The GitHub ruleset "Main" (id 20981187, created 2026-08-18: no
   deletion, no force-push, the four CI checks, PR required) **targets no
   branch** as of 2026-08-26 — its include list is empty — so nothing is
@@ -153,8 +180,53 @@ new ids.
 | `ACCOUNT_2_GAMENAME`, `ACCOUNT_2_TAGLINE`, `ACCOUNT_2_DISPLAYNAME` | A friend's Riot ID and name — theirs, not the public repo's. All three unset: the entry is skipped and the registry's copy is used |
 | `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` | The shared YouTube channel grant handed to agents |
 | `YT_BEN_CLIENT_ID`, `YT_BEN_CLIENT_SECRET`, `YT_BEN_REFRESH_TOKEN` | One agent's own Google project (keyed by its key id in the compose) |
-| `POSTGRES_PASSWORD` | The database password: the `postgres` service sets it, the app and `pg-backup` connect with it. Must exist before the first deploy of the PostgreSQL build - the compose refuses to start without it |
+| `POSTGRES_PASSWORD` | The database password: the `postgres` service sets it, the app and `pg-backup` connect with it. Must exist before the first deploy of the PostgreSQL build - the compose refuses to start without it. The app's connection string caps its one pool at 80 of the server's 100 connections so `pg_dump` and a hand `psql` always get in |
 | `PC_MAC`, `WOL_BROADCAST`, `UNIFI_URL`, `UNIFI_USER`, `UNIFI_PASS` | The waker |
+| `TRACKER_AGENT_KEY` | The waker's approved agent key: `GET /api/render/pending` needs one since reads are authorised. Optional so the stack starts without it; until it is set the waker logs one line and every poll is a 401 (nothing wakes the PC). Enrolled once, below |
+
+### Enrolling the waker (once)
+
+The waker is a machine like any recorder: it enrols with a key it makes
+up, an owner approves it, the key goes in the stack environment.
+
+1. On the site, as an admin: Data & sync → Machines → **Join code**. It
+   lives 15 minutes and works once.
+2. From any shell that reaches the site, with a random key of 32+
+   characters (`openssl rand -hex 32` is fine):
+
+       curl -sS -X POST https://league.rjav-tech.co.uk/api/agent/enroll \
+         -H 'Content-Type: application/json' \
+         -d '{"key":"<the key>","name":"waker","machine":"truenas","code":"<join code>"}'
+
+   The answer is `{"id":"…","status":"pending","created":true}`.
+3. Machines → **Waiting for approval** → **Approve** the `waker` row,
+   role renderer (any approved key may read the queue count).
+4. Portainer → the stack → environment: add `TRACKER_AGENT_KEY=<the key>`,
+   redeploy. The waker's log should stop saying 401 within a minute:
+   `watching 1 tracker(s) …` with no `cannot read queue` line after it.
+
+Revoking the row on the Machines page is how to lock the waker out; it logs
+the 401 once and keeps polling until a new key is set.
+
+## 5a. Ceilings (app settings, `Accounts__*` / `Uploads__*` env vars)
+
+Every tracked account is a permanent poller slot, a schema and a warm
+connection; every upload lands on the NAS. The defaults are for a small
+public instance - raise them knowingly: the nightly `pg_dump` fails near
+550 schemas and schema-per-account is the wrong shape past a thousand
+(`decisions/ops-postgres.md`).
+
+| Setting | Default | What it stops |
+| --- | --- | --- |
+| `Accounts__MaxAccounts` | 200 | The add box refuses once this many accounts exist (config ones count) |
+| `Accounts__MaxAccountsPerUser` | 5 | Per signed-in person: what they own plus what they added and nobody claimed |
+| `Uploads__MaxMediaGbPerAccount` | 60 | Recordings, clips and renders per account; the raw game JSON is not counted |
+| `Uploads__MinFreeGb` | 20 | No upload is accepted that would leave less than this free on the data disk |
+| `Uploads__MaxVodGb` / `MaxRenderGb` / `MaxClipMb` / `MaxSidecarMb` | 8 / 4 / 512 / 64 | Per-file caps, enforced while the body streams |
+| `Uploads__SweepTempAfterHours` | 24 | Interrupted `.tmp`/`.part` uploads older than this are removed (every six hours) |
+
+A refused upload answers 413 (over a cap) or 507 (allowance or disk);
+the agent retries a couple of times and then logs it.
 
 ## 6. Moving off SQLite (the first boot of the PostgreSQL build)
 

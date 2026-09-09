@@ -7,11 +7,15 @@ namespace LeagueTracker.Api.Services;
 /// Turns raw Riot JSON (match + optional timeline) into entities and a raw file
 /// on disk. Shared by the live poller, the history backfill and the importer -
 /// one code path, identical results.
-public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
+public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths, ILogger<MatchIngestService> logger)
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
 
     public string GamesDir => paths.GamesDir;
+
+    // The payload itself is broken, so no retry will ever ingest it. Anything
+    // else that fails during ingest is worth another pass.
+    public static bool IsUnprocessable(Exception ex) => ex is UnprocessableMatchException or JsonException;
 
     /// withRanks: look up all 10 participants' current League-V4 entries.
     /// ranksAtGameTime: mark those ranks as captured right after the game (live
@@ -21,10 +25,11 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
         bool withRanks, bool ranksAtGameTime, CancellationToken ct)
     {
         var dto = JsonSerializer.Deserialize<RiotMatchDto>(matchRaw, Json)
-            ?? throw new InvalidOperationException("Match JSON did not deserialize");
+            ?? throw new UnprocessableMatchException("Match JSON did not deserialize");
         var info = dto.Info;
+        if (info.Participants is not { Count: > 0 }) throw new UnprocessableMatchException($"Match {dto.Metadata.MatchId} has no participants");
         var me = info.Participants.FirstOrDefault(p => p.Puuid == myPuuid)
-            ?? throw new InvalidOperationException($"Tracked player not found in match {dto.Metadata.MatchId}");
+            ?? throw new UnprocessableMatchException($"Tracked player not found in match {dto.Metadata.MatchId}");
 
         var match = new Match
         {
@@ -124,12 +129,51 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
         match.AllyRanksKnown = allyValues.Count;
         match.EnemyRanksKnown = enemyValues.Count;
 
-        if (timelineRaw is not null)
-        {
-            ApplyTimelineAnalysis(match, TimelineAnalyzer.Analyze(timelineRaw, info, me));
-        }
+        if (timelineRaw is not null) match.HasTimeline = TryApplyTimeline(match, timelineRaw, info, me);
 
         return match;
+    }
+
+    public sealed record StoredGame(string MatchRaw, string? TimelineRaw);
+
+    public async Task<StoredGame?> ReadStoredAsync(Match match, CancellationToken ct)
+    {
+        if (paths.ResolveRawGame(match.Id, match.RawPath) is not { } rawPath) return null;
+        using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(rawPath, ct));
+        var timelineRaw = doc.RootElement.TryGetProperty("timeline", out var tl) && tl.ValueKind is not JsonValueKind.Null ? tl.GetRawText() : null;
+        return new StoredGame(doc.RootElement.GetProperty("match").GetRawText(), timelineRaw);
+    }
+
+    // The raw file is rewritten before the analysis runs, so a timeline the
+    // analyzer cannot read yet is still on disk for a later reprocess.
+    public async Task ApplyRepairedTimelineAsync(Match match, string matchRaw, string timelineRaw, string myPuuid, CancellationToken ct)
+    {
+        match.RawPath = await SaveRawAsync(match.Id, matchRaw, timelineRaw, ct);
+        var dto = JsonSerializer.Deserialize<RiotMatchDto>(matchRaw, Json)
+            ?? throw new UnprocessableMatchException("Match JSON did not deserialize");
+        // IsMe (set at ingest) is the stable identity: puuids are encrypted per
+        // API key, so a raw file written under an older key never carries today's.
+        var myPid = match.Participants.FirstOrDefault(p => p.IsMe)?.ParticipantId;
+        var me = dto.Info.Participants.FirstOrDefault(p => myPid is { } pid ? p.ParticipantId == pid : p.Puuid == myPuuid)
+            ?? throw new UnprocessableMatchException($"Tracked player not found in match {match.Id}");
+        match.HasTimeline = TryApplyTimeline(match, timelineRaw, dto.Info, me);
+    }
+
+    // An analyzer that trips on one odd frame (a non-number where it reads an
+    // int) must not cost the match: the timeline stays in the raw file for a
+    // reprocess once the analyzer is fixed, and the row lands without it.
+    public bool TryApplyTimeline(Match match, string timelineRaw, MatchInfoDto info, MatchParticipantDto me)
+    {
+        try
+        {
+            ApplyTimelineAnalysis(match, TimelineAnalyzer.Analyze(timelineRaw, info, me));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Timeline analysis failed for {MatchId}; stored without timeline metrics", match.Id);
+            return false;
+        }
     }
 
     public static void ApplyTimelineAnalysis(Match match, TimelineAnalysis analysis)
@@ -260,3 +304,5 @@ public sealed class MatchIngestService(RankLookupService ranks, DataPaths paths)
         return path;
     }
 }
+
+public sealed class UnprocessableMatchException(string message) : Exception(message);

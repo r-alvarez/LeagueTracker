@@ -243,25 +243,40 @@ public sealed class AgentConfig
         return config;
     }
 
+    /// What the tracker may set on a machine it does not own: its own
+    /// credentials, naming, upload preferences and picture-quality knobs.
+    /// Anything that changes what the agent records, deletes, opens on the
+    /// screen or runs (paths, role, capture toggles, disk budgets, visibility,
+    /// review, client launch) stays local - a compromised or mistyped profile
+    /// must not be able to reach past the tracker's own concerns.
+    private static readonly HashSet<string> ProfileKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        nameof(PollSeconds), nameof(CaptureFramerate), nameof(MaxWindowsPerJob),
+        nameof(RecordFramerate), nameof(RecordQuality), nameof(RecordMaxHeight), nameof(CaptureBackend), nameof(HdrToneMap),
+        nameof(RecordNamePrefix), nameof(UploadVods), nameof(UploadVodSidecars), nameof(UploadInGameMbps),
+        nameof(YouTubeUpload), nameof(YouTubeClientId), nameof(YouTubeClientSecret), nameof(YouTubeRefreshToken),
+        nameof(PostGameReviewDelaySec), nameof(PostGameReviewAutoAdvance), nameof(PostGameReviewWaitMin),
+    };
+
+    private readonly HashSet<string> _reportedIgnored = new(StringComparer.OrdinalIgnoreCase);
+
     /// The tracker's agent profile: string values keyed by property name.
     /// Local settings and environment overrides stay; only unset keys take the
     /// server's value. Returns the names that changed.
     public List<string> ApplyProfile(IReadOnlyDictionary<string, string> profile)
     {
         var applied = new List<string>();
+        var ignored = new List<string>();
         foreach (var (key, value) in profile)
         {
             if (_localKeys.Contains(key)) continue;
-            if (typeof(AgentConfig).GetProperty(key, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase) is not { CanWrite: true } property) continue;
-            object converted;
-            try
+            if (!ProfileKeys.Contains(key))
             {
-                converted = property.PropertyType == typeof(bool) ? value is "1" or "true" or "True"
-                    : property.PropertyType == typeof(int) ? int.Parse(value)
-                    : property.PropertyType == typeof(double) ? double.Parse(value, System.Globalization.CultureInfo.InvariantCulture)
-                    : value;
+                if (_reportedIgnored.Add(key)) ignored.Add(key);
+                continue;
             }
-            catch (FormatException)
+            if (typeof(AgentConfig).GetProperty(key, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase) is not { CanWrite: true } property) continue;
+            if (ParseProfileValue(value, property.PropertyType) is not { } converted)
             {
                 Log.Warn($"Profile value for {key} is not a {property.PropertyType.Name}: \"{value}\"");
                 continue;
@@ -270,7 +285,17 @@ public sealed class AgentConfig
             property.SetValue(this, converted);
             applied.Add(property.Name);
         }
+        // The profile comes back hourly; naming a key once is enough.
+        if (ignored is { Count: > 0 }) Log.Warn($"Profile keys the tracker may not set on this machine, ignored: {string.Join(", ", ignored)}");
         return applied;
+    }
+
+    private static object? ParseProfileValue(string value, Type type)
+    {
+        if (type == typeof(bool)) return value is "1" or "true" or "True";
+        if (type == typeof(int)) return int.TryParse(value, out var number) ? number : null;
+        if (type == typeof(double)) return double.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var real) ? real : null;
+        return value;
     }
 }
 

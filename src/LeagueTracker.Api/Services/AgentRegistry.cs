@@ -25,16 +25,34 @@ public sealed class AgentOptions
 
     /// The shared profile with the keyed agent's overrides on top (blank
     /// overrides ignored: an unset stack env var must not blank a value).
-    public IReadOnlyDictionary<string, string> ProfileFor(string? agentId)
+    public IReadOnlyDictionary<string, string> ProfileFor(string? agentId) => ProfileFor(agentId, sharedSecrets: true);
+
+    // The shared YouTube secret and refresh token are the operator's own
+    // channel: only machines an admin owns may carry them, because any
+    // signed-in user can mint and approve a recorder key (audit B2). A
+    // secret in a key's own override block was put there for that key by
+    // the operator and always reaches it - a friend's own channel keeps
+    // working. A machine left with no token records without uploading.
+    public IReadOnlyDictionary<string, string> ProfileFor(string? agentId, bool sharedSecrets)
     {
-        if (agentId is not { Length: > 0 } || !Profiles.TryGetValue(agentId, out var overrides)) return Profile;
-        var merged = new Dictionary<string, string>(Profile, StringComparer.OrdinalIgnoreCase);
-        foreach (var (key, value) in overrides)
+        var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in Profile)
         {
-            if (value is { Length: > 0 }) merged[key] = value;
+            if (sharedSecrets || !IsSecret(key)) merged[key] = value;
         }
+        if (agentId is { Length: > 0 } && Profiles.TryGetValue(agentId, out var overrides))
+        {
+            foreach (var (key, value) in overrides)
+            {
+                if (value is { Length: > 0 }) merged[key] = value;
+            }
+        }
+        if (!merged.ContainsKey("YouTubeRefreshToken") && merged.ContainsKey("YouTubeUpload")) merged["YouTubeUpload"] = "false";
         return merged;
     }
+
+    public static bool IsSecret(string key) =>
+        key.Contains("Secret", StringComparison.OrdinalIgnoreCase) || key.Contains("Token", StringComparison.OrdinalIgnoreCase);
 
     /// Folder holding LeagueTracker.RenderAgent-<version>.zip builds. Blank =
     /// <Accounts:DataRoot or the default account's DataDir>/agent-releases -
@@ -85,7 +103,7 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
 
     public IReadOnlyDictionary<string, string> Profile => options.Value.Profile;
 
-    public IReadOnlyDictionary<string, string> ProfileFor(string? agentId) => options.Value.ProfileFor(agentId);
+    public IReadOnlyDictionary<string, string> ProfileFor(string? agentId, bool sharedSecrets) => options.Value.ProfileFor(agentId, sharedSecrets);
 
     // Override blocks that name no key: a machine name left over from when
     // overrides were keyed by name, or a typo - either way the operator
@@ -182,9 +200,6 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
             return true;
         }
     }
-
-    // Everything (admin's view, and the agent-to-agent listing).
-    public List<AgentLive> Snapshot() => SnapshotFor(null, admin: true);
 
     // The machines an owner may see: theirs, plus every renderer (a renderer
     // serves everyone, so everyone gets to know it exists); an admin sees
