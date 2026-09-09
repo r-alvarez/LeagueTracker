@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 using Match = LeagueTracker.Api.Data.Match;
 
 var builder = WebApplication.CreateBuilder(args);
+const string PublicReadCache = "public-read";
 
 builder.Services.AddWindowsService(o => o.ServiceName = "LeagueTracker");
 builder.Services.Configure<RiotOptions>(builder.Configuration.GetSection("Riot"));
@@ -113,6 +114,18 @@ builder.Services.AddDataProtection()
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    // A visitor's ceiling by address, a signed-in person's by identity, and
+    // none for agents (an upload is hundreds of chunk PUTs): once reads are
+    // public, a script with no credentials must not be able to saturate the
+    // NAS (audit D7).
+    o.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(http =>
+        http.Request.Headers.ContainsKey(AgentKeyAuthenticationHandler.HeaderName)
+            ? System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("agent")
+            : http.User.FindFirst(TrackerClaims.UserId)?.Value is { } user
+                ? System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter("user:" + user,
+                    _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions { PermitLimit = 600, Window = TimeSpan.FromMinutes(1), SegmentsPerWindow = 6, QueueLimit = 0 })
+                : System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter("ip:" + (http.Connection.RemoteIpAddress?.ToString() ?? "anon"),
+                    _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), SegmentsPerWindow = 6, QueueLimit = 0 }));
     o.AddPolicy("account-add", http => System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
         http.User.FindFirst(TrackerClaims.UserId)?.Value ?? http.Connection.RemoteIpAddress?.ToString() ?? "anon",
         _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromHours(1), SegmentsPerWindow = 4, QueueLimit = 0 }));
@@ -137,6 +150,12 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
     o.KnownIPNetworks.Clear();
     o.KnownProxies.Clear();
 });
+
+// The heavy public reads (a match with four includes, the lens, the
+// fundamentals) are identical for every anonymous visitor within a short
+// window; a signed-in owner's requests are never cached, so their own edits
+// show at once.
+builder.Services.AddOutputCache(o => o.AddPolicy(PublicReadCache, p => p.Expire(TimeSpan.FromSeconds(30)).SetVaryByQuery("*")));
 
 // Compress JSON app-side: the Traefik deployment doesn't compress (the old
 // Caddy proxy did), and this way every proxy setup gets it for free.
@@ -201,6 +220,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 app.UseCsrfGuard();
+app.UseOutputCache();
 app.UseResponseCompression();
 // Hashed bundles never change; everything else (index.html above all) must
 // revalidate every load - without an explicit Cache-Control, browsers apply
@@ -1165,7 +1185,7 @@ read.MapGet("/matches/{id}", async (AccountContext acct, string id, LeagueDbCont
         }),
         ItemEvents = match.ItemEvents.Select(i => new { i.TimeSec, i.Kind, i.ItemId }),
     });
-});
+}).CacheOutput(PublicReadCache);
 
 // Collapse-focused death analytics over the recent ranked games with timelines.
 // Deliberately centred on collapse count and contest quality, not KDA cosmetics.
@@ -1183,22 +1203,22 @@ read.MapGet("/matches/{id}/track", async (string id, MatchTrackService track, Ca
 // The Lens: coaching scores for the recent window vs the player's own history,
 // optionally scoped to one role (TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY).
 read.MapGet("/lens", async (LensService lens, int window = 20, int? days = null, string? role = null, CancellationToken ct = default) =>
-    await lens.GetAsync(window, days, role, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+    await lens.GetAsync(window, days, role, ct) is { } result ? Results.Ok(result) : Results.NoContent()).CacheOutput(PublicReadCache);
 
 // Ladder percentiles (Challenges-V1) - how the player ranks vs everyone, the
 // external benchmark the wins-vs-losses analysis can't provide.
 read.MapGet("/challenges/percentiles", async (ChallengesBenchmarkService svc, CancellationToken ct) =>
-    await svc.GetAsync(ct) is { } result ? Results.Ok(result) : Results.NoContent());
+    await svc.GetAsync(ct) is { } result ? Results.Ok(result) : Results.NoContent()).CacheOutput(PublicReadCache);
 
 // The Fundamentals ladder: curriculum skills pinned to rank tiers, each scored
 // by self-percentile and anchored on Riot's own challenge levels where mapped.
 read.MapGet("/fundamentals", async (FundamentalsService svc, int window = 20, int? days = null, string? role = null, CancellationToken ct = default) =>
-    await svc.GetAsync(window, days, role, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+    await svc.GetAsync(window, days, role, ct) is { } result ? Results.Ok(result) : Results.NoContent()).CacheOutput(PublicReadCache);
 
 // The three questions, answered per game and blind to the result: out-dueled
 // my lane / fights bought the map / stepped with the enemy accounted for.
 read.MapGet("/matches/{id}/review", async (string id, ReviewService svc, CancellationToken ct) =>
-    await svc.GetAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent());
+    await svc.GetAsync(id, ct) is { } result ? Results.Ok(result) : Results.NoContent()).CacheOutput(PublicReadCache);
 
 // The between-games review: the moments the player was in, as replay
 // timestamps, for the agent to drive the game client through.
@@ -1229,7 +1249,7 @@ read.MapGet("/matches/{id}/gameplan", async (string id, GameplanService svc, Can
 // Verdict triples for a page of matches (the list rows' process chips).
 read.MapGet("/reviews", async (string ids, ReviewService svc, CancellationToken ct) =>
     Results.Ok(await svc.VerdictsAsync(
-        ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(100).ToArray(), ct)));
+        ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(100).ToArray(), ct))).CacheOutput(PublicReadCache);
 
 // The dashboard aggregate: coach-style stats over recent ranked games.
 // lastGames takes precedence over days; neither = whole history.
@@ -1251,7 +1271,7 @@ owner.MapPost("/ranks/backfill", (AccountScopes scopes, AccountContext acct, Job
         }
     });
     return Results.Accepted($"/api/a/{acct.UrlSegment}/jobs/status", jobs.Snapshot());
-});
+}).CacheOutput(PublicReadCache);
 
 owner.MapPost("/analytics/reprocess", (AccountScopes scopes, AccountContext acct, JobStatusService jobs) =>
 {
