@@ -77,10 +77,14 @@ Remaining qualifications:
    writes/deletion during confirmation. Sidecars alone, unavailable trackers,
    mismatched recordings and older servers without `sizeBytes` remain protected
    when video delivery is enabled. No video download or re-upload is needed.
-7. Reuse the site's sharing rules. Agent discovery now uses the existing
-   `Caller.Owns` predicate, including explicit shared-PC grants. The desktop
-   bridge only reads accounts returned by discovery. This does not change the
-   site's intentionally broader authenticated Read policy.
+7. Reuse the site's sharing rules, but keep rendering and review discovery
+   separate. `/api/agent/accounts` can remain broad for a renderer's work queue;
+   `/api/agent/review/accounts` requires a bound owner and applies only owner
+   access plus explicit shared-PC grants. It never inherits the legacy
+   `AllowUnbound` exception. The desktop bridge only reads accounts returned by
+   that personal endpoint and deliberately fails closed against an older
+   server. This does not change the site's intentionally broader authenticated
+   Read policy.
 8. Evergreen runtime installation is part of agent setup. The build verifies
    Microsoft's signature on the small bootstrapper and embeds it in the agent.
    Setup.exe runs it silently when the runtime is missing; ZIP setup and the
@@ -136,9 +140,17 @@ opt-in setting.
 
 Library preferences are saved in `metadata/library-settings.json`; explicit
 preferences take precedence over profile defaults. The default is 20 games
-with the existing recording budget and keep-all setting. The library currently
-shows the latest 500 catalogue entries; very large keep-all archives need local
-pagination in a subsequent iteration. Retention examines the whole catalogue.
+with the existing recording budget and keep-all setting. The library shows the
+latest 500 catalogue entries, counts retained sidecars separately from playable
+MP4s, and enriches permitted recordings from account match history by stable
+match ID. This preserves account association across Riot ID changes and lets
+the cards show thumbnails, champion, result, KDA, opponent and loadout. Very
+large keep-all archives need local pagination in a subsequent iteration. A
+matched card opens the same `MatchDetail` used by the website and substitutes
+only its local `/vod/status` response; scoreboard, verdict, timeline, track,
+gameplan and clips still come through the account-scoped tracker APIs. An
+unmatched or offline-only file retains the simple local player. Retention
+examines the whole catalogue.
 
 Analysis caches are partitioned by installation and agent-key identity, keyed
 by schema and URL, capped at 128 MiB per identity. Artwork is separately capped

@@ -2,7 +2,7 @@ import { setReviewTransport } from '../api'
 import { account } from '../account'
 
 export interface ReviewAccount { id: string; accountId: string; region: string; slug: string; label: string; riotId: string }
-export interface Recording { id: string; name: string; matchId: string | null; player: string | null; recordedUtc: string; durationSec: number; sizeBytes: number; available: boolean; pinned: boolean; published: boolean }
+export interface Recording { id: string; name: string; matchId: string | null; player: string | null; recordedUtc: string; durationSec: number; sizeBytes: number; available: boolean; pinned: boolean; published: boolean; thumbnailUrl: string | null }
 export interface LibrarySettings { keepGames: number; maxGb: number; minFreeGb: number; keepAll: boolean }
 export interface Library { recordings: Recording[]; settings: LibrarySettings; freeGb: number }
 export interface Reply { status: number; body: string; cached: boolean; offline: boolean; savedUtc: string }

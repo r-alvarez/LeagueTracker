@@ -40,7 +40,11 @@ public sealed partial class ReviewApi : IDisposable
         var denied = false;
         foreach (var server in _servers)
         {
-            var reply = await FetchAsync(server + "/api/agent/accounts", refresh, ct);
+            // A renderer's normal discovery scope is deliberately wider than
+            // its personal gameplay. The dedicated endpoint is the boundary:
+            // an older server returning 404 yields no picker entries rather
+            // than falling back to everybody.
+            var reply = await FetchAsync(server + "/api/agent/review/accounts", refresh, ct);
             offline |= reply.Offline || reply.Status == 503;
             denied |= reply.Status is 401 or 403;
             if (reply.Status != 200) continue;
@@ -79,7 +83,7 @@ public sealed partial class ReviewApi : IDisposable
     private static partial Regex MediaPath();
 
     public static bool IsReviewPath(string path) => ReviewPath().IsMatch(path)
-        || Regex.IsMatch(path, @"\A/matches\?page=[1-9][0-9]{0,3}&pageSize=(?:20|50)\z");
+        || Regex.IsMatch(path, @"\A/matches\?page=[1-9][0-9]{0,3}&pageSize=(?:20|50|200)\z");
     public static bool IsMediaPath(string path) => MediaPath().IsMatch(path);
     public Uri UriFor(string accountId, string path, bool media = false)
     {

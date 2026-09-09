@@ -486,6 +486,19 @@ app.MapGet("/api/agent/accounts", (AccountRegistry registry, Caller caller) =>
     });
 }).RequireAuthorization(Policies.Agent);
 
+// Unlike render discovery above, gameplay review never inherits a renderer's
+// global scope. It sees the enrolled owner's accounts and explicit shared-PC
+// grants only. Keeping this as a separate endpoint also means the desktop app
+// cannot accidentally render a broad discovery response in the future.
+app.MapGet("/api/agent/review/accounts", (AccountRegistry registry, Caller caller) =>
+{
+    var reachable = caller.DiscoverReviewAccounts(registry.All).ToArray();
+    return Results.Ok(new
+    {
+        Accounts = reachable.Select(a => new { a.Id, a.Slug, a.Label, a.RiotId, a.GameName, a.TagLine, a.Puuid, a.Platform, Region = a.RegionCode, Path = a.UrlPath, Available = initializer.IsReady(a) }),
+    });
+}).RequireAuthorization(Policies.Agent);
+
 // Human management of machines lives under /api/me (own) and /api/admin
 // (all) - see ManagementEndpoints. Nothing under /api/agents any more, so
 // no path prefix of the agent slice ever names a human route again.

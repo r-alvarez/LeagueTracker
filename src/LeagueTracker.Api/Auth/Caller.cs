@@ -35,6 +35,16 @@ public sealed class Caller(IHttpContextAccessor http, AgentKeyStore keys, UserSt
     public IEnumerable<Accounts.Account> DiscoverAgentAccounts(IEnumerable<Accounts.Account> accounts) =>
         Agent?.Role is Registry.AgentRole.Renderer ? accounts : accounts.Where(Owns);
 
+    // The desktop review window is always personal, including on a machine
+    // that also renders for everyone. A renderer's broad queue scope must not
+    // turn into a list of other people's gameplay on that PC.
+    public IEnumerable<Accounts.Account> DiscoverReviewAccounts(IEnumerable<Accounts.Account> accounts)
+    {
+        var agent = Agent;
+        if (agent is not { IsBound: true }) return [];
+        return accounts.Where(account => account.OwnerUserId == agent.OwnerUserId || agent.MayActFor(account.Id));
+    }
+
     // The owner test every policy reduces to: admin, or the account's owner,
     // or an agent whose owner is the account's owner - or that carries an
     // explicit grant for this account (the shared-PC case: a friend's games
