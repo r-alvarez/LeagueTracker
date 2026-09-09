@@ -22,6 +22,8 @@ public sealed class AccountRegistry
     private readonly Dictionary<string, Account> _bySlug = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Account> _byId = new(StringComparer.OrdinalIgnoreCase);
     private readonly string? _root;
+    private readonly int _maxAccounts;
+    private readonly int _maxPerUser;
     private readonly IWebHostEnvironment _env;
     private readonly RegistryDatabase _registry;
     private readonly ILogger<AccountRegistry> _log;
@@ -34,6 +36,8 @@ public sealed class AccountRegistry
         registry.Migrate(log);
         var options = accounts.Value;
         _root = options.DataRoot is { Length: > 0 } r ? Rooted(r) : null;
+        _maxAccounts = options.MaxAccounts;
+        _maxPerUser = options.MaxAccountsPerUser;
 
         using var db = registry.Open();
         var stored = db.Accounts.AsNoTracking().ToList();
@@ -74,10 +78,24 @@ public sealed class AccountRegistry
 
     public IReadOnlyList<Account> OwnedBy(string userId) { lock (_gate) return [.. _all.Where(a => a.OwnerUserId == userId)]; }
 
+    // What a user's quota is charged for: what they own, and what they added
+    // that nobody has claimed yet (once claimed it is the claimant's).
+    public int CountedAgainst(string userId) { lock (_gate) return CountedAgainstUnlocked(userId); }
+    private int CountedAgainstUnlocked(string userId) => _all.Count(a => a.OwnerUserId == userId || (a.AddedByUserId == userId && !a.IsOwned));
+
+    public bool AtCapacity { get { lock (_gate) return _all.Count >= _maxAccounts; } }
+    public bool AtCapacityFor(string userId) => CountedAgainst(userId) >= _maxPerUser;
+
+    // Untracking is for whoever is answerable for the slot: the owner, an
+    // admin, or the person who added it - the last only while it is unclaimed,
+    // so the adder cannot pull a profile out from under its owner.
+    public bool MayUntrack(Account account, string? userId, bool admin) =>
+        admin || (userId is not null && (account.OwnerUserId == userId || (account.AddedByUserId == userId && !account.IsOwned)));
+
     // Runtime add (the site's "add account" box). The caller has already
     // resolved the Riot ID; this gives it a folder and remembers it. Owner is
     // null: an unowned public profile until someone claims it.
-    public Account Add(string gameName, string tagLine, string platform, string? displayName, string? puuid)
+    public Account Add(string gameName, string tagLine, string platform, string? displayName, string? puuid, string? addedByUserId)
     {
         if (_root is null) throw new InvalidOperationException("Accounts:DataRoot is not set - accounts can only come from config");
         var entry = Platforms.ByPlatform(platform) ?? throw new ArgumentException($"unknown platform '{platform}'");
@@ -90,11 +108,15 @@ public sealed class AccountRegistry
             Region = entry.Region,
             DisplayName = displayName ?? "",
             Puuid = puuid,
+            AddedByUserId = addedByUserId,
             CreatedUtc = DateTime.UtcNow,
         };
+        account.Slug = account.UrlSlug;
         lock (_gate)
         {
             if (_bySlug.ContainsKey(account.UrlSlug)) throw new AccountConflictException($"{account.RiotId} is already tracked");
+            if (_all.Count >= _maxAccounts) throw new AccountQuotaException($"This tracker is full ({_maxAccounts} accounts) - no more can be added right now");
+            if (addedByUserId is not null && CountedAgainstUnlocked(addedByUserId) >= _maxPerUser) throw new AccountQuotaException($"You already have {_maxPerUser} accounts here - untrack one to add another");
             // The folder is named by the surrogate id, not the Riot ID: a rename
             // must never move data, so the name must not be something Riot changes.
             account.DataDir = Path.Combine(_root, account.Id);
@@ -317,3 +339,5 @@ public sealed class AccountContext(AccountRegistry registry)
 }
 
 public sealed class AccountConflictException(string message) : InvalidOperationException(message);
+
+public sealed class AccountQuotaException(string message) : InvalidOperationException(message);

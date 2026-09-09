@@ -259,9 +259,13 @@ app.MapGet("/api/accounts", (AccountRegistry registry, AccountContext acct) => R
 // The "add account" box: a Riot ID typed by a person, checked against Riot
 // (account-v1 answers with the canonical casing and the puuid), then given a
 // folder, a database and a place in the poller's round - no redeploy.
-app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry registry, AccountScopes scopes, AccountInitializer initializer, IRiotKeyProvider keys, CancellationToken ct) =>
+app.MapPost("/api/accounts", async (AddAccountRequest request, Caller caller, AccountRegistry registry, AccountScopes scopes, AccountInitializer initializer, IRiotKeyProvider keys, CancellationToken ct) =>
 {
     if (!registry.CanAdd) return Results.Problem("This deployment takes accounts from configuration only (Accounts:DataRoot is not set)", statusCode: 409);
+    // Checked before the Riot call as well as inside Add: a full tracker
+    // should not spend key budget confirming a Riot ID it will refuse.
+    if (registry.AtCapacity) return Results.Problem("This tracker is full - no more accounts can be added right now", statusCode: 409);
+    if (registry.AtCapacityFor(caller.UserId!)) return Results.Problem("You already track the most accounts allowed here - untrack one to add another", statusCode: 409);
     var (gameName, tagLine) = ParseRiotId(request.RiotId);
     if (gameName is null || tagLine is null) return Results.BadRequest(new { error = "Type the Riot ID as GameName#TAG" });
     var platform = Platforms.ByCode(request.Region) ?? Platforms.ByPlatform(request.Region);
@@ -292,9 +296,9 @@ app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry r
     Account account;
     try
     {
-        account = registry.Add(resolved.GameName ?? gameName, resolved.TagLine ?? tagLine, platform.Platform, request.DisplayName, resolved.Puuid);
+        account = registry.Add(resolved.GameName ?? gameName, resolved.TagLine ?? tagLine, platform.Platform, request.DisplayName, resolved.Puuid, caller.UserId);
     }
-    catch (AccountConflictException ex)
+    catch (InvalidOperationException ex) when (ex is AccountConflictException or AccountQuotaException)
     {
         return Results.Conflict(new { error = ex.Message });
     }
@@ -310,12 +314,12 @@ app.MapPost("/api/accounts", async (AddAccountRequest request, AccountRegistry r
 }).RequireAuthorization(Policies.User).RequireRateLimiting("account-add");
 
 // Untrack (the folder stays on the NAS). Configured accounts say no; so
-// does anyone but the owner or an admin.
+// does anyone but the owner, an admin, or the adder of an unclaimed one.
 app.MapDelete("/api/accounts/{idOrSlug}", (string idOrSlug, Caller caller, AccountRegistry registry, AccountInitializer initializer) =>
 {
     var decoded = Uri.UnescapeDataString(idOrSlug);
     if ((registry.ById(decoded) ?? registry.BySlug(decoded)) is not { } account) return Results.NotFound();
-    if (!caller.Owns(account)) return Results.Forbid();
+    if (!registry.MayUntrack(account, caller.UserId, caller.IsAdmin)) return Results.Forbid();
     if (!registry.Remove(account.Id)) return Results.Conflict(new { error = "configured accounts are removed from the compose, not here" });
     initializer.Forget(account.Id);
     return Results.NoContent();
