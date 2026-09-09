@@ -21,6 +21,7 @@ public class SqliteImportTests(PostgresFixture postgres) : IDisposable
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), "lt-tests", Guid.NewGuid().ToString("N"));
     private readonly DatabaseServer _server = postgres.NewServer();
+    private readonly HashSet<string> _absentColumns = new(StringComparer.OrdinalIgnoreCase);
 
     public void Dispose()
     {
@@ -171,7 +172,11 @@ public class SqliteImportTests(PostgresFixture postgres) : IDisposable
         {
             if (dropTables?.Contains(entity.GetTableName()) is true) continue;
             keys[entity] = [];
-            var columns = entity.GetProperties().ToList();
+            // Columns added after the SQLite era (AddedByUserId) are not in the
+            // fixture schema, exactly as they are not in a real registry.db.
+            var inFile = FixtureColumns(connection, entity.GetTableName()!);
+            var columns = entity.GetProperties().Where(p => inFile.Contains(p.GetColumnName())).ToList();
+            foreach (var absent in entity.GetProperties().Where(p => !inFile.Contains(p.GetColumnName()))) _absentColumns.Add($"{entity.GetTableName()}.{absent.GetColumnName()}");
             for (var i = 1; i <= RowsPerTable; i++)
             {
                 using var insert = connection.CreateCommand();
@@ -184,7 +189,17 @@ public class SqliteImportTests(PostgresFixture postgres) : IDisposable
         return (file, keys);
     }
 
-    private static void AssertEveryRowAsWritten(DbContext db, Dictionary<IEntityType, List<object>> keys)
+    private static HashSet<string> FixtureColumns(SqliteConnection connection, string table)
+    {
+        using var pragma = connection.CreateCommand();
+        pragma.CommandText = $"PRAGMA table_info(\"{table}\")";
+        using var reader = pragma.ExecuteReader();
+        HashSet<string> columns = new(StringComparer.OrdinalIgnoreCase);
+        while (reader.Read()) columns.Add(reader.GetString(1));
+        return columns;
+    }
+
+    private void AssertEveryRowAsWritten(DbContext db, Dictionary<IEntityType, List<object>> keys)
     {
         foreach (var (entity, ids) in keys)
         {
@@ -194,6 +209,7 @@ public class SqliteImportTests(PostgresFixture postgres) : IDisposable
                 Assert.NotNull(row);
                 foreach (var property in entity.GetProperties())
                 {
+                    if (_absentColumns.Contains($"{entity.GetTableName()}.{property.GetColumnName()}")) continue;
                     var actual = property.PropertyInfo!.GetValue(row);
                     Assert.Equal(AfterImport(Expected(entity, property, i, keys)), actual);
                     if (actual is DateTime d) Assert.Equal(DateTimeKind.Utc, d.Kind);

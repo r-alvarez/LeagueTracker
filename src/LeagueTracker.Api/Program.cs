@@ -139,6 +139,7 @@ builder.Services.AddRateLimiter(o =>
     o.AddPolicy("invite", http => System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
         http.User.FindFirst(TrackerClaims.UserId)?.Value ?? http.Connection.RemoteIpAddress?.ToString() ?? "anon",
         _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromHours(1), SegmentsPerWindow = 4, QueueLimit = 0 }));
+    o.AddClaimRateLimits();
 });
 
 // Behind Traefik (and Cloudflare in front of it) the socket peer is always the
