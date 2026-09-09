@@ -262,6 +262,9 @@ services:
     environment:
       # One URL: /api/render/pending already counts every account.
       - TRACKER_URLS=https://league.rjav-tech.co.uk
+      # Optional so the stack starts before the waker is enrolled; without it
+      # every poll is a 401 and the waker says so once (docs/operate.md §5).
+      - TRACKER_AGENT_KEY=${TRACKER_AGENT_KEY:-}
       - PC_MAC=${PC_MAC:-}
       - WOL_BROADCAST=${WOL_BROADCAST:-255.255.255.255}
       - POLL_SECONDS=60

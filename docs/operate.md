@@ -182,6 +182,31 @@ new ids.
 | `YT_BEN_CLIENT_ID`, `YT_BEN_CLIENT_SECRET`, `YT_BEN_REFRESH_TOKEN` | One agent's own Google project (keyed by its key id in the compose) |
 | `POSTGRES_PASSWORD` | The database password: the `postgres` service sets it, the app and `pg-backup` connect with it. Must exist before the first deploy of the PostgreSQL build - the compose refuses to start without it. The app's connection string caps its one pool at 80 of the server's 100 connections so `pg_dump` and a hand `psql` always get in |
 | `PC_MAC`, `WOL_BROADCAST`, `UNIFI_URL`, `UNIFI_USER`, `UNIFI_PASS` | The waker |
+| `TRACKER_AGENT_KEY` | The waker's approved agent key: `GET /api/render/pending` needs one since reads are authorised. Optional so the stack starts without it; until it is set the waker logs one line and every poll is a 401 (nothing wakes the PC). Enrolled once, below |
+
+### Enrolling the waker (once)
+
+The waker is a machine like any recorder: it enrols with a key it makes
+up, an owner approves it, the key goes in the stack environment.
+
+1. On the site, as an admin: Data & sync → Machines → **Join code**. It
+   lives 15 minutes and works once.
+2. From any shell that reaches the site, with a random key of 32+
+   characters (`openssl rand -hex 32` is fine):
+
+       curl -sS -X POST https://league.rjav-tech.co.uk/api/agent/enroll \
+         -H 'Content-Type: application/json' \
+         -d '{"key":"<the key>","name":"waker","machine":"truenas","code":"<join code>"}'
+
+   The answer is `{"id":"…","status":"pending","created":true}`.
+3. Machines → **Waiting for approval** → **Approve** the `waker` row,
+   role renderer (any approved key may read the queue count).
+4. Portainer → the stack → environment: add `TRACKER_AGENT_KEY=<the key>`,
+   redeploy. The waker's log should stop saying 401 within a minute:
+   `watching 1 tracker(s) …` with no `cannot read queue` line after it.
+
+Revoking the row on the Machines page is how to lock the waker out; it logs
+the 401 once and keeps polling until a new key is set.
 
 ## 6. Moving off SQLite (the first boot of the PostgreSQL build)
 
