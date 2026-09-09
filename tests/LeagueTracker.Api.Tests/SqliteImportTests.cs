@@ -143,7 +143,7 @@ public class SqliteImportTests(PostgresFixture postgres) : IDisposable
     private LeagueDbContext AccountDb()
     {
         _server.EnsureSchema("acct_test");
-        var db = new LeagueDbContext(new DbContextOptionsBuilder<LeagueDbContext>().UseNpgsql(_server.ForSchema("acct_test")).Options);
+        var db = new LeagueDbContext(_server.OptionsFor<LeagueDbContext>("acct_test"));
         db.Database.Migrate();
         return db;
     }
@@ -151,7 +151,7 @@ public class SqliteImportTests(PostgresFixture postgres) : IDisposable
     private RegistryDbContext RegistryDb()
     {
         _server.EnsureSchema(DatabaseServer.RegistrySchema);
-        var db = new RegistryDbContext(new DbContextOptionsBuilder<RegistryDbContext>().UseNpgsql(_server.ForSchema(DatabaseServer.RegistrySchema)).Options);
+        var db = new RegistryDbContext(_server.OptionsFor<RegistryDbContext>(DatabaseServer.RegistrySchema));
         db.Database.Migrate();
         return db;
     }

@@ -63,7 +63,7 @@ public sealed class RegistryDatabase
             : riot.Value.DataDir;
         Root = Path.IsPathRooted(configured) ? configured : Path.Combine(env.ContentRootPath, configured);
         LegacyPath = Path.Combine(Root, LegacyFileName);
-        Options = new DbContextOptionsBuilder<RegistryDbContext>().UseNpgsql(server.ForSchema(DatabaseServer.RegistrySchema)).Options;
+        Options = server.OptionsFor<RegistryDbContext>(DatabaseServer.RegistrySchema);
     }
 
     public RegistryDbContext Open() => new(Options);

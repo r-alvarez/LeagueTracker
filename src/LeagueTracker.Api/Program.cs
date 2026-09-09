@@ -38,7 +38,7 @@ builder.Services.AddScoped<AccountContext>();
 builder.Services.AddSingleton<AccountScopes>();
 builder.Services.AddSingleton<AccountInitializer>();
 builder.Services.AddDbContext<LeagueDbContext>((sp, o) =>
-    o.UseNpgsql(sp.GetRequiredService<DatabaseServer>().ForSchema(DatabaseServer.AccountSchema(sp.GetRequiredService<AccountContext>().Current))));
+    sp.GetRequiredService<DatabaseServer>().Configure(o, DatabaseServer.AccountSchema(sp.GetRequiredService<AccountContext>().Current)));
 
 builder.Services.AddSingleton<RiotRateLimiter>();
 builder.Services.AddSingleton<IRiotKeyProvider, RiotKeyProvider>();
