@@ -266,6 +266,27 @@ public sealed class ReviewTests : IDisposable
     }
 
     [Fact]
+    public async Task Desktop_account_discovery_authorizes_only_exact_local_sidecar_identities()
+    {
+        var handler = new Handler
+        {
+            Reply = _ => new(HttpStatusCode.OK) { Content = new StringContent(
+                "{\"accounts\":[" +
+                "{\"id\":\"owner\",\"region\":\"euw\",\"slug\":\"Player-EUW\",\"label\":\"Player\",\"riotId\":\"Player#EUW\"}," +
+                "{\"id\":\"render-only\",\"region\":\"euw\",\"slug\":\"Ben-EUW\",\"label\":\"Ben\",\"riotId\":\"Ben#EUW\"}]}"
+                , Encoding.UTF8, "application/json") },
+        };
+        using var api = new ReviewApi(new AgentConfig { ServerUrl = "https://tracker.example" }, Path.Combine(_root, "cache"), handler, "private-test-key");
+        var allowed = new HashSet<string>(["player#euw", "Unknown"], StringComparer.OrdinalIgnoreCase);
+
+        var result = JsonSerializer.SerializeToNode(await api.DiscoverAsync(true, CancellationToken.None, allowed), new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+
+        var account = Assert.Single(result["accounts"]!.AsArray())!;
+        Assert.Equal("Player#EUW", account["riotId"]!.GetValue<string>());
+        Assert.Throws<UnauthorizedAccessException>(() => api.Account(RecordingLibrary.IdFor("https://tracker.example:render-only")));
+    }
+
+    [Fact]
     public async Task Remote_head_handles_GET_only_trackers_and_keeps_authentication_native()
     {
         var handler = new Handler();

@@ -142,22 +142,35 @@ Library preferences are saved in `metadata/library-settings.json`; explicit
 preferences take precedence over profile defaults. The default is 20 games
 with the existing recording budget and keep-all setting. The library shows the
 latest 500 catalogue entries, counts retained sidecars separately from playable
-MP4s, and enriches permitted recordings from account match history by stable
-match ID. This preserves account association across Riot ID changes and lets
-the cards show thumbnails, champion, result, KDA, opponent and loadout. Very
-large keep-all archives need local pagination in a subsequent iteration. A
-matched card opens the same `MatchDetail` used by the website and substitutes
+MP4s, and pages all attributable entries in groups of 25. Accounts must first
+be proven by a Riot ID written directly in a local sidecar; only their histories
+are then used to enrich older recordings by stable match ID. This preserves
+association across Riot ID changes and lets rows show champion, result, KDA,
+opponent and loadout. A matched row opens the same `MatchDetail` used by the
+website and substitutes
 only its local `/vod/status` response; scoreboard, verdict, timeline, track,
 gameplan and clips still come through the account-scoped tracker APIs. An
 unmatched or offline-only file retains the simple local player. Retention
 examines the whole catalogue.
 
 The picker is narrower than the agent's rendering scope. A combined machine may
-render replay clips for every account, but only accounts represented by its
-full-game recording sidecars appear in review. The newest local recording
-chooses the initial account. Background match association prioritizes locally
-named Riot IDs, runs one account at a time and stops once all catalogue matches
-are resolved; render-only accounts do not become review identities.
+render replay clips for every account, but only Riot IDs written directly into
+its full-game recording sidecars appear in review. Match-ID overlap is not used
+as identity evidence because every participant shares the same match ID. The
+newest proven local account is selected initially. Background match association
+runs only for those proven accounts; render-only accounts neither become review
+identities nor have their match history scanned. This allow-list is enforced in
+the native bridge as well as the interface, so a hidden render-only account
+cannot be queried by the embedded page.
+
+The landing page lists all attributable recorded games in pages of 25 rather
+than showing only the MP4 files still retained. Duplicate sidecars for a
+restarted capture collapse into one match row, preferring playable footage.
+Rows use the tracker match metadata (champion, lane opponent, result, KDA and
+loadout) and distinguish
+`Footage` from `Map` when retention has removed the local video. Clicking either
+kind opens the shared match detail; retained local footage remains its default
+stage.
 
 Analysis caches are partitioned by installation and agent-key identity, keyed
 by schema and URL, capped at 128 MiB per identity. Artwork is separately capped

@@ -33,7 +33,7 @@ public sealed partial class ReviewApi : IDisposable
         && uri.UserInfo.Length == 0 && uri.Query.Length == 0 && uri.Fragment.Length == 0
         && (uri.Scheme == "https" || (uri.Scheme == "http" && uri.IsLoopback));
 
-    public async Task<object> DiscoverAsync(bool refresh, CancellationToken ct)
+    public async Task<object> DiscoverAsync(bool refresh, CancellationToken ct, IReadOnlySet<string>? allowedRiotIds = null)
     {
         var found = new List<ReviewAccount>();
         var offline = false;
@@ -58,8 +58,10 @@ public sealed partial class ReviewApi : IDisposable
                     var region = node["region"]?.GetValue<string>();
                     var slug = node["slug"]?.GetValue<string>();
                     if (id is null || region is null || slug is null) continue;
+                    var riotId = node["riotId"]?.GetValue<string>() ?? slug;
+                    if (allowedRiotIds is not null && !allowedRiotIds.Contains(riotId)) continue;
                     found.Add(new(RecordingLibrary.IdFor(server + ":" + id), server, id, region, slug,
-                        node["label"]?.GetValue<string>() ?? slug, node["riotId"]?.GetValue<string>() ?? slug));
+                        node["label"]?.GetValue<string>() ?? slug, riotId));
                 }
             }
             catch (Exception ex) when (ex is JsonException or InvalidOperationException) { offline = true; }
