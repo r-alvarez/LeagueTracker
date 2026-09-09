@@ -118,18 +118,9 @@ builder.Services.AddDataProtection()
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    // A visitor's ceiling by address, a signed-in person's by identity, and
-    // none for agents (an upload is hundreds of chunk PUTs): once reads are
-    // public, a script with no credentials must not be able to saturate the
-    // NAS (audit D7).
-    o.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(http =>
-        http.Request.Headers.ContainsKey(AgentKeyAuthenticationHandler.HeaderName)
-            ? System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("agent")
-            : http.User.FindFirst(TrackerClaims.UserId)?.Value is { } user
-                ? System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter("user:" + user,
-                    _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions { PermitLimit = 600, Window = TimeSpan.FromMinutes(1), SegmentsPerWindow = 6, QueueLimit = 0 })
-                : System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter("ip:" + (http.Connection.RemoteIpAddress?.ToString() ?? "anon"),
-                    _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), SegmentsPerWindow = 6, QueueLimit = 0 }));
+    // Once reads are public, a script with no credentials must not be able to
+    // saturate the NAS (audit D7).
+    o.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(RateLimitPolicies.GlobalPartition);
     o.AddPolicy("account-add", http => System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
         http.User.FindFirst(TrackerClaims.UserId)?.Value ?? http.Connection.RemoteIpAddress?.ToString() ?? "anon",
         _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromHours(1), SegmentsPerWindow = 4, QueueLimit = 0 }));
