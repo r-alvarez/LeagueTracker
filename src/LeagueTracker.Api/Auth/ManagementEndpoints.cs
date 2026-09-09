@@ -39,8 +39,8 @@ public static class ManagementEndpoints
             return Results.Ok(new
             {
                 LatestVersion = agents.Latest()?.Version,
-                Keys = visible.Select(k => KeyView(k, k.OwnerUserId is { } o && emails.TryGetValue(o, out var e) ? e : null,
-                    agents.Find(k.Id, caller.UserId, caller.IsAdmin), agents.Logs(k.Id), k.OwnerUserId == caller.UserId, accounts)),
+                Keys = visible.Select(k => VisibleKeyView(k, caller.UserId, caller.IsAdmin, k.OwnerUserId is { } o && emails.TryGetValue(o, out var e) ? e : null,
+                    agents.Find(k.Id, caller.UserId, caller.IsAdmin), agents.Logs(k.Id), accounts)),
                 JoinCodes = keys.OpenJoinCodes(caller.UserId!).Select(c => new { c.Code, Role = c.Role.ToString().ToLowerInvariant(), c.ExpiresUtc }),
             });
         });
@@ -209,10 +209,20 @@ public static class ManagementEndpoints
     private static AgentKeyRecord? Own(Caller caller, AgentKeyStore keys, string id) =>
         keys.ById(id) is { } key && (caller.IsAdmin || key.OwnerUserId == caller.UserId) ? key : null;
 
+    // A shared renderer is someone else's machine: a stranger learns that
+    // it exists and whether it is up, not where it is or whose it is.
+    internal static object VisibleKeyView(AgentKeyRecord r, string? viewerUserId, bool admin, string? ownerEmail, AgentLive? live, List<AgentLogInfo> logs, AccountRegistry? accounts)
+    {
+        var mine = viewerUserId is not null && r.OwnerUserId == viewerUserId;
+        return admin || mine ? KeyView(r, ownerEmail, live, logs, mine, accounts) : new SharedKey(r.Id, r.Name, r.Role.ToString().ToLowerInvariant(), r.Status.ToString().ToLowerInvariant(), live?.Online ?? false);
+    }
+
+    internal sealed record SharedKey(string Id, string Name, string Role, string Status, bool Online);
+
     private static object KeyView(AgentKeyRecord r, string? ownerEmail = null, AgentLive? live = null, List<AgentLogInfo>? logs = null, bool mine = false, AccountRegistry? accounts = null) => new
     {
         r.Id, r.Name, r.Machine, Status = r.Status.ToString().ToLowerInvariant(), Role = r.Role.ToString().ToLowerInvariant(),
-        r.OwnerUserId, OwnerEmail = ownerEmail, Bound = r.IsBound, Mine = mine, r.CreatedUtc, r.DecidedUtc, r.LastSeenUtc, r.LastIp, r.Note,
+        r.OwnerUserId, OwnerEmail = ownerEmail, Bound = r.IsBound, Mine = mine, Online = live?.Online ?? false, r.CreatedUtc, r.DecidedUtc, r.LastSeenUtc, r.LastIp, r.Note,
         ActsFor = r.ActsFor,
         ActsForRiotIds = r.ActsFor.Select(id => accounts?.ById(id)?.RiotId).OfType<string>().ToList(),
         Live = live, Logs = logs ?? [],

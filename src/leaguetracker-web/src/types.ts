@@ -58,16 +58,19 @@ export interface AgentInfo {
 }
 
 export interface AgentLog { file: string; whenUtc: string; sizeBytes: number }
+/// A key the caller does not own (a renderer shared with everyone) arrives
+/// with the first line only - no address, owner, heartbeat or logs.
 export interface AgentKey {
-  id: string; name: string; machine: string; status: 'pending' | 'approved' | 'revoked'; role: 'recorder' | 'renderer'
-  ownerUserId: string | null; ownerEmail?: string | null; bound: boolean; mine: boolean
+  id: string; name: string; status: 'pending' | 'approved' | 'revoked'; role: 'recorder' | 'renderer'; online: boolean
+  machine?: string
+  ownerUserId?: string | null; ownerEmail?: string | null; bound?: boolean; mine?: boolean
   /// Accounts beyond the owner's this machine may also act for (shared-PC
   /// grants): ids for the assign form, Riot ids for display.
-  actsFor: string[]; actsForRiotIds: string[]
-  createdUtc: string; decidedUtc: string | null; lastSeenUtc: string | null; lastIp: string | null; note: string | null
+  actsFor?: string[]; actsForRiotIds?: string[]
+  createdUtc?: string; decidedUtc?: string | null; lastSeenUtc?: string | null; lastIp?: string | null; note?: string | null
   /// The heartbeat of the agent running under this key, if it has reported.
-  live: AgentInfo | null
-  logs: AgentLog[]
+  live?: AgentInfo | null
+  logs?: AgentLog[]
 }
 export interface ClaimInfo { id: string; accountId: string; riotId: string; iconId: number; expiresUtc: string; attemptsLeft: number; state: 'pending' | 'verified' | 'expired' | 'failed' }
 export interface JoinCodeInfo { code: string; role: 'recorder' | 'renderer'; expiresUtc: string }
