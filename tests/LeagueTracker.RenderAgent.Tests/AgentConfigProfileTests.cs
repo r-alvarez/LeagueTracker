@@ -11,12 +11,52 @@ public class AgentConfigProfileTests
     public void An_allowed_key_applies_and_is_reported()
     {
         var config = new AgentConfig();
-        var applied = config.ApplyProfile(Profile(("YouTubeClientId", "client-1"), ("recordnameprefix", "Road to Platinum"), ("UploadVods", "false")));
+        var applied = config.ApplyProfile(Profile(("recordnameprefix", "Road to Platinum"), ("UploadVods", "false")));
 
-        Assert.Equal("client-1", config.YouTubeClientId);
         Assert.Equal("Road to Platinum", config.RecordNamePrefix);
         Assert.False(config.UploadVods);
-        Assert.Equal(["YouTubeClientId", "RecordNamePrefix", "UploadVods"], applied);
+        Assert.Equal(["RecordNamePrefix", "UploadVods"], applied);
+    }
+
+    [Fact]
+    public void A_complete_server_youtube_profile_replaces_local_credentials()
+    {
+        var config = LoadJson("""
+            {
+              "YouTubeClientId": "local-id",
+              "YouTubeClientSecret": "local-secret",
+              "YouTubeRefreshToken": "local-token"
+            }
+            """);
+
+        var applied = config.ApplyProfile(Profile(
+            ("YouTubeClientId", "server-id"),
+            ("YouTubeClientSecret", "server-secret"),
+            ("YouTubeRefreshToken", "server-token")));
+
+        Assert.Equal("server-id", config.YouTubeClientId);
+        Assert.Equal("server-secret", config.YouTubeClientSecret);
+        Assert.Equal("server-token", config.YouTubeRefreshToken);
+        Assert.Equal(["YouTubeClientId", "YouTubeClientSecret", "YouTubeRefreshToken"], applied);
+    }
+
+    [Fact]
+    public void An_incomplete_server_youtube_profile_does_not_mix_with_local_credentials()
+    {
+        var config = LoadJson("""
+            {
+              "YouTubeClientSecret": "local-secret"
+            }
+            """);
+
+        var applied = config.ApplyProfile(Profile(
+            ("YouTubeClientId", "server-id"),
+            ("YouTubeRefreshToken", "server-token")));
+
+        Assert.Equal("", config.YouTubeClientId);
+        Assert.Equal("local-secret", config.YouTubeClientSecret);
+        Assert.Equal("", config.YouTubeRefreshToken);
+        Assert.Empty(applied);
     }
 
     [Theory]

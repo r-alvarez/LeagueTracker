@@ -7,11 +7,14 @@ namespace LeagueTracker.Api.Services;
 /// What the tracker hands its agents at startup and how it publishes agent
 /// builds. Profile keys are AgentConfig property names (case-insensitive,
 /// string values - the agent converts); the friend's local appsettings.json
-/// still wins for anything it sets, so this is the central "defaults +
-/// secrets" store: YouTube client + refresh token, recording prefix, queues.
+/// still wins for local behavior; a complete YouTube credential trio is
+/// centrally authoritative so stale machine credentials cannot strand uploads.
 /// Set via env: Agent__Profile__YouTubeClientId=... Agent__ReleaseDir=/agent-releases
 public sealed class AgentOptions
 {
+    private static readonly string[] YouTubeCredentialKeys =
+        ["YouTubeClientId", "YouTubeClientSecret", "YouTubeRefreshToken"];
+
     public Dictionary<string, string> Profile { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// Per-agent overrides layered on Profile, keyed by the agent's key id
@@ -38,17 +41,60 @@ public sealed class AgentOptions
         var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, value) in Profile)
         {
+            if (IsYouTubeCredential(key)) continue;
             if (sharedSecrets || !IsSecret(key)) merged[key] = value;
         }
+        IReadOnlyDictionary<string, string>? agentProfile = null;
         if (agentId is { Length: > 0 } && Profiles.TryGetValue(agentId, out var overrides))
         {
+            agentProfile = overrides;
             foreach (var (key, value) in overrides)
             {
+                if (IsYouTubeCredential(key)) continue;
                 if (value is { Length: > 0 }) merged[key] = value;
             }
         }
+
+        // A refresh token only works with the OAuth client that minted it.
+        // Keep the trio atomic so blank variables cannot mix Google projects.
+        if (TryGetYouTubeCredentials(agentProfile, out var agentCredentials))
+        {
+            AddYouTubeCredentials(merged, agentCredentials);
+        }
+        else if (sharedSecrets && TryGetYouTubeCredentials(Profile, out var sharedCredentials))
+        {
+            AddYouTubeCredentials(merged, sharedCredentials);
+        }
+
         if (!merged.ContainsKey("YouTubeRefreshToken") && merged.ContainsKey("YouTubeUpload")) merged["YouTubeUpload"] = "false";
         return merged;
+    }
+
+    private static bool IsYouTubeCredential(string key) =>
+        YouTubeCredentialKeys.Contains(key, StringComparer.OrdinalIgnoreCase);
+
+    private static bool TryGetYouTubeCredentials(IReadOnlyDictionary<string, string>? profile,
+        out (string ClientId, string ClientSecret, string RefreshToken) credentials)
+    {
+        credentials = default;
+        if (profile is null
+            || !profile.TryGetValue("YouTubeClientId", out var clientId) || clientId is not { Length: > 0 }
+            || !profile.TryGetValue("YouTubeClientSecret", out var clientSecret) || clientSecret is not { Length: > 0 }
+            || !profile.TryGetValue("YouTubeRefreshToken", out var refreshToken) || refreshToken is not { Length: > 0 })
+        {
+            return false;
+        }
+
+        credentials = (clientId, clientSecret, refreshToken);
+        return true;
+    }
+
+    private static void AddYouTubeCredentials(Dictionary<string, string> profile,
+        (string ClientId, string ClientSecret, string RefreshToken) credentials)
+    {
+        profile["YouTubeClientId"] = credentials.ClientId;
+        profile["YouTubeClientSecret"] = credentials.ClientSecret;
+        profile["YouTubeRefreshToken"] = credentials.RefreshToken;
     }
 
     public static bool IsSecret(string key) =>

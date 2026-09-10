@@ -190,8 +190,8 @@ public sealed class AgentConfig
     /// server; harmless to keep sending afterwards.
     public string JoinCode { get; set; } = "";
 
-    /// The keys appsettings.json set explicitly - the tracker's profile fills
-    /// in around them, never over them.
+    /// The keys appsettings.json set explicitly. The tracker fills around them,
+    /// except for a complete centrally managed YouTube credential trio.
     private readonly HashSet<string> _localKeys = new(StringComparer.OrdinalIgnoreCase);
 
     public static string Version => Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "0.0.0.0";
@@ -256,18 +256,28 @@ public sealed class AgentConfig
         nameof(PostGameReviewDelaySec), nameof(PostGameReviewAutoAdvance), nameof(PostGameReviewWaitMin),
     };
 
+    private static readonly HashSet<string> ServerYouTubeCredentialKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        nameof(YouTubeClientId), nameof(YouTubeClientSecret), nameof(YouTubeRefreshToken),
+    };
+
     private readonly HashSet<string> _reportedIgnored = new(StringComparer.OrdinalIgnoreCase);
 
     /// The tracker's agent profile: string values keyed by property name.
-    /// Local settings and environment overrides stay; only unset keys take the
-    /// server's value. Returns the names that changed.
+    /// Local settings stay except for a complete server-managed YouTube OAuth
+    /// trio. Returns the names that changed.
     public List<string> ApplyProfile(IReadOnlyDictionary<string, string> profile)
     {
         var applied = new List<string>();
         var ignored = new List<string>();
+        var completeServerYouTubeCredentials = ServerYouTubeCredentialKeys.All(key =>
+            profile.TryGetValue(key, out var value) && value is { Length: > 0 });
         foreach (var (key, value) in profile)
         {
-            if (_localKeys.Contains(key)) continue;
+            var youtubeCredential = ServerYouTubeCredentialKeys.Contains(key);
+            if (youtubeCredential && !completeServerYouTubeCredentials) continue;
+            var serverOwnsCredential = completeServerYouTubeCredentials && youtubeCredential;
+            if (_localKeys.Contains(key) && !serverOwnsCredential) continue;
             if (!ProfileKeys.Contains(key))
             {
                 if (_reportedIgnored.Add(key)) ignored.Add(key);

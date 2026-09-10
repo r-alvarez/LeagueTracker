@@ -11,6 +11,7 @@ public class AgentOptionsTests
         Profile = new(StringComparer.OrdinalIgnoreCase)
         {
             ["YouTubeClientId"] = "shared-id",
+            ["YouTubeClientSecret"] = "shared-secret",
             ["YouTubeRefreshToken"] = "shared-token",
             ["RecordQueues"] = "ranked-solo",
         },
@@ -25,10 +26,11 @@ public class AgentOptionsTests
     };
 
     [Fact]
-    public void The_keyed_agent_gets_its_override_but_blank_values_do_not_replace_shared_ones()
+    public void An_incomplete_keyed_credential_set_falls_back_as_a_group()
     {
         var profile = Options().ProfileFor(BenKeyId.ToUpperInvariant());
-        Assert.Equal("ben-id", profile["YouTubeClientId"]);
+        Assert.Equal("shared-id", profile["YouTubeClientId"]);
+        Assert.Equal("shared-secret", profile["YouTubeClientSecret"]);
         Assert.Equal("shared-token", profile["YouTubeRefreshToken"]);
         Assert.Equal("ranked-solo", profile["RecordQueues"]);
     }
@@ -42,29 +44,27 @@ public class AgentOptionsTests
     {
         var profile = Options().ProfileFor(agentId);
         Assert.Equal("shared-id", profile["YouTubeClientId"]);
-        Assert.Equal(3, profile.Count);
+        Assert.Equal(4, profile.Count);
     }
 
     [Fact]
     public void A_friends_machine_loses_the_shared_secrets_but_uploads_go_off()
     {
         var options = Options();
-        options.Profile["YouTubeClientSecret"] = "shared-secret";
         options.Profile["YouTubeUpload"] = "true";
 
         var profile = options.ProfileFor("some-other-key", sharedSecrets: false);
 
-        Assert.Equal(["RecordQueues", "YouTubeClientId", "YouTubeUpload"], profile.Keys.Order());
+        Assert.Equal(["RecordQueues", "YouTubeUpload"], profile.Keys.Order());
         Assert.Equal("false", profile["YouTubeUpload"]);
     }
 
-    // Ben's own channel: the operator put the token in his key's override
-    // block, so it reaches that key whoever owns it.
+    // Ben's OAuth project: the operator put the complete credential set in
+    // his key's override block, so it reaches that key whoever owns it.
     [Fact]
     public void A_keys_own_override_secrets_always_reach_it()
     {
         var options = Options();
-        options.Profile["YouTubeClientSecret"] = "shared-secret";
         options.Profile["YouTubeUpload"] = "true";
         options.Profiles[BenKeyId]["YouTubeClientSecret"] = "ben-secret";
         options.Profiles[BenKeyId]["YouTubeRefreshToken"] = "ben-token";
@@ -81,8 +81,6 @@ public class AgentOptionsTests
     public void The_operators_machine_gets_the_shared_secrets()
     {
         var options = Options();
-        options.Profile["YouTubeClientSecret"] = "shared-secret";
-
         var profile = options.ProfileFor("ruben-key", sharedSecrets: true);
 
         Assert.Equal("shared-secret", profile["YouTubeClientSecret"]);
