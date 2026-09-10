@@ -151,6 +151,9 @@ uploads from unaudited API projects to **private** regardless of
 `YouTubeVisibility` until the project passes their audit/exception process.
 A busy player's agent can be given its own project via the tracker's
 per-agent profile (`Agent__Profiles__<agent>__YouTube*`).
+The tracker sends the client id, client secret and refresh token as one set;
+when all three are present they replace stale YouTube credentials in the
+agent's local settings. An incomplete per-agent set falls back as a group.
 
 ### Diagnostics from the tracker
 
