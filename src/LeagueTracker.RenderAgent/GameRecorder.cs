@@ -38,6 +38,13 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     private static readonly string[] NearGamePhases =
         ["Lobby", "Matchmaking", "ReadyCheck", "ChampSelect", "GameStart"];
 
+    /// How long a recording waits for a game that stopped being InProgress
+    /// without being over - the window an early quit, a client crash or a
+    /// dropped connection has to come back through Reconnect. Long enough to
+    /// cover a client restart from scratch, short enough that a game nobody
+    /// returns to still finalizes while the footage is worth having.
+    private static readonly TimeSpan RejoinGrace = TimeSpan.FromMinutes(5);
+
     private readonly IReadOnlyList<TrackerClient> _trackers = trackers;
 
     // Delivery (tracker sidecars/VOD, YouTube publish, link, retention) runs
@@ -281,6 +288,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
         var earlyFailures = 0;
         var gaveUp = false;
+        DateTime? rejoinDeadline = null;
         while (true)
         {
             if (RenderAgent.StopRequested)
@@ -296,7 +304,34 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 }
                 break;
             }
-            if (await PhaseAsync(ct) is not "InProgress") break;
+            // A phase that is not InProgress is not yet a finished game. An
+            // early quit out of the loading screen (Quit Game Confirmed /
+            // GAME_EXIT_EARLY) kills the game process while the match runs
+            // on, and the player rejoins seconds later through Reconnect.
+            // Breaking here finalized the fragment and the delivery loop
+            // published it: 11 Sep 2026 games 2 and 4 went to YouTube as a
+            // 2-minute and a 29-second stub of a 20- and a 28-minute game.
+            // Only a confirmed end - or a rejoin that never comes - ends the
+            // recording; the loop otherwise waits and picks the game back up
+            // as the next segment.
+            if (await PhaseAsync(ct) is not "InProgress")
+            {
+                if (await GameHasEndedAsync()) break;
+                if (rejoinDeadline is null)
+                {
+                    rejoinDeadline = DateTime.UtcNow + RejoinGrace;
+                    Log.Info($"{state.BaseName}: the game left InProgress but is not over (an early quit or a crash) - "
+                        + $"waiting up to {RejoinGrace.TotalMinutes:0} min for it to come back before finalizing");
+                }
+                else if (DateTime.UtcNow > rejoinDeadline)
+                {
+                    Log.Warn($"{state.BaseName}: the game never came back within {RejoinGrace.TotalMinutes:0} min - finalizing what was captured");
+                    break;
+                }
+                await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                continue;
+            }
+            rejoinDeadline = null;
 
             var game = await WaitForGameWindowAsync(ct);
             if (game is not { } g) break; // game over, or the window never came - finalize what exists
@@ -414,6 +449,13 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
         if (state.Segments.Any(seg => !seg.Preexisting))
         {
+            // Footage was captured on top of a recording that had already
+            // been finalized - and possibly already delivered, describing
+            // only the part recorded before the game came back. Withdraw
+            // that delivery so the finished game supersedes the fragment.
+            // Placed here, not at resume: a resume that adds nothing (the
+            // game really was over) leaves a good delivery alone.
+            if (state.Segments.Any(seg => seg.Preexisting)) RetractDelivery(state.BaseName);
             await FinalizeGameAsync(state, ct);
             Log.Info($"Recording complete: {state.BaseName}.mp4 ({state.Segments.Sum(seg => seg.VideoSec) / 60:0} min, {state.Segments.Count} segment(s))");
             AgentStatus.LastRecordingUtc = DateTime.UtcNow;
@@ -503,6 +545,41 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             }
         }
         return null;
+    }
+
+    /// A game that comes back after its recording was already finalized and
+    /// delivered is about to grow by everything that follows, so what went
+    /// out describes a fragment. Every delivery stamp is withdrawn and the
+    /// finished file goes through the whole pipeline again: VOD, YouTube,
+    /// link. The published video itself cannot be deleted from here - the
+    /// agent holds upload and readonly scopes only - so its link is kept in
+    /// .ytsuperseded.txt, which both stops the adopt guard from picking the
+    /// fragment straight back up off the tracker and leaves a human the list
+    /// of videos to tidy off the channel.
+    private void RetractDelivery(string baseName)
+    {
+        string M(string ext) => Path.Combine(MetaDir, baseName + ext);
+        if (File.Exists(M(".youtube.txt")))
+        {
+            try
+            {
+                var stale = File.ReadAllText(M(".youtube.txt")).Trim();
+                if (stale.Length > 0)
+                {
+                    File.AppendAllText(M(".ytsuperseded.txt"), stale + Environment.NewLine);
+                    Log.Warn($"{baseName} was already published as {stale}, but the game came back - that video covers only "
+                        + "the part recorded so far. The finished game will be uploaded again and relinked; delete the old "
+                        + "video on YouTube by hand (the agent cannot - it has no delete scope).");
+                }
+            }
+            catch (Exception ex) { Log.Warn($"Could not record the superseded YouTube link for {baseName}: {ex.Message}"); }
+        }
+        // .ytsession.json is a resumable upload pointed at the old, shorter
+        // file: resuming it would upload the fragment again.
+        foreach (var stamp in new[] { ".youtube.txt", ".linked", ".uploaded", ".review-published", ".pruned", ".ytsession.json" })
+        {
+            TryDelete(M(stamp));
+        }
     }
 
     private string InflightPath(RecordingState state) => Path.Combine(MetaDir, state.BaseName + ".inflight.json");
@@ -690,10 +767,19 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             // adopt that link instead of minting a duplicate video. Learned
             // live 04 Aug 2026: the first sweep re-uploaded a hand-published
             // backlog game before this guard existed.
+            // Except a link this agent itself withdrew: the tracker still
+            // points at the fragment published before the game came back,
+            // and adopting it would pin the short video in place forever.
+            var superseded = Superseded(baseName);
             foreach (var tracker in TrackersFor(baseName))
             {
                 if (await tracker.GetVodLinkAsync(matchId, ct) is { Length: > 0 } existing)
                 {
+                    if (superseded.Contains(existing))
+                    {
+                        Log.Info($"{tracker.Name} still links the superseded {existing} for {baseName} - uploading the finished game instead");
+                        continue;
+                    }
                     File.WriteAllText(M(".youtube.txt"), existing);
                     File.WriteAllText(M(".linked"), tracker.Name);
                     Log.Info($"Adopted existing YouTube link for {baseName} from {tracker.Name}");
@@ -744,6 +830,20 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     }
 
     private const string QuotaNotice = "YouTube upload quota reached";
+
+    /// Links this agent published for a game and then withdrew, because the
+    /// game turned out to still be running. Never adopted, never relinked.
+    private HashSet<string> Superseded(string baseName)
+    {
+        var path = Path.Combine(MetaDir, baseName + ".ytsuperseded.txt");
+        try
+        {
+            return File.Exists(path)
+                ? new HashSet<string>(File.ReadAllLines(path).Select(l => l.Trim()).Where(l => l.Length > 0), StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch { return new HashSet<string>(StringComparer.OrdinalIgnoreCase); }
+    }
 
     /// The link goes to whichever tracker owns the match, the same routing
     /// rule as the VOD itself; a .linked stamp stops re-posting. No taker
@@ -1124,7 +1224,11 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
-            if (await PhaseAsync(ct) is not "InProgress") return null;
+            // Reconnect counts as waiting, not as gone: after an early quit
+            // the window disappears for as long as it takes the client to
+            // start the game again, and that new process is the one to
+            // record. The 3-minute deadline still bounds the wait.
+            if (await PhaseAsync(ct) is not "InProgress" and not "Reconnect") return null;
 
             var procs = Process.GetProcessesByName(GameProcessName);
             var newest = procs.OrderByDescending(SafeStartTime).FirstOrDefault();
@@ -1166,7 +1270,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         while (DateTime.UtcNow < deadline)
         {
             if (RenderAgent.StopRequested) return;
-            if (await PhaseAsync(ct) is not "InProgress") return; // game vanished (dodge, crash)
+            if (await PhaseAsync(ct) is not "InProgress" and not "Reconnect") return; // game vanished (dodge, crash)
             if (await GameTimeAsync(ct) is { } t)
             {
                 everSaw = true;

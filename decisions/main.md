@@ -1859,3 +1859,51 @@ needs the building position and the enemy kill events, and the 3500-unit
 reach covers the mid inhibitor tower from that spot but not the bot one.
 Even if it does, Discipline lands on "mixed" and the contest on "split" -
 the lead flip against Veigar is real.
+
+## 2026-09-12 — A game that is not InProgress is not yet a game that is over
+
+11 Sep games 2 and 4 were published to YouTube as a 2-minute and a
+29-second stub of a 20- and a 28-minute game. Both were early quits out
+of the loading screen (`GAMESTATE_SPAWN -> PRE_EXIT for reason Quit Game
+Confirmed`, `GAME_EXIT_EARLY`) with a rejoin ten seconds later. The local
+mp4s were always right - the recorder resumed, appended a second segment
+and concatenated 28 minutes correctly. What was wrong was the moment the
+recording was declared finished.
+
+The recording loop asked `PhaseAsync() is not "InProgress"` and broke.
+The game process had exited, so the client sat in Reconnect (or answered
+nothing at all while it restarted), which is not InProgress and is also
+not over. Breaking there finalized a 28-second fragment and released the
+delivery signal; three seconds later the fragment was on YouTube, and the
+link stamp written then was never revisited. The full game finalized half
+an hour later over the top of it, so the match page carried 44 markers
+against 29 seconds of footage.
+
+`GameHasEndedAsync()` - two consecutive reads that are neither InProgress
+nor Reconnect nor a failed read - already existed and was already trusted
+inside the capture loops. It is now the predicate at the loop's own
+game-over decision too, bounded by a five-minute `RejoinGrace`: a game
+nobody comes back to still finalizes while the footage is worth having.
+`WaitForGameWindowAsync` and `WaitForGameLiveAsync` likewise treat
+Reconnect as waiting rather than as gone, so the relaunched process is
+the one that gets recorded.
+
+Second half: delivery is now retractable. Capturing new footage on top
+of an already finalized recording withdraws every delivery stamp (`.youtube.txt`,
+`.linked`, `.uploaded`, `.pruned`, and the `.ytsession.json` resumable
+upload that still pointed at the shorter file), so the finished game goes
+through VOD, YouTube and link again. The video already on YouTube cannot
+be deleted from here - the agent holds `youtube.upload` and
+`youtube.readonly`, and widening that scope would force a re-authorize
+for a case this rare - so its link is appended to `.ytsuperseded.txt`.
+That file does double duty: the adopt guard (which exists to stop the
+sweep minting duplicates of hand-published games) must not adopt a link
+this agent just withdrew, and a human gets the list of stubs to delete
+off the channel.
+
+Not fixed, and not fixable from here: the third-party recorder (Ascent)
+missed 11 Sep game 4 outright for the same reason - it was recording the
+process that quit and never re-hooked the one that replaced it. Its files
+are numbered sequentially by start time, so the gap renamed every later
+file down one (its "Game Four" is game 5). Nothing in this repo controls
+that; the agent's own recordings are the authority on which game is which.
