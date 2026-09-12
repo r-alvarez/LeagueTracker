@@ -33,8 +33,12 @@ computed offline. Previously fetched analysis and artwork are cached. A missing
 cached resource stays unavailable until the tracker is reachable. This is a
 self-contained review interface, not a replacement for the backend.
 
-YouTube-only footage opens externally. Remote YouTube JavaScript is not loaded
-into the document that has native capabilities. Existing website embeds remain.
+YouTube-only footage plays in the window, in YouTube's own embed - the same
+one the website uses, so a game whose local copy is gone is still watchable
+here. Remote YouTube JavaScript is still not loaded into the document that has
+native capabilities: the window speaks the embed's postMessage protocol itself,
+and its first reply is what proves YouTube is reachable. If nothing answers,
+the window falls back to the link and opens it in the browser.
 The app watches recorded video and existing rendered replays; it does not decode
 `.rofl` files itself or provide clip editing and cloud sharing.
 

@@ -188,7 +188,10 @@ internal sealed class ReviewForm : Form
             core.Settings.IsGeneralAutofillEnabled = false;
             core.SetVirtualHostNameToFolderMapping(new Uri(ReviewMediaServer.AppOrigin).Host, assets, CoreWebView2HostResourceAccessKind.DenyCors);
             core.NavigationStarting += (_, e) => { if (!TrustedPage(e.Uri)) e.Cancel = true; };
-            core.NewWindowRequested += (_, e) => { e.Handled = true; };
+            // The embedded player's own links (its title, the YouTube button)
+            // ask for a new window. Nothing opens inside this one - send a
+            // YouTube link to the browser, drop anything else.
+            core.NewWindowRequested += (_, e) => { e.Handled = true; if (YouTubeLink(e.Uri) is { } link) OpenExternally(link); };
             core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
             core.DownloadStarting += (_, e) => e.Cancel = true;
             core.WebMessageReceived += OnMessage;
@@ -219,6 +222,14 @@ internal sealed class ReviewForm : Form
         }
         Controls.Add(panel);
     }
+
+    // A plain https YouTube address, or nothing: the only links this window
+    // hands to the browser, wherever they came from.
+    internal static string? YouTubeLink(string? uri) => Uri.TryCreate(uri, UriKind.Absolute, out var value)
+        && value.Scheme == Uri.UriSchemeHttps && value.IsDefaultPort && value.UserInfo.Length == 0
+        && value.Host is "www.youtube.com" or "youtube.com" or "m.youtube.com" or "youtu.be" ? value.AbsoluteUri : null;
+
+    internal static void OpenExternally(string url) => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
 
     internal static bool TrustedPage(string uri) => Uri.TryCreate(uri, UriKind.Absolute, out var value)
         && value.GetLeftPart(UriPartial.Authority) == ReviewMediaServer.AppOrigin && value.AbsolutePath == "/desktop.html";
@@ -381,9 +392,8 @@ internal sealed class ReviewForm : Form
             }
             case "openYouTube":
             {
-                if (!Uri.TryCreate(Text("url"), UriKind.Absolute, out var uri) || uri.Scheme != "https"
-                    || !uri.IsDefaultPort || uri.UserInfo.Length > 0 || uri.Host is not ("www.youtube.com" or "youtube.com" or "youtu.be")) throw new ArgumentException("Invalid YouTube link.");
-                Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+                var link = YouTubeLink(Text("url")) ?? throw new ArgumentException("Invalid YouTube link.");
+                OpenExternally(link);
                 return true;
             }
             default: throw new ArgumentException("Unknown review operation.");

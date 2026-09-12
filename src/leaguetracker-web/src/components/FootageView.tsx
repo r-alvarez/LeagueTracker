@@ -16,6 +16,8 @@ const markerColour = (m: MapMoment) =>
   : m.tone === 'neutral' ? 'var(--muted, #9aa4af)'
   : 'var(--win, #30a46c)'
 
+const youtubeOrigin = 'https://www.youtube.com'
+
 export type FootageSource = 'recorded' | 'youtube' | 'render' | 'pending' | 'none'
 
 // What the Footage tab can show, in the order it prefers: the tracker's own
@@ -70,6 +72,8 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
   const lastPositionWrite = useRef(0)
   const [playbackRate, setPlaybackRate] = useState(1)
   const [playbackError, setPlaybackError] = useState(false)
+  const [youtubeUnreachable, setYoutubeUnreachable] = useState(false)
+  const [youtubeAttempt, setYoutubeAttempt] = useState(0)
   const source = footageSource(vod, fullGame)
 
   // Piecewise-linear mapping over the sampled (videoSec, gameSec) pairs. A
@@ -121,6 +125,39 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
     }
     return () => { cancelled = true; ytPlayerRef.current = null }
   }, [source, ytId])
+
+  // The review window loads no remote code - its CSP keeps scripts to the app
+  // itself - so it performs YouTube's handshake by hand: tell the embed to
+  // listen, then send it the same commands the API script would. The embed
+  // only answers once it has loaded, so its first reply doubles as proof this
+  // PC can reach YouTube at all; silence means the link is all we can offer.
+  // (No origin= on the embed here: the window's own origin is a private host
+  // name, and the player then addresses its replies somewhere we never hear.)
+  useEffect(() => {
+    if (!reviewHost.desktop || source !== 'youtube' || !ytId) return
+    setYoutubeUnreachable(false)
+    let answered = false
+    const post = (message: object) => youtubeRef.current?.contentWindow?.postMessage(JSON.stringify(message), youtubeOrigin)
+    const command = (func: string, args: unknown[] = []) => post({ event: 'command', func, args, id: 1, channel: 'widget' })
+    ytPlayerRef.current = {
+      seekTo: (seconds, allowAhead) => command('seekTo', [seconds, allowAhead]),
+      playVideo: () => command('playVideo'),
+      pauseVideo: () => command('pauseVideo'),
+    }
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== youtubeOrigin || !youtubeRef.current || e.source !== youtubeRef.current.contentWindow) return
+      answered = true
+    }
+    window.addEventListener('message', onMessage)
+    const handshake = window.setInterval(() => { if (!answered) post({ event: 'listening', id: 1, channel: 'widget' }) }, 400)
+    const grace = window.setTimeout(() => { if (!answered) setYoutubeUnreachable(true) }, 12000)
+    return () => {
+      window.removeEventListener('message', onMessage)
+      window.clearInterval(handshake)
+      window.clearTimeout(grace)
+      ytPlayerRef.current = null
+    }
+  }, [source, ytId, youtubeAttempt])
 
   // Without a clock map (a hand-linked upload, or the replay render that
   // starts at the game's 0:00) assume video time is game time.
@@ -200,15 +237,16 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
             }
           }} onError={() => setPlaybackError(true)} />
       )}
-      {source === 'youtube' && ytId && reviewHost.desktop && (
-        <div className="stage-placeholder"><b>This recording is available on YouTube.</b>
+      {source === 'youtube' && ytId && youtubeUnreachable && (
+        <div className="stage-placeholder"><b>This recording is on YouTube, and this PC can’t reach it.</b>
           <p>Keep a local copy to watch here, including when you’re offline.</p>
           <button className="action" type="button" onClick={() => reviewHost.openYouTube?.(vod!.youtubeUrl!)}>Watch on YouTube</button>
+          <button className="action" type="button" onClick={() => setYoutubeAttempt(n => n + 1)}>Try again</button>
         </div>
       )}
-      {source === 'youtube' && ytId && !reviewHost.desktop && (
-        <iframe ref={youtubeRef}
-          src={`https://www.youtube.com/embed/${ytId}?enablejsapi=1&rel=0&playsinline=1&origin=${encodeURIComponent(window.location.origin)}`}
+      {source === 'youtube' && ytId && !youtubeUnreachable && (
+        <iframe key={youtubeAttempt} ref={youtubeRef}
+          src={`${youtubeOrigin}/embed/${ytId}?enablejsapi=1&rel=0&playsinline=1${reviewHost.desktop ? '' : `&origin=${encodeURIComponent(window.location.origin)}`}`}
           title="Game VOD on YouTube" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen className="footage-video footage-frame" />
       )}
       {source === 'render' && (

@@ -1907,3 +1907,43 @@ process that quit and never re-hooked the one that replaced it. Its files
 are numbered sequentially by start time, so the gap renamed every later
 file down one (its "Game Four" is game 5). Nothing in this repo controls
 that; the agent's own recordings are the authority on which game is which.
+
+## 2026-09-12 — The review window plays the YouTube copy, and proves the reach itself
+
+The website has embedded the YouTube upload since the footage tab existed.
+The agent's own review window would not: it showed "This recording is
+available on YouTube", a sentence and a button, for a game whose local mp4
+had been pruned. That is the case the upload exists for - the local copy is
+the one that goes away - so the window was refusing to play footage everyone
+else could see, and the fallback was the only thing it offered.
+
+The refusal was the window's content policy, `frame-src 'none'`, and the
+reason behind it stands: this document is the one with a bridge to the
+machine, and pulling Google's `iframe_api` into it to get a seekable player
+would put remote script beside that bridge. So `script-src` stays `'self'`
+and only `frame-src` opens, to `https://www.youtube.com`. The seeking that
+the API script would have provided is done by hand instead - the handshake
+it performs is one `listening` message, and the commands are `seekTo` and
+`playVideo` posted at the frame. Verified against the live embed: onReady,
+then `seekTo(123)` and the player reporting 125.3 and running.
+
+That handshake doubles as the reachability test the window could not
+otherwise run. An embed on a PC with no route to YouTube renders a browser
+error page that fires `load` like any other; what it never does is answer.
+Twelve seconds of silence and the window shows the link and a retry
+instead, which is also what a machine that is simply offline gets. There is
+no probe request and no second network dependency - the frame we already
+need is the test.
+
+Two smaller things follow. The embed carries no `origin=` parameter in the
+window (its own origin is a private host name; with one set, the player
+addresses its replies somewhere the page never hears them - measured: zero
+messages). And the player's own links - its title, its YouTube button - ask
+for a new window, which this one has always dropped on the floor; a YouTube
+link among them now goes to the browser, through the same check the
+bridge's `openYouTube` uses.
+
+Not yet verified in WebView2 itself: the game was running while this was
+written, and the review window closes for a running game. The mechanism was
+proven in the same Chromium under the same policy, and the smoke harness
+(`deploy/test-review-ui.ps1`) is where the real check belongs.
