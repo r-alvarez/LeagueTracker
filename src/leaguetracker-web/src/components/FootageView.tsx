@@ -72,7 +72,7 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
   const lastPositionWrite = useRef(0)
   const [playbackRate, setPlaybackRate] = useState(1)
   const [playbackError, setPlaybackError] = useState(false)
-  const [youtubeUnreachable, setYoutubeUnreachable] = useState(false)
+  const [youtubeFallback, setYoutubeFallback] = useState<'silent' | 'refused' | null>(null)
   const [youtubeAttempt, setYoutubeAttempt] = useState(0)
   const source = footageSource(vod, fullGame)
 
@@ -130,12 +130,13 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
   // itself - so it performs YouTube's handshake by hand: tell the embed to
   // listen, then send it the same commands the API script would. The embed
   // only answers once it has loaded, so its first reply doubles as proof this
-  // PC can reach YouTube at all; silence means the link is all we can offer.
+  // PC can reach YouTube at all; silence means the link is all we can offer,
+  // and so does a player that answers only to refuse the video.
   // (No origin= on the embed here: the window's own origin is a private host
   // name, and the player then addresses its replies somewhere we never hear.)
   useEffect(() => {
     if (!reviewHost.desktop || source !== 'youtube' || !ytId) return
-    setYoutubeUnreachable(false)
+    setYoutubeFallback(null)
     let answered = false
     const post = (message: object) => youtubeRef.current?.contentWindow?.postMessage(JSON.stringify(message), youtubeOrigin)
     const command = (func: string, args: unknown[] = []) => post({ event: 'command', func, args, id: 1, channel: 'widget' })
@@ -147,10 +148,13 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== youtubeOrigin || !youtubeRef.current || e.source !== youtubeRef.current.contentWindow) return
       answered = true
+      let message: { event?: string } = {}
+      try { message = JSON.parse(String(e.data)) } catch { /* The player sends housekeeping frames too. */ }
+      if (message.event === 'onError') setYoutubeFallback('refused')
     }
     window.addEventListener('message', onMessage)
     const handshake = window.setInterval(() => { if (!answered) post({ event: 'listening', id: 1, channel: 'widget' }) }, 400)
-    const grace = window.setTimeout(() => { if (!answered) setYoutubeUnreachable(true) }, 12000)
+    const grace = window.setTimeout(() => { if (!answered) setYoutubeFallback('silent') }, 12000)
     return () => {
       window.removeEventListener('message', onMessage)
       window.clearInterval(handshake)
@@ -237,15 +241,19 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
             }
           }} onError={() => setPlaybackError(true)} />
       )}
-      {source === 'youtube' && ytId && youtubeUnreachable && (
-        <div className="stage-placeholder"><b>This recording is on YouTube, and this PC can’t reach it.</b>
+      {source === 'youtube' && ytId && youtubeFallback && (
+        <div className="stage-placeholder">
+          <b>{youtubeFallback === 'refused' ? 'YouTube won’t play this recording here.' : 'This recording is on YouTube, and this PC can’t reach it.'}</b>
           <p>Keep a local copy to watch here, including when you’re offline.</p>
           <button className="action" type="button" onClick={() => reviewHost.openYouTube?.(vod!.youtubeUrl!)}>Watch on YouTube</button>
           <button className="action" type="button" onClick={() => setYoutubeAttempt(n => n + 1)}>Try again</button>
         </div>
       )}
-      {source === 'youtube' && ytId && !youtubeUnreachable && (
-        <iframe key={youtubeAttempt} ref={youtubeRef}
+      {source === 'youtube' && ytId && !youtubeFallback && (
+        // The player refuses a request that carries no referrer (error 153),
+        // and the review window is a no-referrer document - so this one frame
+        // says where it came from, and sends the origin only.
+        <iframe key={youtubeAttempt} ref={youtubeRef} referrerPolicy="strict-origin-when-cross-origin"
           src={`${youtubeOrigin}/embed/${ytId}?enablejsapi=1&rel=0&playsinline=1${reviewHost.desktop ? '' : `&origin=${encodeURIComponent(window.location.origin)}`}`}
           title="Game VOD on YouTube" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen className="footage-video footage-frame" />
       )}

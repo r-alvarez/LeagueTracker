@@ -1943,7 +1943,21 @@ for a new window, which this one has always dropped on the floor; a YouTube
 link among them now goes to the browser, through the same check the
 bridge's `openYouTube` uses.
 
-Not yet verified in WebView2 itself: the game was running while this was
-written, and the review window closes for a running game. The mechanism was
-proven in the same Chromium under the same policy, and the smoke harness
-(`deploy/test-review-ui.ps1`) is where the real check belongs.
+Verified afterwards in WebView2 itself, through the smoke harness, and it
+found what plain Chromium could not: the window is a `no-referrer`
+document, and a YouTube embed that carries no referrer is refused with
+error 153. Nothing about that looks like failure from outside - the frame
+loads, the handshake answers in 440ms, the reachability test passes, and
+the player then sits at state -1 showing "Video unavailable". So the one
+frame overrides the document: `referrerPolicy="strict-origin-when-cross-
+origin"`, which tells YouTube the origin and nothing else. With it: states
+5 -> 3 -> 1, and `seekTo(123)` answered by the player reporting 127.9 and
+climbing, inside the real review window.
+
+A player that answers only to refuse the video is now a fallback case of
+its own - the silence timer would never have caught it, because it was
+never silent.
+
+(The first attempt to run the harness closed immediately: the review
+window shuts for a running `League of Legends` process, and a replay
+render is one. The check has to wait for an idle render queue.)
