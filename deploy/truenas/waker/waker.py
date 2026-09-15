@@ -96,7 +96,13 @@ def unifi_call(step: str, url: str, body: dict, headers: dict):
         return urllib.request.urlopen(req, timeout=15, context=INSECURE)
     except urllib.error.HTTPError as ex:
         reply = ex.read(300).decode("utf-8", "replace").strip()
-        raise RuntimeError(f"{step} ({url}) answered HTTP {ex.code}: {reply or ex.reason}") from None
+        # A 404 is the console saying it has no such command at that path -
+        # not that the PC is missing. UniFi moved the wake from cmd/stamgr to
+        # cmd/devmgr in 10.6, and the reply ("api.err.NotFound") reads exactly
+        # like an unknown MAC, which sends the next person after the client
+        # list instead of the URL.
+        hint = " - no such command at that path; UniFi has moved it before (stamgr -> devmgr in 10.6), so check the manager in the URL" if ex.code == 404 else ""
+        raise RuntimeError(f"{step} ({url}) answered HTTP {ex.code}: {reply or ex.reason}{hint}") from None
 
 
 def send_unifi_wake() -> None:
@@ -110,7 +116,7 @@ def send_unifi_wake() -> None:
     headers = {"Cookie": cookie}
     if csrf:
         headers["X-Csrf-Token"] = csrf
-    with unifi_call("wake-device", f"{UNIFI_URL}/proxy/network/api/s/{UNIFI_SITE}/cmd/stamgr", {"cmd": "wake-device", "mac": mac}, headers) as resp:
+    with unifi_call("wake-device", f"{UNIFI_URL}/proxy/network/api/s/{UNIFI_SITE}/cmd/devmgr", {"cmd": "wake-device", "mac": mac}, headers) as resp:
         if resp.status != 200:
             raise RuntimeError(f"wake-device answered HTTP {resp.status}")
 

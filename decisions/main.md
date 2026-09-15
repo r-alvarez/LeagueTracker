@@ -1961,3 +1961,40 @@ never silent.
 (The first attempt to run the harness closed immediately: the review
 window shuts for a running `League of Legends` process, and a replay
 render is one. The check has to wait for an idle render queue.)
+
+## 2026-09-15 — The render box is its own machine, and UniFi moved `wake-device`
+
+**Rendering left the gaming PC: `rjav-agent01` is the renderer, Ruben's PC
+only records.** Enrolled with a **renderer**-role join code, which is the part
+that matters — `Caller.cs` hands a renderer every account and a recorder only
+its owner's, so a recorder-role code would have quietly limited the shared box
+to one player's replays. The gaming PC keeps `RecordGames` and its YouTube
+publishing; only `RenderReplays` moved (it was absent there, and the code
+default is `true`, so it had to be written in explicitly).
+
+**A render box needs a real mouse and keyboard plugged into it.** With no HID
+devices present the camera never engages: `EngageCameraAsync` has no API route
+to the follow-cam and drives the replay's fog and camera dropdowns with
+synthetic clicks, and League's UI takes the cursor through raw input, so with
+no physical cursor to own, the clicks land nowhere. Both dropdowns stay at
+their defaults and every window fails with `parked=(300,-770) now=(300,-770)`,
+forever, on every attempt of every lease. It reads like a replay or camera
+fault and is neither. Ruled out on the way past, all of them wrong:
+`ForegroundLockTimeout` (200000 on the working machine too), HUD `GlobalScale`
+(0.07 on a fresh install vs 0.28 on the calibrated one — matched anyway),
+resolution, GPU driver, and running headless. A USB mouse fixed it on the
+first attempt. `Get-CimInstance Win32_PointingDevice` returning nothing is the
+one-line diagnosis.
+
+**UniFi Network 10.6.101 answers `api.err.NotFound` for `cmd/stamgr`; the wake
+now lives under `cmd/devmgr`.** Swept both managers against three command
+names from the NAS: every `stamgr` call 404s, every `devmgr` call answers
+`{"rc":"ok"}` — `wake-sta` and `wol` included, so `devmgr` is not validating
+`cmd` and an `ok` proves the endpoint accepted the request, not that a packet
+left the gateway. The MAC and the site were eliminated first (the client is in
+`stat/sta`, the site really is `default`), which is what pointed at the command
+rather than the configuration. The waker also needed re-enrolling: its
+`TRACKER_AGENT_KEY` was answering `agent key unknown`, so every poll of
+`/api/render/pending` 401'd and it could not have woken anything regardless of
+`PC_MAC` — enrol it with a renderer join code, or it undercounts the queue the
+same way a recorder-role agent would.
