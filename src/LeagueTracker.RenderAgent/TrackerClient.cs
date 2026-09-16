@@ -389,7 +389,19 @@ public sealed class TrackerClient
                 await using var file = File.OpenRead(mp4Path);
                 using var content = new StreamContent(file);
                 content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("video/mp4");
-                using var resp = await _http.PutAsync(url, content, ct);
+                using var request = new HttpRequestMessage(HttpMethod.Put, url) { Content = content };
+                // Ask before sending. The tracker refuses an upload it has no
+                // room for without reading the body, so without this the
+                // refusal arrives as a reset on a socket we are still writing
+                // tens of MB into - the status never reaches us at all, and a
+                // full account reads as a flaky network.
+                request.Headers.ExpectContinue = true;
+                using var resp = await _http.SendAsync(request, ct);
+                if (resp.StatusCode is HttpStatusCode.InsufficientStorage or HttpStatusCode.RequestEntityTooLarge)
+                {
+                    var why = await resp.Content.ReadAsStringAsync(ct);
+                    throw new UploadRefusedException($"the tracker refused it ({(int)resp.StatusCode}): {Reason(why)}");
+                }
                 resp.EnsureSuccessStatusCode();
                 return;
             }
@@ -406,6 +418,14 @@ public sealed class TrackerClient
     }
 
     private static Exception Root(Exception ex) { while (ex.InnerException is { } inner) ex = inner; return ex; }
+
+    /// The {"error":"..."} the tracker sends with a refusal, or the raw body
+    /// if it is not that shape - either way something a log reader can act on.
+    private static string Reason(string body)
+    {
+        try { return JsonDocument.Parse(body).RootElement.GetProperty("error").GetString() ?? body; }
+        catch { return body.Length > 200 ? body[..200] : body; }
+    }
 
     /// Offers a recorded live-game VOD to this tracker. False when the
     /// tracker doesn't know the match (it belongs to another account's
@@ -577,3 +597,8 @@ public sealed class TrackerClient
         }
     }
 }
+
+/// A refusal, not a wobble: the account is out of allowance or the file is
+/// over a cap. Retrying sends the same bytes to the same answer, so this
+/// fails the job instead - loudly, with the tracker's own words.
+public sealed class UploadRefusedException(string message) : Exception(message);

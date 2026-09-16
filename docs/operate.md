@@ -181,6 +181,7 @@ new ids.
 | `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` | The shared YouTube channel grant handed to agents |
 | `YT_BEN_CLIENT_ID`, `YT_BEN_CLIENT_SECRET`, `YT_BEN_REFRESH_TOKEN` | One agent's own Google project (keyed by its key id in the compose) |
 | `POSTGRES_PASSWORD` | The database password: the `postgres` service sets it, the app and `pg-backup` connect with it. Must exist before the first deploy of the PostgreSQL build - the compose refuses to start without it. The app's connection string caps its one pool at 80 of the server's 100 connections so `pg_dump` and a hand `psql` always get in |
+| `UPLOADS_MAX_MEDIA_GB` | Per-account media allowance in GB (default 60). Raise it with the pool: at the default, an account simply stops accepting clips |
 | `PC_MAC`, `WOL_BROADCAST`, `UNIFI_URL`, `UNIFI_USER`, `UNIFI_PASS` | The waker |
 | `TRACKER_AGENT_KEY` | The waker's approved agent key: `GET /api/render/pending` needs one since reads are authorised. Optional so the stack starts without it; until it is set the waker logs one line and every poll is a 401 (nothing wakes the PC). Enrolled once, below |
 
@@ -220,13 +221,17 @@ public instance - raise them knowingly: the nightly `pg_dump` fails near
 | --- | --- | --- |
 | `Accounts__MaxAccounts` | 200 | The add box refuses once this many accounts exist (config ones count) |
 | `Accounts__MaxAccountsPerUser` | 5 | Per signed-in person: what they own plus what they added and nobody claimed |
-| `Uploads__MaxMediaGbPerAccount` | 60 | Recordings, clips and renders per account; the raw game JSON is not counted |
+| `Uploads__MaxMediaGbPerAccount` | 60 | Recordings, clips and renders per account; the raw game JSON is not counted. Set from `UPLOADS_MAX_MEDIA_GB` in the stack environment |
 | `Uploads__MinFreeGb` | 20 | No upload is accepted that would leave less than this free on the data disk |
 | `Uploads__MaxVodGb` / `MaxRenderGb` / `MaxClipMb` / `MaxSidecarMb` | 8 / 4 / 512 / 64 | Per-file caps, enforced while the body streams |
 | `Uploads__SweepTempAfterHours` | 24 | Interrupted `.tmp`/`.part` uploads older than this are removed (every six hours) |
 
-A refused upload answers 413 (over a cap) or 507 (allowance or disk);
-the agent retries a couple of times and then logs it.
+A refused upload answers 413 (over a cap) or 507 (allowance or disk).
+The agent sends `Expect: 100-continue`, so it hears the refusal before it
+sends the body and fails the job with the reason rather than retrying -
+the same bytes would meet the same answer. Without that the refusal lands
+as a connection reset mid-body and reads as a flaky network, which is how
+two full accounts went unnoticed for two days (2026-09-16).
 
 ## 6. Moving off SQLite (the first boot of the PostgreSQL build)
 
