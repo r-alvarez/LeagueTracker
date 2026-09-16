@@ -16,14 +16,6 @@ const FILTERS: { key: Filter; label: string; test: (m: MapMoment) => boolean }[]
 
 export interface StageJump { timeSec: number; nonce: number }
 
-// The best evidence for a moment: the footage when the player was there (a
-// POV recording never had the fights without them), else the map. The map
-// is the fallback viewer, never the lead over something actually filmed.
-function viewFor(moment: MapMoment | null, hasFootage: boolean, hasTrack: boolean): View {
-  if (hasFootage && !moment?.withoutMe) return 'footage'
-  return hasTrack ? 'map' : 'footage'
-}
-
 // One list of moments, two ways to look at each: the map drawn from the
 // timeline, the footage if any exists. Every clock on the page lands here
 // through jumpTo.
@@ -45,14 +37,12 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
   const [selected, setSelected] = useState(() => defaultMoment(moments))
   const [adhoc, setAdhoc] = useState<MapMoment | null>(null)
   const moment = adhoc ?? moments[selected] ?? null
-  // A tab the player clicked holds until the next moment opens; otherwise
-  // each moment picks its own viewer, from whatever has loaded so far. Until
-  // the first moment is opened the footage leads whenever there is any: the
-  // page is the game as played first, the map fills in what the footage
-  // never saw once a missed fight is chosen.
+  // Footage is the only viewer once any exists: every moment, the fights the
+  // player missed included, seeks the recording. The map is the last resort
+  // for a game with nothing filmed, where the tabs let the player reach the
+  // link/render controls the Footage panel still holds.
   const [pinned, setPinned] = useState<View | null>(null)
-  const [opened, setOpened] = useState(false)
-  const view = pinned ?? (!opened && hasFootage ? 'footage' : viewFor(moment, hasFootage, track !== null))
+  const view: View = hasFootage ? 'footage' : (pinned ?? (track ? 'map' : 'footage'))
   const win = useMemo(() => (moment ? windowFor(moment, durationSec) : { start: 0, end: durationSec }), [moment, durationSec])
   // At rest the map shows the moment itself; play starts from the approach.
   const [t, setT] = useState(() => moment?.timeSec ?? 0)
@@ -64,8 +54,6 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
 
   const open = useCallback((m: MapMoment, idx: number | null) => {
     resting.current = false
-    setOpened(true)
-    setPinned(null)
     setAdhoc(idx === null ? m : null)
     if (idx !== null) setSelected(idx)
     setT(windowFor(m, durationSec).start)
@@ -93,7 +81,6 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
   useEffect(() => {
     const t0 = Number(new URLSearchParams(window.location.search).get('t'))
     if (!Number.isFinite(t0) || t0 <= 0) return
-    setOpened(true)
     const idx = moments.findIndex(m => Math.abs(m.timeSec - t0) <= 2)
     if (idx >= 0) { setSelected(idx); setT(moments[idx].timeSec) }
     else { setAdhoc({ kind: 'kill', timeSec: t0, label: `the moment at ${clock(t0)}`, tone: 'neutral' }); setT(t0) }
@@ -127,15 +114,15 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
   return (
     <div className="card stage" ref={root}>
       <div className="stage-main">
-        <div className="stage-tabs" role="tablist" aria-label="Viewer">
-          <button type="button" role="tab" aria-selected={view === 'footage'} className={`stage-tab${view === 'footage' ? ' active' : ''}`} onClick={() => setPinned('footage')}>
-            Footage <span className="mut">· {sourceWord}</span>
-          </button>
-          {track && (
+        {!hasFootage && track && (
+          <div className="stage-tabs" role="tablist" aria-label="Viewer">
+            <button type="button" role="tab" aria-selected={view === 'footage'} className={`stage-tab${view === 'footage' ? ' active' : ''}`} onClick={() => setPinned('footage')}>
+              Footage <span className="mut">· {sourceWord}</span>
+            </button>
             <button type="button" role="tab" aria-selected={view === 'map'} className={`stage-tab${view === 'map' ? ' active' : ''}`} onClick={() => setPinned('map')}>Map</button>
-          )}
-        </div>
-        {track && (
+          </div>
+        )}
+        {!hasFootage && track && (
           <div className="stage-view" hidden={view !== 'map'}>
             <div className="map-stage"><MapCanvas track={track} t={t} label={moment?.label} /></div>
             <div className="map-controls">
@@ -164,7 +151,7 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
         <div className="stage-view" hidden={view !== 'footage'}>
           <FootageView matchId={matchId} vod={vod} onVodChange={onVodChange} fullGame={fullGame} onFullGameChange={onFullGameChange}
             canManage={canManage} moment={moment} moments={moments} durationSec={durationSec} seekKey={seekKey} active={view === 'footage'}
-            onJump={t => { jump(t); setPinned('footage') }} />
+            onJump={jump} />
         </div>
         {view === 'map' && (
           <p className="mut sm-text map-caption">

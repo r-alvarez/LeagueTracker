@@ -1998,3 +1998,17 @@ rather than the configuration. The waker also needed re-enrolling: its
 `/api/render/pending` 401'd and it could not have woken anything regardless of
 `PC_MAC` — enrol it with a renderer join code, or it undercounts the queue the
 same way a recorder-role agent would.
+
+## 2026-09-16 — Footage is the only viewer once any exists
+
+**The map never shows on a game that has footage; every moment seeks the
+recording.** The stage used to pick a viewer per moment: the footage when the
+player was there, the map for the fights without them, on the theory that a
+POV recording never saw those. In practice that flipped the page to the map
+on most cards in the "Fights without you" list, which is the list the page
+opens on, so the footage the player linked was the thing that kept vanishing.
+Ruben's rule: the map is a last resort for a game with nothing filmed, never
+the main driver. `MatchStage` now derives the view from the source alone —
+footage when there is any, otherwise the map with the Footage/Map tabs kept
+only for that case so the link/render controls stay reachable. The per-moment
+`viewFor`, the `opened` flag and the pin-reset on open went with it.
