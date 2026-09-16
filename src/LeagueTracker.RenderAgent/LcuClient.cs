@@ -26,7 +26,14 @@ public sealed class LcuClient : IDisposable
         _base = $"https://127.0.0.1:{port}";
     }
 
-    /// Null when the client isn't running (no lockfile in the League root).
+    /// Null when the client isn't running (no lockfile in the League root),
+    /// and null after clearing a STALE one: League leaves its lockfile behind
+    /// when it dies ungracefully (a force-kill, or a reboot mid-render), and
+    /// the file alone is enough to make this method hand back a client that
+    /// will never answer. The caller then waits for a start that is not
+    /// happening ('League client still starting') and never reaches the
+    /// launch path that would fix it - so the deadlock outlives every poll.
+    /// The pid in the file settles it: no process, no client.
     public static LcuClient? TryConnect(string leagueRoot)
     {
         var lockfile = Path.Combine(leagueRoot, "lockfile");
@@ -36,11 +43,40 @@ public sealed class LcuClient : IDisposable
             // name:pid:port:token:protocol - shared read; the client keeps it open.
             using var stream = new FileStream(lockfile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             var parts = new StreamReader(stream).ReadToEnd().Split(':');
-            return parts.Length >= 5 ? new LcuClient(int.Parse(parts[2]), parts[3]) : null;
+            if (parts.Length < 5) return null;
+            if (!int.TryParse(parts[1], out var pid) || !IsAlive(pid))
+            {
+                stream.Dispose();
+                ClearStale(lockfile, pid);
+                return null;
+            }
+            return new LcuClient(int.Parse(parts[2]), parts[3]);
         }
         catch
         {
             return null;
+        }
+    }
+
+    private static bool IsAlive(int pid)
+    {
+        try { using var p = System.Diagnostics.Process.GetProcessById(pid); return !p.HasExited; }
+        catch { return false; }
+    }
+
+    /// Said once per stale file, not once per poll: the delete either works
+    /// (next pass relaunches cleanly) or the file is still held, which means
+    /// the client is alive after all and the pid check was the wrong answer.
+    private static void ClearStale(string lockfile, int pid)
+    {
+        try
+        {
+            File.Delete(lockfile);
+            Log.Warn($"League's lockfile pointed at dead pid {pid} - cleared it; the client can be launched again");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"League's lockfile points at dead pid {pid} but could not be cleared ({ex.Message})");
         }
     }
 
