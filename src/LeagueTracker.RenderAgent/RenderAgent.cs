@@ -33,6 +33,14 @@ public sealed class RenderAgent(AgentConfig config)
     // Consecutive launch windows where the hub never served its API - two in
     // a row triggers the stranded-hub reset in MaybeLaunchClientAsync.
     private int _hubLaunchFailures;
+    /// When the render queue was first seen empty, for the idle close below.
+    private DateTime? _queueEmptySince;
+
+    /// Quiet-queue grace before a renderer closes its client. Gaps between
+    /// job claims are bimodal - clusters minutes apart, then an hour of
+    /// nothing (682 measured: median 10 min, p75 17) - so this sits just
+    /// under p75: the clusters keep the client, the tail goes to sleep.
+    private static readonly TimeSpan IdleClientCloseAfter = TimeSpan.FromMinutes(15);
 
     /// Deploys ask the agent to stop by dropping this file next to the exe:
     /// the agent finishes (or cleanly postpones) what it is doing and exits,
@@ -319,6 +327,10 @@ public sealed class RenderAgent(AgentConfig config)
             _reportedUserActive = false;
         }
 
+        // An empty queue and an unreachable tracker look identical from
+        // here, and only one of them means there is no work - so the idle
+        // close below acts on an answer, never on silence.
+        var answered = false;
         foreach (var tracker in _trackers)
         {
             RenderJob? job;
@@ -326,6 +338,7 @@ public sealed class RenderAgent(AgentConfig config)
             {
                 job = await tracker.ClaimNextAsync(ct);
                 _reportedClaimFailures.Remove(tracker.Name);
+                answered = true;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -342,9 +355,35 @@ public sealed class RenderAgent(AgentConfig config)
                 }
                 continue;
             }
-            if (job is not null) return await ProcessJobAsync(tracker, job, ct);
+            if (job is not null)
+            {
+                _queueEmptySince = null;
+                return await ProcessJobAsync(tracker, job, ct);
+            }
         }
+        if (answered) await MaybeCloseIdleClientAsync(ct);
         return false;
+    }
+
+    /// Nobody plays on a render box, so a client left open after the last
+    /// job only holds the SYSTEM wake locks that keep the machine awake -
+    /// and a machine that never sleeps is one the NAS waker cannot wake.
+    /// Only a renderer closes: a recorder has someone sitting at it, and
+    /// their client is theirs. The Riot hub stays up (no wake locks, and it
+    /// makes the next launch a Play press instead of a 90s cold start).
+    private async Task MaybeCloseIdleClientAsync(CancellationToken ct)
+    {
+        if (config.RecordGames || !config.RenderReplays) return;
+        _queueEmptySince ??= DateTime.UtcNow;
+        if (DateTime.UtcNow - _queueEmptySince < IdleClientCloseAfter) return;
+        if (LcuClient.TryConnect(LeagueRoot) is not { } lcu) return;
+        using (lcu)
+        {
+            if (!await lcu.IsUpAsync(ct)) return;
+            Log.Info($"No queued work for {IdleClientCloseAfter.TotalMinutes:0} minutes - closing the League client so the machine can sleep");
+            await lcu.QuitAsync(ct);
+        }
+        _queueEmptySince = null;
     }
 
     /// The client is closed. Open it (via Riot's launcher - the only

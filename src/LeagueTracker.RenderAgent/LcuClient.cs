@@ -80,6 +80,17 @@ public sealed class LcuClient : IDisposable
         }
     }
 
+    /// Asks the client to shut itself down. Politeness is the point: a
+    /// graceful exit removes League's lockfile on the way out, where a kill
+    /// leaves the stale file that TryConnect above has to clean up after.
+    /// The request dies with the process it is closing, so a cancelled or
+    /// failed send is the expected case, not an error worth reporting.
+    public async Task QuitAsync(CancellationToken ct)
+    {
+        try { using var _ = await _http.PostAsync($"{_base}/process-control/v1/process/quit", null, ct); }
+        catch { /* the client is going away - that IS the success case */ }
+    }
+
     /// True when the client answers on its replay API (fully started, logged in).
     public async Task<bool> IsUpAsync(CancellationToken ct)
     {
