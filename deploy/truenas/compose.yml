@@ -128,6 +128,11 @@ services:
       # trust is anything that can reach Traefik directly, i.e. the LAN.
       Proxy__ClientIpHeaderFrom__0: 172.20.0.1/32
       AllowedHosts: league.rjav-tech.co.uk;league-alt.rjav-tech.co.uk;league-ben.rjav-tech.co.uk
+      # Recordings, clips and renders per account. The 60 GB default is a
+      # safety net against one recorder filling the NAS, not a storage
+      # policy - so it follows the pool from the stack environment rather
+      # than waiting on a release. Two accounts hit it silently in Sept 2026.
+      Uploads__MaxMediaGbPerAccount: ${UPLOADS_MAX_MEDIA_GB:-60}
       Accounts__DataRoot: /data
       Accounts__Default: ImRA-87166
       Accounts__List__0__GameName: ImRA
