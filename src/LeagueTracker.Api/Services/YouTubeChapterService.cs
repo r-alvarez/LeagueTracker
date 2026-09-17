@@ -52,11 +52,11 @@ public sealed class YouTubeChapterService(
         {
             case ChapterOutcome.Written:
                 Stamp(matchId, DateTime.UtcNow.ToString("O"), outcome);
-                log.LogInformation("Chapters written to YouTube for {MatchId} ({Count} moments)", matchId, reel.Moments.Count);
+                log.LogInformation("Chapters written to YouTube for {MatchId} ({Count} moments)", Loggable(matchId), reel.Moments.Count);
                 break;
             case ChapterOutcome.Rejected:
                 Stamp(matchId, "rejected by YouTube (not this channel's video, or gone)", outcome);
-                log.LogWarning("YouTube refused the chapters for {MatchId}: not this channel's video, or it is gone", matchId);
+                log.LogWarning("YouTube refused the chapters for {MatchId}: not this channel's video, or it is gone", Loggable(matchId));
                 break;
             case ChapterOutcome.NeedsConsent:
                 log.LogWarning("YouTube chapters need a refresh token consented with the youtube.force-ssl scope: mint one with deploy/youtube-auth.ps1 and replace the stack's YT_*_REFRESH_TOKEN");
@@ -64,6 +64,10 @@ public sealed class YouTubeChapterService(
         }
         return outcome;
     }
+
+    // The id comes off the URL; the vod folder rule already rejects anything
+    // but [A-Za-z0-9_], and the log line holds to the same rule (CodeQL).
+    private static string Loggable(string matchId) => new([.. matchId.Where(ch => char.IsAsciiLetterOrDigit(ch) || ch is '_')]);
 
     private ChapterOutcome Stamp(string matchId, string note, ChapterOutcome outcome)
     {
