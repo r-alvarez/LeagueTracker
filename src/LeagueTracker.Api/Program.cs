@@ -87,6 +87,11 @@ builder.Services.AddHostedService<AgentReleaseSyncService>();
 builder.Services.AddHttpClient(Auth0ManagementClient.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddSingleton<Auth0ManagementClient>();
 builder.Services.AddScoped<VodService>();
+builder.Services.Configure<SiteOptions>(builder.Configuration.GetSection("Site"));
+builder.Services.AddHttpClient(nameof(YouTubeChapterService), client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<YouTubeChapterService>();
+builder.Services.AddSingleton<YouTubeChapterSweeper>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<YouTubeChapterSweeper>());
 builder.Services.AddScoped<UploadQuota>();
 builder.Services.AddHostedService<TempFileSweeper>();
 builder.Services.AddPerAccount<LiveGameState>();
@@ -824,9 +829,10 @@ recorder.MapGet("/matches/at", async (AccountContext acct, LeagueDbContext db, D
     return Results.Ok(new { player = acct.Current.RiotId, matches = items });
 });
 
-recorder.MapPost("/matches/{id}/vod/link", async (string id, HttpRequest request, VodService vods, LeagueDbContext db, CancellationToken ct) =>
+recorder.MapPost("/matches/{id}/vod/link", async (string id, HttpRequest request, VodService vods, LeagueDbContext db, Caller caller, YouTubeChapterService chapters, YouTubeChapterSweeper sweeper, CancellationToken ct) =>
 {
-    if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == id, ct)) return Results.NotFound();
+    var match = await db.Matches.AsNoTracking().Where(m => m.Id == id).Select(m => new { m.Id, m.GameEndUtc }).FirstOrDefaultAsync(ct);
+    if (match is null) return Results.NotFound();
     using var doc = await System.Text.Json.JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
     var url = doc.RootElement.TryGetProperty("url", out var u) ? u.GetString()?.Trim() : null;
     if (url is { Length: > 0 } && !System.Text.RegularExpressions.Regex.IsMatch(
@@ -835,6 +841,14 @@ recorder.MapPost("/matches/{id}/vod/link", async (string id, HttpRequest request
         return Results.BadRequest(new { error = "that does not look like a YouTube video link" });
     }
     vods.SaveLink(id, url);
+    if (url is { Length: > 0 })
+    {
+        // A replaced link is a different video: its chapters start over.
+        if (chapters.StampPath(id) is { } stamp && File.Exists(stamp)) File.Delete(stamp);
+        // The analysed game is usually not in yet; the sweeper finishes the
+        // job. The immediate try is for the hand-pasted link on an old game.
+        if (await chapters.TryWriteAsync(id, match.GameEndUtc, caller.Agent?.Id, ct) is ChapterOutcome.Retry) sweeper.Poke();
+    }
     return Results.Ok(vods.Status(id));
 });
 

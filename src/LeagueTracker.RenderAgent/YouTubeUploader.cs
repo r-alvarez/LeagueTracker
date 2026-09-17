@@ -34,7 +34,10 @@ public sealed class YouTubeUploader(AgentConfig config, UploadThrottle throttle)
     /// upload alone suffices for videos.insert; readonly is only so the auth
     /// flow's channels.list can NAME the channel it just bound (upload-only
     /// tokens get 403 insufficientPermissions on any read, learned live).
-    private const string Scope = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly";
+    /// force-ssl is for the tracker, not the agent: the server rewrites the
+    /// description with chapters (videos.update) using the token this flow
+    /// mints. A token from before it keeps uploading; only the chapters wait.
+    private const string Scope = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl";
     private const string TokenEndpoint = "https://oauth2.googleapis.com/token";
     private const string UploadEndpoint =
         "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status";
