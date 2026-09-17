@@ -105,6 +105,9 @@ services:
       Auth__Oidc__ClientId: ${AUTH0_CLIENT_ID:-}
       Auth__Oidc__ClientSecret: ${AUTH0_CLIENT_SECRET:-}
       Auth__Admins: ${AUTH_ADMINS:-}
+      # Where the tracker points from outside (the YouTube description's
+      # "Review on the tracker" line). Blank = no link.
+      Site__Origin: ${SITE_ORIGIN:-https://league.rjav-tech.co.uk}
       # Invites: a separate Machine-to-Machine application authorised for the
       # Management API (create:users read:users delete:users
       # create:user_tickets). Unset = "Add a person" still makes the row here
