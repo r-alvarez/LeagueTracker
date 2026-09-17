@@ -24,3 +24,17 @@ the clips card alone ~2000px of it.
   Plan proposed: a delivery-pass step on the agent that, once the tracker
   has fights for the match, converts game clocks through the sidecar's
   clockMap and PUTs the description once.
+
+## 2026-09-17 — Reel chosen, one Theater switch for both cards
+
+Ruben, after the three copies side by side (`?clips=grid|carousel|reel`
+on the Ahri vs Orianna game): "I'm going for the reel option", and the
+clips should get the same Normal/Theater treatment "so that we don't take
+over the entire page if it's not needed".
+
+- Normal view of the reel is the stage's own shape: player two thirds,
+  the clips as a vertical list beside it (portrait, clock, label, camera).
+  Theater is the full-width player with the filmstrip under it.
+- One preference (`stage-theater` in localStorage) drives both cards;
+  each card carries its own button because either can be the one on
+  screen. The grid and carousel variants and the `?clips=` switch are gone.

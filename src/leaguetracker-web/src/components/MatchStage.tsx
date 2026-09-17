@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { clock, defaultMoment, windowFor } from '../mapTrack'
 import FootageView, { footageSource } from './FootageView'
 import MapCanvas from './MapCanvas'
+import TheaterToggle from './TheaterToggle'
 import type { FullGameStatus, MapMoment, MatchTrack, VodStatus } from '../types'
 
 const SPEEDS = [4, 8]
@@ -19,7 +20,7 @@ export interface StageJump { timeSec: number; nonce: number }
 // One list of moments, two ways to look at each: the map drawn from the
 // timeline, the footage if any exists. Every clock on the page lands here
 // through jumpTo.
-export default function MatchStage({ matchId, track, moments, durationSec, vod, onVodChange, fullGame, onFullGameChange, canManage, jumpTo }: {
+export default function MatchStage({ matchId, track, moments, durationSec, vod, onVodChange, fullGame, onFullGameChange, canManage, jumpTo, theater, onToggleTheater }: {
   matchId: string
   track: MatchTrack | null
   moments: MapMoment[]
@@ -30,6 +31,8 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
   onFullGameChange: (f: FullGameStatus | null) => void
   canManage: boolean
   jumpTo: StageJump | null
+  theater: boolean
+  onToggleTheater: () => void
 }) {
   const source = footageSource(vod, fullGame)
   const hasFootage = source === 'recorded' || source === 'youtube' || source === 'render'
@@ -42,10 +45,6 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
   // for a game with nothing filmed, where the tabs let the player reach the
   // link/render controls the Footage panel still holds.
   const [pinned, setPinned] = useState<View | null>(null)
-  // Theater drops the moment rail under the viewer so the footage takes the
-  // whole card; the choice sticks across games.
-  const [theater, setTheater] = useState(() => localStorage.getItem('stage-theater') === '1')
-  const toggleTheater = () => setTheater(on => { localStorage.setItem('stage-theater', on ? '0' : '1'); return !on })
   const view: View = hasFootage ? 'footage' : (pinned ?? (track ? 'map' : 'footage'))
   const win = useMemo(() => (moment ? windowFor(moment, durationSec) : { start: 0, end: durationSec }), [moment, durationSec])
   // At rest the map shows the moment itself; play starts from the approach.
@@ -118,12 +117,7 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
   return (
     <div className={`card stage${theater ? ' theater' : ''}`} ref={root}>
       <div className="stage-main">
-        {hasFootage && (
-          <button type="button" className="action sm-action stage-theater" aria-pressed={theater} onClick={toggleTheater}
-            title={theater ? 'Put the moment list back beside the video' : 'Widen the video across the card'}>
-            {theater ? '⤡ Normal view' : '⤢ Theater'}
-          </button>
-        )}
+        {hasFootage && <TheaterToggle on={theater} onToggle={onToggleTheater} what="the moment list" />}
         {!hasFootage && track && (
           <div className="stage-tabs" role="tablist" aria-label="Viewer">
             <button type="button" role="tab" aria-selected={view === 'footage'} className={`stage-tab${view === 'footage' ? ' active' : ''}`} onClick={() => setPinned('footage')}>

@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { useChampionIcons } from '../champions'
+import TheaterToggle from './TheaterToggle'
 import { clock } from './TimeLink'
 import type { ClipInfo } from '../types'
 
 // One player, however many clips: the card must not grow with the fight
 // count (seven clips already pushed the scoreboard two screens down).
-export default function ClipReel({ clips, title, hint, canManage, onDelete }: {
+export default function ClipReel({ clips, title, hint, canManage, onDelete, theater, onToggleTheater }: {
   clips: ClipInfo[]
   title: string
   hint: string
   canManage: boolean
   onDelete: (index: number) => void
+  theater: boolean
+  onToggleTheater: () => void
 }) {
   const icons = useChampionIcons()
   const ready = clips.filter(c => c.ready)
@@ -33,9 +36,10 @@ export default function ClipReel({ clips, title, hint, canManage, onDelete }: {
   const pending = clips.length - ready.length
 
   return (
-    <div className="card reel" onKeyDown={e => { if (e.key === 'ArrowRight') step(1); if (e.key === 'ArrowLeft') step(-1) }}>
-      <h2>
-        {title} <span className="mut" style={{ fontWeight: 400 }}>— {hint}</span>
+    <div className={`card reel${theater ? ' theater' : ''}`} onKeyDown={e => { if (e.key === 'ArrowRight') step(1); if (e.key === 'ArrowLeft') step(-1) }}>
+      <h2 className="reel-head">
+        <span>{title} <span className="mut" style={{ fontWeight: 400 }}>— {hint}</span></span>
+        {ready.length > 0 && <TheaterToggle on={theater} onToggle={onToggleTheater} what="the clip list" />}
       </h2>
       {ready.length === 0 ? (
         <p className="mut" style={{ margin: 0 }}>{clips.length} fight window{clips.length === 1 ? '' : 's'} planned — waiting for the render agent on the gaming PC.</p>

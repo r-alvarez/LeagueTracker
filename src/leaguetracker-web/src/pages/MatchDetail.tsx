@@ -10,7 +10,6 @@ import { ItemIcon, PerkIcon, UnitGlyph } from '../components/GameIcons'
 import VerdictStrip from '../components/VerdictStrip'
 import MatchStage, { type StageJump } from '../components/MatchStage'
 import ClipReel from '../components/ClipReel'
-import { ClipCarousel, ClipGrid } from '../components/ClipVariants'
 import { RelTime, tierClass } from '../components/Stats'
 
 import { footageSource } from '../components/FootageView'
@@ -555,6 +554,10 @@ export default function MatchDetail() {
   const [jump, setJump] = useState<StageJump | null>(null)
   const canManage = auth.owns(account.current.id)
   const [recapAt, setRecapAt] = useState<number | null>(null)
+  // Theater lets the footage and the clips take the whole card; one choice
+  // for both, kept across games.
+  const [theater, setTheater] = useState(() => localStorage.getItem('stage-theater') === '1')
+  const toggleTheater = () => setTheater(on => { localStorage.setItem('stage-theater', on ? '0' : '1'); return !on })
 
   useEffect(() => {
     if (!id) return
@@ -693,22 +696,17 @@ export default function MatchDetail() {
       <MatchStage matchId={m.id} track={track && track.frames.length > 0 ? track : null} moments={moments}
         durationSec={Math.round(m.durationMin * 60)}
         vod={vod} onVodChange={setVod} fullGame={fullGame} onFullGameChange={setFullGame}
-        canManage={canManage} jumpTo={jump} />
+        canManage={canManage} jumpTo={jump} theater={theater} onToggleTheater={toggleTheater} />
 
       {/* Clips keep rendering and stay on disk as the backup copy, but once a
           recording (or its YouTube link) exists the footage covers the same
           moments - only the fights the player's POV never saw earn a card. */}
-      {visibleClips.length > 0 && (() => {
-        const props = {
-          clips: visibleClips,
-          canManage,
-          title: hasFootage ? 'Team fights' : 'Clips',
-          hint: hasFootage ? "the fights you weren't in, rendered from the replay (your footage never saw them)" : 'your kills & deaths, rendered from the official replay',
-          onDelete: (index: number) => { void api.deleteClip(m.id, index).then(() => api.clips(m.id).then(setClips)) },
-        }
-        const variant = new URLSearchParams(window.location.search).get('clips')
-        return variant === 'grid' ? <ClipGrid {...props} /> : variant === 'carousel' ? <ClipCarousel {...props} /> : <ClipReel {...props} />
-      })()}
+      {visibleClips.length > 0 && (
+        <ClipReel clips={visibleClips} canManage={canManage} theater={theater} onToggleTheater={toggleTheater}
+          title={hasFootage ? 'Team fights' : 'Clips'}
+          hint={hasFootage ? "the fights you weren't in, rendered from the replay (your footage never saw them)" : 'your kills & deaths, rendered from the official replay'}
+          onDelete={index => { void api.deleteClip(m.id, index).then(() => api.clips(m.id).then(setClips)) }} />
+      )}
 
       <div className="filters">
         <div className="seg" role="tablist" aria-label="Match detail">
