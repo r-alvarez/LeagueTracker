@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { clock, defaultMoment, windowFor } from '../mapTrack'
 import FootageView, { footageSource } from './FootageView'
 import MapCanvas from './MapCanvas'
+import TheaterToggle from './TheaterToggle'
 import type { FullGameStatus, MapMoment, MatchTrack, VodStatus } from '../types'
 
 const SPEEDS = [4, 8]
@@ -19,7 +20,7 @@ export interface StageJump { timeSec: number; nonce: number }
 // One list of moments, two ways to look at each: the map drawn from the
 // timeline, the footage if any exists. Every clock on the page lands here
 // through jumpTo.
-export default function MatchStage({ matchId, track, moments, durationSec, vod, onVodChange, fullGame, onFullGameChange, canManage, jumpTo }: {
+export default function MatchStage({ matchId, track, moments, durationSec, vod, onVodChange, fullGame, onFullGameChange, canManage, jumpTo, theater, onToggleTheater }: {
   matchId: string
   track: MatchTrack | null
   moments: MapMoment[]
@@ -30,6 +31,8 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
   onFullGameChange: (f: FullGameStatus | null) => void
   canManage: boolean
   jumpTo: StageJump | null
+  theater: boolean
+  onToggleTheater: () => void
 }) {
   const source = footageSource(vod, fullGame)
   const hasFootage = source === 'recorded' || source === 'youtube' || source === 'render'
@@ -112,8 +115,9 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
   const sourceWord = source === 'recorded' ? 'recorded' : source === 'youtube' ? 'YouTube' : source === 'render' ? 'render' : source === 'pending' ? 'uploading' : 'none'
 
   return (
-    <div className="card stage" ref={root}>
+    <div className={`card stage${theater ? ' theater' : ''}`} ref={root}>
       <div className="stage-main">
+        {hasFootage && <TheaterToggle on={theater} onToggle={onToggleTheater} what="the moment list" />}
         {!hasFootage && track && (
           <div className="stage-tabs" role="tablist" aria-label="Viewer">
             <button type="button" role="tab" aria-selected={view === 'footage'} className={`stage-tab${view === 'footage' ? ' active' : ''}`} onClick={() => setPinned('footage')}>
