@@ -829,10 +829,9 @@ recorder.MapGet("/matches/at", async (AccountContext acct, LeagueDbContext db, D
     return Results.Ok(new { player = acct.Current.RiotId, matches = items });
 });
 
-recorder.MapPost("/matches/{id}/vod/link", async (string id, HttpRequest request, VodService vods, LeagueDbContext db, Caller caller, YouTubeChapterService chapters, YouTubeChapterSweeper sweeper, CancellationToken ct) =>
+recorder.MapPost("/matches/{id}/vod/link", async (string id, HttpRequest request, VodService vods, LeagueDbContext db, YouTubeChapterService chapters, CancellationToken ct) =>
 {
-    var match = await db.Matches.AsNoTracking().Where(m => m.Id == id).Select(m => new { m.Id, m.GameEndUtc }).FirstOrDefaultAsync(ct);
-    if (match is null) return Results.NotFound();
+    if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == id, ct)) return Results.NotFound();
     using var doc = await System.Text.Json.JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
     var url = doc.RootElement.TryGetProperty("url", out var u) ? u.GetString()?.Trim() : null;
     if (url is { Length: > 0 } && !System.Text.RegularExpressions.Regex.IsMatch(
@@ -840,16 +839,33 @@ recorder.MapPost("/matches/{id}/vod/link", async (string id, HttpRequest request
     {
         return Results.BadRequest(new { error = "that does not look like a YouTube video link" });
     }
+    var previous = vods.ReadLink(id);
     vods.SaveLink(id, url);
-    if (url is { Length: > 0 })
+    // The agent says whether the upload carried the chapters; a link without
+    // them is left to the nightly sweep, never written mid-evening while the
+    // day's uploads still need the quota. A different video starts over.
+    if (url is { Length: > 0 } && doc.RootElement.TryGetProperty("chapters", out var carried) && carried.ValueKind is System.Text.Json.JsonValueKind.True)
     {
-        // A replaced link is a different video: its chapters start over.
-        if (chapters.StampPath(id) is { } stamp && File.Exists(stamp)) File.Delete(stamp);
-        // The analysed game is usually not in yet; the sweeper finishes the
-        // job. The immediate try is for the hand-pasted link on an old game.
-        if (await chapters.TryWriteAsync(id, match.GameEndUtc, caller.Agent?.Id, ct) is ChapterOutcome.Retry) sweeper.Poke();
+        chapters.MarkWrittenAtUpload(id);
+    }
+    else if (url != previous)
+    {
+        chapters.ClearStamp(id);
     }
     return Results.Ok(vods.Status(id));
+});
+
+// The YouTube description for a game about to be uploaded: the chapters
+// from the review reel on the recording's clock. 204 = not yet (the timeline
+// or the recording's sidecar is still on the way, or the reel is too thin) -
+// the agent uploads without chapters and the nightly sweep adds them. No
+// sidecar, no clock map: times baked into an upload must not be guesses.
+recorder.MapGet("/matches/{id}/youtube/description", async (string id, LeagueDbContext db, VodService vods, YouTubeChapterService chapters, CancellationToken ct) =>
+{
+    if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == id, ct)) return Results.NotFound();
+    if (vods.MetaPath(id) is null) return Results.NoContent();
+    var text = await chapters.DescribeAsync(id, ct);
+    return text.Description is { } description ? Results.Ok(new { description }) : Results.NoContent();
 });
 
 // Agent-facing uploads. The mp4 is only accepted for a match this tracker

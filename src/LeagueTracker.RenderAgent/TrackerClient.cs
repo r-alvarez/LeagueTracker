@@ -550,12 +550,33 @@ public sealed class TrackerClient
         }
     }
 
+    /// The YouTube description for a game about to be uploaded, chapters
+    /// included. Null = this tracker doesn't hold the match, isn't ready for
+    /// it (timeline or sidecar still on the way, too few moments), predates
+    /// the endpoint, or is unreachable - the upload goes without chapters and
+    /// the tracker's nightly sweep adds them.
+    public async Task<string?> GetYouTubeDescriptionAsync(string matchId, CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _http.GetAsync($"{Api}/matches/{Uri.EscapeDataString(matchId)}/youtube/description", ct);
+            if (resp.StatusCode != HttpStatusCode.OK || !IsJson(resp)) return null;
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            return doc.RootElement.TryGetProperty("description", out var d) ? d.GetString() : null;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
     /// Registers a match's YouTube link (the review player embeds it). False
     /// when this tracker doesn't know the match - same ownership routing as
-    /// the VOD upload; the caller tries the next tracker.
-    public async Task<bool> SetVodLinkAsync(string matchId, string url, CancellationToken ct)
+    /// the VOD upload; the caller tries the next tracker. chapters = the
+    /// upload carried them, so the tracker has nothing left to write.
+    public async Task<bool> SetVodLinkAsync(string matchId, string url, bool chapters, CancellationToken ct)
     {
-        using var content = new StringContent(JsonSerializer.Serialize(new { url }),
+        using var content = new StringContent(JsonSerializer.Serialize(new { url, chapters }),
             System.Text.Encoding.UTF8, "application/json");
         using var resp = await _http.PostAsync($"{Api}/matches/{matchId}/vod/link", content, ct);
         if (resp.StatusCode == HttpStatusCode.NotFound) return false;

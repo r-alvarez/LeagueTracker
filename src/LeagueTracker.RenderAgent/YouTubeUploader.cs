@@ -16,7 +16,9 @@ public enum UploadOutcome
     Failed,     // deterministic (rejected request, revoked auth) - retrying cannot
 }
 
-public sealed record UploadResult(UploadOutcome Outcome, string? Url = null, string? Error = null);
+/// Description = what the video went up with: a resumed session keeps the
+/// one it started with, whatever the caller passes this time.
+public sealed record UploadResult(UploadOutcome Outcome, string? Url = null, string? Error = null, string? Description = null);
 
 /// Publishes finished recordings to the player's YouTube channel - the
 /// storage-free review mode (UploadVodSidecars) with the manual
@@ -34,9 +36,9 @@ public sealed class YouTubeUploader(AgentConfig config, UploadThrottle throttle)
     /// upload alone suffices for videos.insert; readonly is only so the auth
     /// flow's channels.list can NAME the channel it just bound (upload-only
     /// tokens get 403 insufficientPermissions on any read, learned live).
-    /// force-ssl is for the tracker, not the agent: the server rewrites the
-    /// description with chapters (videos.update) using the token this flow
-    /// mints. A token from before it keeps uploading; only the chapters wait.
+    /// force-ssl is for the tracker, not the agent: the server adds chapters
+    /// to a video that went up without them (videos.update) using the token
+    /// this flow mints. A token from before it keeps uploading; only those wait.
     private const string Scope = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl";
     private const string TokenEndpoint = "https://oauth2.googleapis.com/token";
     private const string UploadEndpoint =
@@ -131,14 +133,15 @@ public sealed class YouTubeUploader(AgentConfig config, UploadThrottle throttle)
 
         // An earlier attempt's session continues where it stopped; Google
         // keeps them alive for days, and 404/410 just means start over.
-        var (sessionUri, offset) = await ResumeSessionAsync(sessionPath, size, ct);
+        var (sessionUri, offset, sentDescription) = await ResumeSessionAsync(sessionPath, size, ct);
         if (sessionUri is null)
         {
             var started = await StartSessionAsync(size, title, description, ct);
             if (started.Error is not null) return started.Error;
             sessionUri = started.Uri!;
             offset = 0;
-            File.WriteAllText(sessionPath, JsonSerializer.Serialize(new { uri = sessionUri, size }));
+            sentDescription = description;
+            File.WriteAllText(sessionPath, JsonSerializer.Serialize(new { uri = sessionUri, size, description }));
         }
 
         await using var file = File.OpenRead(mp4Path);
@@ -170,7 +173,7 @@ public sealed class YouTubeUploader(AgentConfig config, UploadThrottle throttle)
                 var id = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct))
                     .RootElement.GetProperty("id").GetString();
                 TryDelete(sessionPath);
-                return new(UploadOutcome.Uploaded, Url: $"https://youtu.be/{id}");
+                return new(UploadOutcome.Uploaded, Url: $"https://youtu.be/{id}", Description: sentDescription);
             }
             if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone)
             {
@@ -184,9 +187,10 @@ public sealed class YouTubeUploader(AgentConfig config, UploadThrottle throttle)
     /// Asks the stored session where it stands ("bytes */size" probe).
     /// (null, 0) = no usable session; otherwise the URI and the next byte
     /// YouTube wants.
-    private async Task<(string? Uri, long Offset)> ResumeSessionAsync(string sessionPath, long size, CancellationToken ct)
+    private async Task<(string? Uri, long Offset, string? Description)> ResumeSessionAsync(string sessionPath, long size, CancellationToken ct)
     {
         string? uri = null;
+        string? description = null;
         try
         {
             var saved = JsonDocument.Parse(File.ReadAllText(sessionPath)).RootElement;
@@ -194,22 +198,24 @@ public sealed class YouTubeUploader(AgentConfig config, UploadThrottle throttle)
             // upload - the old session's bytes are for a file that no longer
             // exists.
             if (saved.GetProperty("size").GetInt64() == size) uri = saved.GetProperty("uri").GetString();
+            // Sessions from before the field: unknown, so no chapters claimed.
+            if (saved.TryGetProperty("description", out var d)) description = d.GetString();
         }
         catch
         {
-            return (null, 0); // no/corrupt session file - start fresh
+            return (null, 0, null); // no/corrupt session file - start fresh
         }
         if (uri is null)
         {
             TryDelete(sessionPath);
-            return (null, 0);
+            return (null, 0, null);
         }
         using var req = new HttpRequestMessage(HttpMethod.Put, uri) { Content = new ByteArrayContent([]) };
         req.Content.Headers.ContentRange = new ContentRangeHeaderValue(size);
         using var resp = await _http.SendAsync(req, ct);
-        if ((int)resp.StatusCode == 308) return (uri, NextOffset(resp) ?? 0);
+        if ((int)resp.StatusCode == 308) return (uri, NextOffset(resp) ?? 0, description);
         TryDelete(sessionPath);
-        return (null, 0);
+        return (null, 0, null);
     }
 
     /// "Range: bytes=0-N" on a 308 means N+1 is the next byte wanted; no

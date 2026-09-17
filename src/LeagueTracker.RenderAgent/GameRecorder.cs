@@ -576,7 +576,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         }
         // .ytsession.json is a resumable upload pointed at the old, shorter
         // file: resuming it would upload the fragment again.
-        foreach (var stamp in new[] { ".youtube.txt", ".linked", ".uploaded", ".review-published", ".pruned", ".ytsession.json" })
+        foreach (var stamp in new[] { ".youtube.txt", ".ytchapters", ".linked", ".uploaded", ".review-published", ".pruned", ".ytsession.json" })
         {
             TryDelete(M(stamp));
         }
@@ -795,7 +795,16 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             // Platinum 03 Aug 2026 Game 2", the exact style the channel's
             // hand-made uploads already use.
             if (AgentStatus.Current.State is not "recording") AgentStatus.Set("uploading", baseName);
-            var result = await _youtube.UploadAsync(mp4, baseName.Replace(" - ", " "), $"Match {matchId}",
+            // Chapters ride along when the tracker has the analysed game by
+            // now (usually: the sidecar just went up and Riot is quick) - free,
+            // where adding them afterwards costs the channel's quota.
+            string? chaptered = null;
+            foreach (var tracker in TrackersFor(baseName))
+            {
+                if (_refusedTrackers.Contains(tracker.Name)) continue;
+                if ((chaptered = await tracker.GetYouTubeDescriptionAsync(matchId, ct)) is not null) break;
+            }
+            var result = await _youtube.UploadAsync(mp4, baseName.Replace(" - ", " "), chaptered ?? $"Match {matchId}",
                 M(".ytsession.json"), holdOff: () => RenderAgent.StopRequested, ct);
             if (AgentStatus.Current.State is "uploading") AgentStatus.Set(RenderAgent.Paused ? "paused" : "idle");
             AgentStatus.YouTubeReady = _youtube.Enabled;
@@ -803,7 +812,11 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             {
                 case UploadOutcome.Uploaded:
                     File.WriteAllText(M(".youtube.txt"), result.Url);
-                    Log.Info($"Published to YouTube: {baseName} -> {result.Url}");
+                    // What the video actually went up with: a resumed session
+                    // keeps the description it started with.
+                    var withChapters = HasChapters(result.Description);
+                    if (withChapters) File.WriteAllText(M(".ytchapters"), "");
+                    Log.Info($"Published to YouTube{(withChapters ? " with chapters" : "")}: {baseName} -> {result.Url}");
                     if (AgentStatus.LastError is { } cleared && cleared.StartsWith(QuotaNotice, StringComparison.Ordinal)) AgentStatus.LastError = null;
                     break;
                 case UploadOutcome.Paused:
@@ -830,6 +843,11 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
     }
 
     private const string QuotaNotice = "YouTube upload quota reached";
+
+    /// YouTube's own rule: chapters exist when the description lists them
+    /// from 0:00.
+    internal static bool HasChapters(string? description) =>
+        description is not null && description.Split('\n').Any(l => l.StartsWith("0:00 ", StringComparison.Ordinal));
 
     /// Links this agent published for a game and then withdrew, because the
     /// game turned out to still be running. Never adopted, never relinked.
@@ -861,7 +879,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             if (_refusedTrackers.Contains(tracker.Name)) continue;
             try
             {
-                if (!await tracker.SetVodLinkAsync(matchId, url, ct)) continue;
+                if (!await tracker.SetVodLinkAsync(matchId, url, File.Exists(M(".ytchapters")), ct)) continue;
                 File.WriteAllText(M(".linked"), tracker.Name);
                 Log.Info($"VOD link for {matchId} registered on {tracker.Name}");
                 return;

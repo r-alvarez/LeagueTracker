@@ -33,3 +33,32 @@ we do with the clips".
 - **Rejected.** Chapters at upload time (no match data yet); an agent-side
   writer (an agent release and the burden on friends' PCs for something
   the server already has).
+
+## 2026-09-17 — Chapters go up with the upload; the sweep runs at night
+
+The first day spent the shared channel's quota: the backlog pass burnt the
+day's 10,000 units, and every video linked afterwards sat unchaptered with
+nothing in the log (`quotaExceeded` read as a quiet retry). Ruben: "the agent
+should not only upload the youtube video but upload the descriptions ...
+whilst the sweeper should only work perhaps at midnight if we have space".
+
+- **At upload.** The agent asks the tracker for the description
+  (`GET /matches/{id}/youtube/description`) and sends it with
+  `videos.insert` - no extra quota. The tracker still builds the text, so
+  the upload and the sweep can never write different chapters. 204 when the
+  timeline or the recording's sidecar is not in yet, or the reel is thin: the
+  video goes up as `Match {id}`. The link post says `chapters: true` when the
+  upload carried them and the tracker stamps `chapters.txt`; a resumed upload
+  session keeps the description it started with, so that is what counts.
+- **Reverses** "Rejected: chapters at upload time (no match data yet)": in
+  practice the tracker holds the game before the upload starts (17 Sep: data
+  at 16:34:55, upload at 16:38:24).
+- **Sweep at 00:30 UK**, after the evening's games are uploaded, on what the
+  quota day has left; it stops at the first `quotaExceeded`. YouTube's day
+  resets at midnight Pacific, so a pass the quota cut short gets one more go
+  at 00:15 Pacific rather than a day later. No immediate write from the link
+  endpoint any more, and no poke: nothing spends quota mid-evening.
+- **Per account.** A token without the scope, or no credentials, skips that
+  account instead of ending the sweep for all of them.
+- **Logged.** Every wait says why (not analysed, too thin, quota, YouTube
+  hiccup), and a pass reports how many it wrote and how many still wait.

@@ -13,7 +13,11 @@ public sealed class SiteOptions
     public string Origin { get; set; } = "";
 }
 
-public enum ChapterOutcome { Written, Retry, Skipped, NeedsConsent, Rejected, NoCredentials }
+public enum ChapterOutcome { Written, Retry, Skipped, NeedsConsent, Rejected, NoCredentials, QuotaExhausted }
+
+// The chapters text, or why there is none (for the log and the agent).
+// Analysed = the reel exists, so a missing text is the game, not a delay.
+public sealed record ChapterText(string? Description, string? Waiting, bool Analysed);
 
 // Files-as-truth like the clips: chapters.txt beside youtube.txt says the
 // video was dealt with, so a restart or a rerun never rewrites a video twice.
@@ -31,35 +35,69 @@ public sealed class YouTubeChapterService(
 
     public bool IsStamped(string matchId) => StampPath(matchId) is { } path && File.Exists(path);
 
+    public void ClearStamp(string matchId)
+    {
+        if (StampPath(matchId) is { } path && File.Exists(path)) File.Delete(path);
+    }
+
+    // The agent put the chapters in the upload itself: nothing left to write,
+    // and no quota spent on it.
+    public void MarkWrittenAtUpload(string matchId)
+    {
+        Stamp(matchId, $"written at upload {DateTime.UtcNow:O}", ChapterOutcome.Written);
+        log.LogInformation("Chapters went up with the upload for {MatchId}", Loggable(matchId));
+    }
+
+    // The same text the sweeper writes, for the agent to send with the upload.
+    public async Task<ChapterText> DescribeAsync(string matchId, CancellationToken ct)
+    {
+        var reel = await reels.GetAsync(matchId, ct);
+        if (reel is null) return new(null, "the match is not analysed yet", Analysed: false);
+        return YouTubeChapters.Describe(reel, ClockMap(matchId), ReviewUrl(matchId)) is { } description
+            ? new(description, null, Analysed: true)
+            : new(null, $"fewer than {YouTubeChapters.MinChapters} chapters in the reel", Analysed: true);
+    }
+
     public async Task<ChapterOutcome> TryWriteAsync(string matchId, DateTime gameEndUtc, string? preferAgentId, CancellationToken ct)
     {
         if (IsStamped(matchId)) return ChapterOutcome.Skipped;
         if (vods.ReadLink(matchId) is not { } url || VideoIdOf(url) is not { } videoId) return ChapterOutcome.Skipped;
 
-        var reel = await reels.GetAsync(matchId, ct);
-        if (reel is null) return ChapterOutcome.Retry;
-        var description = YouTubeChapters.Describe(reel, ClockMap(matchId), ReviewUrl(matchId));
+        var (description, waiting, analysed) = await DescribeAsync(matchId, ct);
         if (description is null)
         {
-            return DateTime.UtcNow - gameEndUtc > ThinReelGrace
-                ? Stamp(matchId, "skipped: fewer than three moments to chapter", ChapterOutcome.Skipped)
-                : ChapterOutcome.Retry;
+            if (analysed && DateTime.UtcNow - gameEndUtc > ThinReelGrace)
+            {
+                return Stamp(matchId, $"skipped: {waiting}", ChapterOutcome.Skipped);
+            }
+            log.LogInformation("Chapters for {MatchId} wait: {Reason}", Loggable(matchId), waiting);
+            return ChapterOutcome.Retry;
         }
-        if (CredentialsFor(preferAgentId) is not { } credentials) return ChapterOutcome.NoCredentials;
+        if (CredentialsFor(preferAgentId) is not { } credentials)
+        {
+            log.LogWarning("No YouTube credentials for the {Account} account: its chapters wait", acct.UrlSegment);
+            return ChapterOutcome.NoCredentials;
+        }
 
         var outcome = await UpdateDescriptionAsync(credentials, videoId, description, ct);
         switch (outcome)
         {
             case ChapterOutcome.Written:
                 Stamp(matchId, DateTime.UtcNow.ToString("O"), outcome);
-                log.LogInformation("Chapters written to YouTube for {MatchId} ({Count} moments)", Loggable(matchId), reel.Moments.Count);
+                log.LogInformation("Chapters written to YouTube for {MatchId}", Loggable(matchId));
                 break;
             case ChapterOutcome.Rejected:
                 Stamp(matchId, "rejected by YouTube (not this channel's video, or gone)", outcome);
                 log.LogWarning("YouTube refused the chapters for {MatchId}: not this channel's video, or it is gone", Loggable(matchId));
                 break;
             case ChapterOutcome.NeedsConsent:
-                log.LogWarning("YouTube chapters need a refresh token consented with the youtube.force-ssl scope: mint one with deploy/youtube-auth.ps1 and replace the stack's YT_*_REFRESH_TOKEN");
+                log.LogWarning("YouTube chapters for the {Account} account need a refresh token consented with the youtube.force-ssl scope: mint one with deploy/youtube-auth.ps1 and replace the stack's YT_*_REFRESH_TOKEN", acct.UrlSegment);
+                break;
+            case ChapterOutcome.QuotaExhausted:
+                log.LogWarning("YouTube quota is spent: chapters for {MatchId} wait for the next pass", Loggable(matchId));
+                break;
+            case ChapterOutcome.Retry:
+                log.LogInformation("Chapters for {MatchId} wait: YouTube did not answer cleanly, retried next pass", Loggable(matchId));
                 break;
         }
         return outcome;
@@ -171,7 +209,11 @@ public sealed class YouTubeChapterService(
         {
             return ChapterOutcome.NeedsConsent;
         }
-        if (status == HttpStatusCode.Forbidden && (body.Contains("quotaExceeded") || body.Contains("dailyLimitExceeded") || body.Contains("rateLimitExceeded")))
+        if (status == HttpStatusCode.Forbidden && (body.Contains("quotaExceeded") || body.Contains("dailyLimitExceeded")))
+        {
+            return ChapterOutcome.QuotaExhausted;
+        }
+        if (status == HttpStatusCode.Forbidden && body.Contains("rateLimitExceeded"))
         {
             return ChapterOutcome.Retry;
         }

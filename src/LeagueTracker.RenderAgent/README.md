@@ -155,11 +155,14 @@ The tracker sends the client id, client secret and refresh token as one set;
 when all three are present they replace stale YouTube credentials in the
 agent's local settings. An incomplete per-agent set falls back as a group.
 
-Chapters are the tracker's job, not the agent's: once it holds the link and
-the analysed game it rewrites the description with the review reel moved
-onto the recording's clock. That is `videos.update`, which needs the
-`youtube.force-ssl` scope this consent flow now asks for - a token minted
-before it keeps uploading, and the tracker's log says to mint a new one
+Chapters go up with the video: just before an upload the agent asks the
+tracker for the description (`GET /matches/{id}/youtube/description`, the
+review reel on the recording's clock) and sends it with the upload, which
+costs no extra quota. When the tracker is not ready yet (timeline or sidecar
+still on the way) the video goes up as `Match {id}` and the tracker adds the
+chapters in its nightly sweep. That is `videos.update`, which needs the
+`youtube.force-ssl` scope this consent flow asks for - a token minted before
+it keeps uploading, and the tracker's log says to mint a new one
 (`deploy/youtube-auth.ps1`, then replace the stack's `YT_*_REFRESH_TOKEN`).
 
 ### Diagnostics from the tracker
