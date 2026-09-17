@@ -155,6 +155,13 @@ The tracker sends the client id, client secret and refresh token as one set;
 when all three are present they replace stale YouTube credentials in the
 agent's local settings. An incomplete per-agent set falls back as a group.
 
+Once the tracker has analysed the game, the agent rewrites the video's
+description with chapters (the tracker's review reel, moved onto the
+recording's clock) and a link back to the match page. This uses
+`videos.update`, so the token needs the `youtube.force-ssl` scope: a token
+from before this feature keeps uploading, and `agent.log` says to run
+`--youtube-auth` once more for the chapters.
+
 ### Diagnostics from the tracker
 
 The Data page's Agent access row has **Log**: the agent ships the last

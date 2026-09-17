@@ -34,7 +34,11 @@ public sealed class YouTubeUploader(AgentConfig config, UploadThrottle throttle)
     /// upload alone suffices for videos.insert; readonly is only so the auth
     /// flow's channels.list can NAME the channel it just bound (upload-only
     /// tokens get 403 insufficientPermissions on any read, learned live).
-    private const string Scope = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly";
+    // force-ssl is what videos.update (the chapters) needs; a token minted
+    // before it was added keeps uploading and only the chapters wait for a
+    // fresh --youtube-auth.
+    private const string Scope = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl";
+    private const string VideosEndpoint = "https://www.googleapis.com/youtube/v3/videos";
     private const string TokenEndpoint = "https://oauth2.googleapis.com/token";
     private const string UploadEndpoint =
         "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status";
@@ -282,6 +286,62 @@ public sealed class YouTubeUploader(AgentConfig config, UploadThrottle throttle)
         }
     }
 
+    // Retry = ask again next pass (network, quota, a stale token);
+    // NeedsConsent = the refresh token predates the force-ssl scope;
+    // Rejected = YouTube will never take it (not our video, deleted).
+    public async Task<DescriptionOutcome> UpdateDescriptionAsync(string videoId, string description, CancellationToken ct)
+    {
+        try
+        {
+            var token = await AccessTokenAsync(ct);
+            if (token is null) return DescriptionOutcome.Retry;
+            // snippet.title and categoryId are mandatory on update, so the
+            // current ones ride along unchanged.
+            using var get = new HttpRequestMessage(HttpMethod.Get, $"{VideosEndpoint}?part=snippet&id={Uri.EscapeDataString(videoId)}");
+            get.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var current = await _http.SendAsync(get, ct);
+            if (!current.IsSuccessStatusCode) return ClassifyDescription(current.StatusCode, await current.Content.ReadAsStringAsync(ct));
+            var items = JsonDocument.Parse(await current.Content.ReadAsStringAsync(ct)).RootElement.GetProperty("items");
+            if (items.GetArrayLength() == 0) return DescriptionOutcome.Rejected;
+            var snippet = items[0].GetProperty("snippet");
+
+            using var put = new HttpRequestMessage(HttpMethod.Put, $"{VideosEndpoint}?part=snippet");
+            put.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            put.Content = new StringContent(JsonSerializer.Serialize(new
+            {
+                id = videoId,
+                snippet = new
+                {
+                    title = snippet.GetProperty("title").GetString(),
+                    categoryId = snippet.TryGetProperty("categoryId", out var category) ? category.GetString() : "20",
+                    description,
+                },
+            }), Encoding.UTF8, "application/json");
+            using var resp = await _http.SendAsync(put, ct);
+            return resp.IsSuccessStatusCode
+                ? DescriptionOutcome.Updated
+                : ClassifyDescription(resp.StatusCode, await resp.Content.ReadAsStringAsync(ct));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            return DescriptionOutcome.Retry;
+        }
+    }
+
+    private DescriptionOutcome ClassifyDescription(HttpStatusCode status, string body)
+    {
+        if (status == HttpStatusCode.Unauthorized) { _accessToken = null; return DescriptionOutcome.Retry; }
+        if (status == HttpStatusCode.Forbidden && (body.Contains("insufficientPermissions") || body.Contains("insufficient authentication scopes")))
+        {
+            return DescriptionOutcome.NeedsConsent;
+        }
+        if (status == HttpStatusCode.Forbidden && (body.Contains("quotaExceeded") || body.Contains("dailyLimitExceeded") || body.Contains("rateLimitExceeded")))
+        {
+            return DescriptionOutcome.Retry;
+        }
+        return (int)status >= 500 ? DescriptionOutcome.Retry : DescriptionOutcome.Rejected;
+    }
+
     /// The video id inside a youtu.be / watch link, or null.
     public static string? VideoIdOf(string url) =>
         System.Text.RegularExpressions.Regex.Match(url, @"(?:youtu\.be/|[?&]v=)([A-Za-z0-9_-]{6,})") is { Success: true } m ? m.Groups[1].Value : null;
@@ -476,3 +536,5 @@ public sealed class YouTubeUploader(AgentConfig config, UploadThrottle throttle)
     private static string Base64Url(byte[] bytes) =>
         Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 }
+
+public enum DescriptionOutcome { Updated, Retry, NeedsConsent, Rejected }

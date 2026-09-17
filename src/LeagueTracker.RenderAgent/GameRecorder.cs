@@ -1147,6 +1147,72 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             }
             if (youtubeGo) youtubeGo = await TryPublishToYouTubeAsync(matchId, baseName, ct);
             await MarkPublishedIfSafeAsync(baseName, ct);
+            if (youtubeGo) await TryWriteChaptersAsync(matchId, baseName, ct);
+        }
+    }
+
+    // The upload usually finishes before Riot's match data lands, so the
+    // chapters are a later pass: retried while the tracker has nothing yet,
+    // written once (.ytchapters stamp), given up after a week.
+    private async Task TryWriteChaptersAsync(string matchId, string baseName, CancellationToken ct)
+    {
+        string M(string ext) => Path.Combine(MetaDir, baseName + ext);
+        if (!_youtube.Enabled || _chaptersNeedConsent || File.Exists(M(".ytchapters")) || !File.Exists(M(".youtube.txt"))) return;
+        if (YouTubeUploader.VideoIdOf(File.ReadAllText(M(".youtube.txt")).Trim()) is not { } videoId) return;
+        var age = DateTime.UtcNow - File.GetLastWriteTimeUtc(M(".json"));
+        if (age > TimeSpan.FromDays(7))
+        {
+            File.WriteAllText(M(".ytchapters"), "skipped: the tracker had no review within a week");
+            return;
+        }
+        ReviewReel? reel = null;
+        TrackerClient? owner = null;
+        foreach (var tracker in TrackersFor(baseName).Where(t => !_refusedTrackers.Contains(t.Name)))
+        {
+            reel = await tracker.GetReelAsync(matchId, ct);
+            if (reel is not null) { owner = tracker; break; }
+        }
+        if (reel is null || owner is null) return;
+        var reviewUrl = owner.Account is { } account ? $"{owner.ServerUrl}/{account.UrlPath}/matches/{Uri.EscapeDataString(matchId)}" : null;
+        var description = YouTubeChapters.Describe(reel, ReadClockMap(M(".json")), matchId, reviewUrl);
+        if (description is null)
+        {
+            // Thin on a fresh game is usually the timeline still on its way;
+            // thin on an old one is the game.
+            if (age > TimeSpan.FromDays(1)) File.WriteAllText(M(".ytchapters"), "skipped: fewer than three moments to chapter");
+            return;
+        }
+        switch (await _youtube.UpdateDescriptionAsync(videoId, description, ct))
+        {
+            case DescriptionOutcome.Updated:
+                File.WriteAllText(M(".ytchapters"), DateTime.UtcNow.ToString("O"));
+                Log.Info($"Chapters written to YouTube for {baseName} ({reel.Moments.Count} moments)");
+                break;
+            case DescriptionOutcome.Rejected:
+                File.WriteAllText(M(".ytchapters"), "rejected by YouTube (not this channel's video, or gone)");
+                Log.Warn($"YouTube refused the chapters for {baseName} - not this channel's video, or it is gone");
+                break;
+            case DescriptionOutcome.NeedsConsent:
+                _chaptersNeedConsent = true;
+                Log.Warn("YouTube chapters need a token with the force-ssl scope - run --youtube-auth once more (or refresh the tracker's YouTubeRefreshToken); uploads are unaffected");
+                break;
+        }
+    }
+
+    // Every recording would fail the same way on an old token; warn once per run.
+    private bool _chaptersNeedConsent;
+
+    private static List<(double VideoSec, double GameSec)> ReadClockMap(string sidecar)
+    {
+        try
+        {
+            var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(sidecar));
+            return [.. (root?["clockMap"]?.AsArray() ?? []).OfType<System.Text.Json.Nodes.JsonNode>()
+                .Select(n => (n["videoSec"]?.GetValue<double>() ?? 0, n["gameSec"]?.GetValue<double>() ?? 0))];
+        }
+        catch
+        {
+            return [];
         }
     }
 
