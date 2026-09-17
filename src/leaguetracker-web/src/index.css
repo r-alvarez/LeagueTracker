@@ -1782,6 +1782,13 @@ button.footage-marker.active { border-color: var(--accent); box-shadow: 0 0 0 1p
 .stage.theater .map-side { max-height: none; }
 .stage.theater .map-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
 
+.carousel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.carousel-nav { display: inline-flex; align-items: center; gap: 8px; font-weight: 400; }
+.carousel-dots { display: inline-flex; gap: 5px; }
+.carousel-dot { width: 8px; height: 8px; border-radius: 50%; border: 0; padding: 0; background: var(--border-strong); cursor: pointer; }
+.carousel-dot.active { background: var(--accent); }
+.carousel-page { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 900px) { .carousel-page { grid-template-columns: minmax(0, 1fr); } }
 .reel-body { display: grid; gap: 10px; }
 .reel-player { display: grid; gap: 8px; }
 .reel-player .footage-video, .reel-player .stage-placeholder { max-height: 560px; object-fit: contain; }

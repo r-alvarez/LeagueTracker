@@ -10,6 +10,7 @@ import { ItemIcon, PerkIcon, UnitGlyph } from '../components/GameIcons'
 import VerdictStrip from '../components/VerdictStrip'
 import MatchStage, { type StageJump } from '../components/MatchStage'
 import ClipReel from '../components/ClipReel'
+import { ClipCarousel, ClipGrid } from '../components/ClipVariants'
 import { RelTime, tierClass } from '../components/Stats'
 
 import { footageSource } from '../components/FootageView'
@@ -697,12 +698,17 @@ export default function MatchDetail() {
       {/* Clips keep rendering and stay on disk as the backup copy, but once a
           recording (or its YouTube link) exists the footage covers the same
           moments - only the fights the player's POV never saw earn a card. */}
-      {visibleClips.length > 0 && (
-        <ClipReel clips={visibleClips} canManage={canManage}
-          title={hasFootage ? 'Team fights' : 'Clips'}
-          hint={hasFootage ? "the fights you weren't in, rendered from the replay (your footage never saw them)" : 'your kills & deaths, rendered from the official replay'}
-          onDelete={index => { void api.deleteClip(m.id, index).then(() => api.clips(m.id).then(setClips)) }} />
-      )}
+      {visibleClips.length > 0 && (() => {
+        const props = {
+          clips: visibleClips,
+          canManage,
+          title: hasFootage ? 'Team fights' : 'Clips',
+          hint: hasFootage ? "the fights you weren't in, rendered from the replay (your footage never saw them)" : 'your kills & deaths, rendered from the official replay',
+          onDelete: (index: number) => { void api.deleteClip(m.id, index).then(() => api.clips(m.id).then(setClips)) },
+        }
+        const variant = new URLSearchParams(window.location.search).get('clips')
+        return variant === 'grid' ? <ClipGrid {...props} /> : variant === 'carousel' ? <ClipCarousel {...props} /> : <ClipReel {...props} />
+      })()}
 
       <div className="filters">
         <div className="seg" role="tablist" aria-label="Match detail">
