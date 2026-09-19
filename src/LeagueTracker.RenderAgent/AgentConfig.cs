@@ -320,6 +320,22 @@ public static class AgentStatus
     public static bool YouTubeReady { get; set; } = true;
     public static event Action? Changed;
 
+    /// A problem the tracker wants the operator to see (today: its render
+    /// queue has stalled), with the id of the episode and where to look.
+    public static (string Text, string Id, string Url)? TrackerAlert { get; private set; }
+
+    public static void SetTrackerAlert((string Text, string Id, string Url)? alert)
+    {
+        lock (Gate)
+        {
+            if (TrackerAlert?.Text == alert?.Text && TrackerAlert?.Id == alert?.Id) return;
+            if (alert is { } raised && TrackerAlert?.Id != raised.Id) Log.Warn($"Tracker alert: {raised.Text}");
+            else if (alert is null) Log.Info("Tracker alert cleared");
+            TrackerAlert = alert;
+        }
+        Changed?.Invoke();
+    }
+
     public static (string State, string? Detail) Current
     {
         get { lock (Gate) return (_state, _detail); }
