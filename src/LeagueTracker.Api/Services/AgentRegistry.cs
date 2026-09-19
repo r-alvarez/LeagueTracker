@@ -261,6 +261,13 @@ public sealed class AgentRegistry(IOptions<AgentOptions> options, IOptions<Accou
         }
     }
 
+    /// Every machine enrolled as a renderer that has reported since start -
+    /// what the render watchdog blames when the queue stops moving.
+    public List<AgentLive> Renderers()
+    {
+        lock (_gate) return [.. _agents.Values.Where(a => a.Key.Role is Registry.AgentRole.Renderer).Select(a => Live(a, null, admin: true))];
+    }
+
     /// The heartbeat picture for one enrolled key, as its owner (or an admin) sees it.
     public AgentLive? Find(string keyId, string? viewerUserId, bool admin)
     {
