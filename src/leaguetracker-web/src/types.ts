@@ -879,6 +879,9 @@ export interface LpPerGame {
   lpChange: number | null
 }
 
+/// The tracker's render watchdog: work waiting, nothing finishing.
+export interface RenderAlert { id: string; pending: number; accounts: string[]; sinceUtc: string; cause: string; message: string }
+
 export interface StopLoss {
   streak: number
   lastGameEndUtc: string | null

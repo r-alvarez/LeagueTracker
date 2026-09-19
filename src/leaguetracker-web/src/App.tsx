@@ -17,6 +17,7 @@ import Machines from './pages/Machines'
 import Admin from './pages/Admin'
 import LiveGameBanner from './components/LiveGameBanner'
 import StopLossBanner from './components/StopLossBanner'
+import RenderStallBanner from './components/RenderStallBanner'
 import SignInScreen from './components/SignInScreen'
 import IndexScreen from './components/IndexScreen'
 import NotFound, { RouteNotFound } from './components/NotFound'
@@ -78,6 +79,7 @@ export default function App() {
           The tracker retries every minute; the other accounts are unaffected.
         </div>
       )}
+      <RenderStallBanner />
       <LiveGameBanner />
       <StopLossBanner />
 
