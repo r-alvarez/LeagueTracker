@@ -190,13 +190,17 @@ public sealed class AgentSupervisor(AgentConfig config, IReadOnlyList<TrackerCli
         // queued command win.
         string? latest = null;
         var heard = false;
+        (string Text, string Id, string Url)? alert = null;
         foreach (var tracker in trackers)
         {
             if (await tracker.HeartbeatAsync(beat, ct) is not { } reply) continue;
             heard = true;
             latest ??= reply.Latest;
+            if (reply.Alert is { Length: > 0 } text) alert ??= (text, reply.AlertId ?? text, tracker.ServerUrl);
             if (reply.Command is { Length: > 0 } && reply.CommandToken is { Length: > 0 }) await HandleCommandAsync(tracker, reply.Command, reply.CommandToken, ct);
         }
+        // Only a tracker that answered may clear it: an outage is not "fixed".
+        if (heard) AgentStatus.SetTrackerAlert(alert);
         if (heard && !_previousBuildCleaned) CleanPreviousBuild();
         return latest;
     }

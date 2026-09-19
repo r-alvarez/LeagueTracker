@@ -136,6 +136,9 @@ services:
       # policy - so it follows the pool from the stack environment rather
       # than waiting on a release. Two accounts hit it silently in Sept 2026.
       Uploads__MaxMediaGbPerAccount: ${UPLOADS_MAX_MEDIA_GB:-60}
+      # A stalled render queue is shown to admins on the site and in their
+      # agent trays; this adds a phone push (an ntfy topic URL). Blank = off.
+      RenderWatch__NtfyUrl: ${RENDER_ALERT_NTFY_URL:-}
       Accounts__DataRoot: /data
       Accounts__Default: ImRA-87166
       Accounts__List__0__GameName: ImRA

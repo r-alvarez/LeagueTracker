@@ -1,6 +1,6 @@
 import { account } from './account'
 import { csrfHeaders } from './auth'
-import type { AdminUsers, AgentKey, AnalyticsSummary, BuildVersion, ClaimInfo, InviteResult, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, Gameplan, GameplanAdherence, GameplanImportResult, GameplanSummary, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchGameplan, MatchPage, MatchReview, MatchTrack, ReferencePoint, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
+import type { AdminUsers, AgentKey, AnalyticsSummary, BuildVersion, ClaimInfo, InviteResult, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, Gameplan, GameplanAdherence, GameplanImportResult, GameplanSummary, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchGameplan, MatchPage, MatchReview, MatchTrack, ReferencePoint, RenderAlert, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
 
 /// Every API call goes through here: account-scoped URL rewriting, the
 /// session cookie, and the CSRF header on writes. Bare fetch() elsewhere is
@@ -151,6 +151,13 @@ export const api = {
   // Admin
   adminAgents: () => get<{ latestVersion: string | null; keys: AgentKey[] }>('/api/admin/agents'),
   adminUsers: () => get<AdminUsers>('/api/admin/users'),
+  // 204 = the render queue is moving.
+  renderAlert: async (): Promise<RenderAlert | null> => {
+    const r = await apiFetch('/api/admin/render-alert')
+    if (r.status === 204) return null
+    if (!r.ok) throw new Error(`/api/admin/render-alert -> HTTP ${r.status}`)
+    return r.json()
+  },
   // Errors from these carry the server's sentence (error / detail / title),
   // which the People card shows as is.
   adminInvite: (email: string, displayName: string | null) =>
