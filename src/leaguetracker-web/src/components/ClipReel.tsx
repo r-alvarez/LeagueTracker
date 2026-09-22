@@ -6,7 +6,7 @@ import type { ClipInfo } from '../types'
 
 // One player, however many clips: the card must not grow with the fight
 // count (seven clips already pushed the scoreboard two screens down).
-export default function ClipReel({ clips, title, hint, canManage, onDelete, theater, onToggleTheater }: {
+export default function ClipReel({ clips, title, hint, canManage, onDelete, theater, onToggleTheater, kept = false, onToggleKeep }: {
   clips: ClipInfo[]
   title: string
   hint: string
@@ -14,6 +14,8 @@ export default function ClipReel({ clips, title, hint, canManage, onDelete, thea
   onDelete: (index: number) => void
   theater: boolean
   onToggleTheater: () => void
+  kept?: boolean
+  onToggleKeep?: () => void
 }) {
   const icons = useChampionIcons()
   const ready = clips.filter(c => c.ready)
@@ -38,8 +40,16 @@ export default function ClipReel({ clips, title, hint, canManage, onDelete, thea
   return (
     <div className={`card reel${theater ? ' theater' : ''}`} onKeyDown={e => { if (e.key === 'ArrowRight') step(1); if (e.key === 'ArrowLeft') step(-1) }}>
       <h2 className="reel-head">
-        <span>{title} <span className="mut" style={{ fontWeight: 400 }}>— {hint}</span></span>
-        {ready.length > 0 && <TheaterToggle on={theater} onToggle={onToggleTheater} what="the clip list" />}
+        <span>{title} <span className="mut" style={{ fontWeight: 400 }}>— {hint}</span>{kept && <span className="mut" style={{ fontWeight: 400 }}> · kept</span>}</span>
+        <span style={{ display: 'inline-flex', gap: 8 }}>
+          {ready.length > 0 && canManage && onToggleKeep && (
+            <button type="button" className="action sm-action" onClick={onToggleKeep}
+              title={kept ? 'Let these clips expire with the patch window again' : 'Hold these clips past the patch window (counts against the kept allowance)'}>
+              {kept ? '★ kept' : '☆ keep'}
+            </button>
+          )}
+          {ready.length > 0 && <TheaterToggle on={theater} onToggle={onToggleTheater} what="the clip list" />}
+        </span>
       </h2>
       {ready.length === 0 ? (
         <p className="mut" style={{ margin: 0 }}>{clips.length} fight window{clips.length === 1 ? '' : 's'} planned — waiting for the render agent on the gaming PC.</p>

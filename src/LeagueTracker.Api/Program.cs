@@ -94,6 +94,10 @@ builder.Services.AddSingleton<YouTubeChapterSweeper>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<YouTubeChapterSweeper>());
 builder.Services.AddScoped<UploadQuota>();
 builder.Services.AddHostedService<TempFileSweeper>();
+builder.Services.Configure<MediaRetentionOptions>(builder.Configuration.GetSection("Retention"));
+builder.Services.AddHttpClient(PatchReference.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.AddSingleton<PatchReference>();
+builder.Services.AddScoped<MediaRetentionService>();
 builder.Services.AddPerAccount<LiveGameState>();
 builder.Services.AddSingleton<PollerHeartbeat>();
 builder.Services.AddHostedService<MatchPollerService>();
@@ -791,6 +795,20 @@ media.MapGet("/matches/{id}/clips/{index:int}", (string id, int index, ClipServi
 owner.MapDelete("/matches/{id}/clips/{index:int}", (string id, int index, ClipService clips) =>
     clips.DeleteClip(id, index) ? Results.Ok() : Results.NotFound());
 
+media.MapGet("/matches/{id}/clips/status", (string id, ClipService clips, IOptions<MediaRetentionOptions> retention) =>
+    Results.Ok(new
+    {
+        Kept = clips.IsKept(id),
+        Expiry = clips.Expiry(id),
+        retention.Value.ClipPatches,
+    }));
+
+owner.MapPost("/matches/{id}/clips/keep", (string id, ClipService clips, UploadQuota quota) =>
+{
+    var (kept, error) = clips.ToggleKeep(id, quota.MaxKeptBytes);
+    return error is null ? Results.Ok(new { kept }) : Results.Conflict(new { error });
+});
+
 // --- Live-game VODs (recorded by the agent while the player was in game) ---------
 
 media.MapGet("/matches/{id}/vod/status", (string id, bool? includeApm, VodService vods) =>
@@ -981,11 +999,14 @@ owner.MapDelete("/matches/{id}/fullgame", (string id, FullGameService full) =>
 });
 
 // Disk usage per artifact family - keeps the storage cost of renders visible.
-owner.MapGet("/storage", async (DataPaths paths, LeagueDbContext db, CancellationToken ct) =>
+owner.MapGet("/storage", async (DataPaths paths, LeagueDbContext db, UploadQuota quota, ClipService clips, PatchReference patches,
+    IOptions<MediaRetentionOptions> retention, CancellationToken ct) =>
 {
     static double DirMb(string dir) => Directory.Exists(dir)
         ? Math.Round(Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length) / 1024.0 / 1024.0, 1)
         : 0;
+    static double Gb(long bytes) => Math.Round(bytes / 1024.0 / 1024 / 1024, 1);
+    var headroom = quota.Headroom();
     return Results.Ok(new
     {
         RawGamesMb = DirMb(Path.Combine(paths.DataDir, "games")),
@@ -994,6 +1015,16 @@ owner.MapGet("/storage", async (DataPaths paths, LeagueDbContext db, Cancellatio
         FullGamesMb = DirMb(Path.Combine(paths.DataDir, "fullgames")),
         VodsMb = DirMb(Path.Combine(paths.DataDir, "vods")),
         DatabaseMb = Math.Round(await db.Database.SqlQueryRaw<long>(DatabaseServer.SchemaBytesSql).SingleAsync(ct) / 1024.0 / 1024.0, 1),
+        KeptClipsMb = Math.Round(clips.KeptBytes() / 1024.0 / 1024, 1),
+        MediaGb = Gb(headroom.MediaBytes),
+        AllowanceGb = Gb(headroom.AllowanceBytes),
+        KeptAllowanceGb = Gb(quota.MaxKeptBytes),
+        // What the tracker sees, not the pool: a dataset quota shows up here.
+        DiskFreeGb = Gb(headroom.FreeBytes),
+        DiskFloorGb = Gb(headroom.FloorBytes),
+        CurrentPatch = (await patches.PatchesNewestFirstAsync(ct))?.FirstOrDefault(),
+        retention.Value.ClipPatches,
+        retention.Value.ReplayPatches,
     });
 });
 
@@ -1031,7 +1062,7 @@ render.MapPost("/render/next", async (AccountContext acct, ClipService clips, Fu
 
     foreach (var matchId in candidates)
     {
-        if (clips.FailReason(matchId) is not null || leases.IsLeased($"clips:{matchId}")) continue;
+        if (clips.FailReason(matchId) is not null || clips.Expiry(matchId) is not null || leases.IsLeased($"clips:{matchId}")) continue;
         // A match with VOD review data (recorded mp4 or a YouTube link) earns
         // only its "fight" windows - the team fights the player was NOT in,
         // which the VOD's own POV can never show. Their kill/death windows
@@ -1097,6 +1128,8 @@ render.MapPut("/render/{matchId}/clips/{index:int}", async (string matchId, int 
 {
     var plan = await clips.LoadPlanAsync(matchId, ct);
     if (plan is null || index < 0 || index >= plan.Windows.Count) return Results.NotFound();
+    // A job that outlived its lease and its match's retention window.
+    if (clips.Expiry(matchId) is not null) return Results.Json(new { error = "these clips expired; the match is off the render queue" }, statusCode: StatusCodes.Status410Gone);
     return await StoreUploadAsync(request, clips.ClipTargetPath(matchId, index), quota, quota.MaxClipBytes, ct);
 });
 
@@ -1151,6 +1184,7 @@ owner.MapPost("/render/{matchId}/retry", (string matchId, ClipService clips, Ful
     {
         clips.ClearFailed(matchId);
         clips.ClearUnrenderable(matchId);
+        clips.ClearExpiry(matchId);
         if (!keep) clips.DeleteClips(matchId);
     }
     return Results.Ok();

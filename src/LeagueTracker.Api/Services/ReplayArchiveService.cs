@@ -1,6 +1,9 @@
 using System.IO.Compression;
 using System.Text.RegularExpressions;
+using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Riot;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace LeagueTracker.Api.Services;
 
@@ -10,7 +13,8 @@ namespace LeagueTracker.Api.Services;
 /// gone for good. Playback is patch-locked by the game client - the archive is
 /// "review this patch", not a permanent library.
 public sealed partial class ReplayArchiveService(
-    RiotApiClient riot, IHttpClientFactory httpFactory, DataPaths paths, ILogger<ReplayArchiveService> logger)
+    RiotApiClient riot, IHttpClientFactory httpFactory, DataPaths paths, ILogger<ReplayArchiveService> logger,
+    LeagueDbContext? db = null, PatchReference? patches = null, IOptions<MediaRetentionOptions>? retention = null)
 {
     [GeneratedRegex(@"filename%3D%22([A-Za-z0-9]+_\d+)\.rofl", RegexOptions.IgnoreCase)]
     private static partial Regex MatchIdInUrl();
@@ -29,6 +33,24 @@ public sealed partial class ReplayArchiveService(
     {
         if (!Directory.Exists(ReplaysDir)) return [];
         return [.. Directory.EnumerateFiles(ReplaysDir, "*.rofl").Select(Path.GetFileNameWithoutExtension).OfType<string>()];
+    }
+
+    public long Delete(string matchId)
+    {
+        if (PathFor(matchId) is not { } path) return 0;
+        var bytes = new FileInfo(path).Length;
+        File.Delete(path);
+        return bytes;
+    }
+
+    // Riot's offer covers the last ~5 games, which straddles a patch day: the
+    // game before the update would download as a replay nothing can play.
+    private async Task<bool> StillPlayableAsync(string matchId, CancellationToken ct)
+    {
+        if (db is null || patches is null || retention is null) return true;
+        if (await patches.PatchesNewestFirstAsync(ct) is not { } known) return true;
+        var version = await db.Matches.AsNoTracking().Where(m => m.Id == matchId).Select(m => m.GameVersion).FirstOrDefaultAsync(ct);
+        return version is null || PatchReference.PatchAge(known, version) < retention.Value.ReplayPatches;
     }
 
     /// Downloads every offered replay we don't have yet; returns how many landed.
@@ -53,6 +75,11 @@ public sealed partial class ReplayArchiveService(
             var matchId = m.Groups[1].Value.ToUpperInvariant();
             var target = Path.Combine(ReplaysDir, $"{matchId}.rofl");
             if (File.Exists(target)) continue;
+            if (!await StillPlayableAsync(matchId, ct))
+            {
+                logger.LogInformation("Skipping replay {MatchId}: its patch is no longer playable", matchId);
+                continue;
+            }
 
             try
             {

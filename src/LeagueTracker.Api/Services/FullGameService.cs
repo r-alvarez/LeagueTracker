@@ -146,6 +146,18 @@ public sealed class FullGameService(LeagueDbContext db, ReplayArchiveService rep
         })];
     }
 
+    public IEnumerable<(string MatchId, long Bytes, DateTime RenderedUtc)> UnkeptRenders()
+    {
+        if (!Directory.Exists(Root)) yield break;
+        foreach (var mp4 in Directory.EnumerateFiles(Root, "*.mp4"))
+        {
+            var matchId = Path.GetFileNameWithoutExtension(mp4);
+            if (File.Exists(KeepMarker(matchId))) continue;
+            var info = new FileInfo(mp4);
+            yield return (matchId, info.Length, info.LastWriteTimeUtc);
+        }
+    }
+
     /// Deletes unkept renders older than the retention window; returns how many.
     public int SweepRetention(int retentionDays)
     {

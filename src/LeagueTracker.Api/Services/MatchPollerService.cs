@@ -255,12 +255,16 @@ public sealed class MatchPollerService(
 
         await CheckLiveGameAsync(account, live, puuid, riot, scope.ServiceProvider.GetRequiredService<RankLookupService>(), ct);
 
-        // Full-game renders are big; expire unkept ones on a slow cadence.
-        if (DateTime.UtcNow - _lastRetentionSweepUtc.GetValueOrDefault(account.Id) > TimeSpan.FromHours(6))
+        var sweepEvery = TimeSpan.FromMinutes(scope.ServiceProvider.GetRequiredService<IOptions<MediaRetentionOptions>>().Value.SweepMinutes);
+        if (DateTime.UtcNow - _lastRetentionSweepUtc.GetValueOrDefault(account.Id) > sweepEvery)
         {
             _lastRetentionSweepUtc[account.Id] = DateTime.UtcNow;
-            var swept = scope.ServiceProvider.GetRequiredService<FullGameService>().SweepRetention(_options.FullGameRetentionDays);
-            if (swept > 0) logger.LogInformation("Retention: deleted {Count} unkept full-game render(s) older than {Days} days", swept, _options.FullGameRetentionDays);
+            var report = await scope.ServiceProvider.GetRequiredService<MediaRetentionService>().SweepAsync(ct);
+            if (report.Changed)
+            {
+                logger.LogInformation("Retention for {Account}: {Replays} replay(s), {ClipMatches} match(es) of clips, {Personal} personal clip(s), {Full} full render(s), {Evicted} pressure eviction(s); {Mb:0} MB freed",
+                    account.Id, report.ReplaysExpired, report.ClipMatchesExpired, report.PersonalClipsReclaimed, report.FullGamesExpired, report.PressureEvictions, report.BytesFreed / 1024.0 / 1024);
+            }
         }
 
         // Service (re)start: grab whatever of the last games' replays is still on
