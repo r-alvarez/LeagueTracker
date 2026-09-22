@@ -265,17 +265,26 @@ export default function DataPage() {
         <div className="card">
           <h2>Storage</h2>
           <p className="mut" style={{ marginTop: 0 }}>
-            What the tracker's data folder holds. Clips are small and permanent; full-game renders are the heavy tier
-            and expire automatically unless marked keep on their match page.
+            What the tracker's data folder holds. Clips stay for the current patch{storage.currentPatch ? ` (${storage.currentPatch})` : ''} and
+            the {storage.clipPatches - 1} before it, replays only while the client can still play them, and full-game renders expire on their own timer;
+            a game marked keep holds its clips and its render past that, up to {storage.keptAllowanceGb} GB.
           </p>
           <div className="status-tiles">
-            {([['raw games', storage.rawGamesMb], ['replays', storage.replaysMb], ['clips', storage.clipsMb],
-              ['full games', storage.fullGamesMb], ['database', storage.databaseMb]] as const).map(([label, mb]) => (
+            {([['raw games', storage.rawGamesMb], ['replays', storage.replaysMb], ['clips', storage.clipsMb], ['kept clips', storage.keptClipsMb],
+              ['full games', storage.fullGamesMb], ['recordings', storage.vodsMb], ['database', storage.databaseMb]] as const).map(([label, mb]) => (
               <div key={label} className="tile status-tile">
                 <div className="value">{mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`}</div>
                 <div className="label">{label}</div>
               </div>
             ))}
+            <div className="tile status-tile">
+              <div className="value">{storage.mediaGb} / {storage.allowanceGb} GB</div>
+              <div className="label">media allowance used</div>
+            </div>
+            <div className={`tile status-tile${storage.diskFreeGb - storage.diskFloorGb < 10 ? ' warn' : ''}`}>
+              <div className="value">{storage.diskFreeGb} GB</div>
+              <div className="label">free on the tracker's disk (floor {storage.diskFloorGb} GB)</div>
+            </div>
           </div>
         </div>
       )}

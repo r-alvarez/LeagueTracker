@@ -3,7 +3,7 @@ import { account } from '../account'
 import { auth } from '../auth'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
-import type { ClipInfo, DeathEvent, FullGameStatus, MapMoment, MatchDetail as Detail, MatchTrack, Participant, Perks, TeamObjectiveCounts, VodStatus } from '../types'
+import type { ClipInfo, ClipsStatus, DeathEvent, FullGameStatus, MapMoment, MatchDetail as Detail, MatchTrack, Participant, Perks, TeamObjectiveCounts, VodStatus } from '../types'
 import { sourceLabel, unitKind, useAbilityLabels, useChampionIcons, useLoadoutIcons } from '../champions'
 import Loadout from '../components/Loadout'
 import { ItemIcon, PerkIcon, UnitGlyph } from '../components/GameIcons'
@@ -548,6 +548,7 @@ export default function MatchDetail() {
     return t === 'timeline' ? 'timeline' : t === 'build' || t === 'details' || t === 'runes' ? 'build' : 'scoreboard'
   })
   const [clips, setClips] = useState<ClipInfo[]>([])
+  const [clipsStatus, setClipsStatus] = useState<ClipsStatus | null>(null)
   const [fullGame, setFullGame] = useState<FullGameStatus | null>(null)
   const [vod, setVod] = useState<VodStatus | null>(null)
   const [track, setTrack] = useState<MatchTrack | null>(null)
@@ -563,6 +564,7 @@ export default function MatchDetail() {
     if (!id) return
     api.match(id).then(setDetail).catch(e => setError(String(e)))
     api.clips(id).then(setClips).catch(() => setClips([]))
+    api.clipsStatus(id).then(setClipsStatus).catch(() => setClipsStatus(null))
     api.fullGameStatus(id).then(setFullGame).catch(() => setFullGame(null))
     api.vodStatus(id).then(setVod).catch(() => setVod(null))
     api.track(id).then(setTrack).catch(() => setTrack(null))
@@ -701,10 +703,21 @@ export default function MatchDetail() {
       {/* Clips keep rendering and stay on disk as the backup copy, but once a
           recording (or its YouTube link) exists the footage covers the same
           moments - only the fights the player's POV never saw earn a card. */}
-      {visibleClips.length > 0 && (
+      {clipsStatus?.expiry ? (
+        <div className="card">
+          <h2>Clips</h2>
+          <p className="mut" style={{ margin: 0 }}>
+            {clipsStatus.expiry.clips} clip{clipsStatus.expiry.clips === 1 ? '' : 's'} expired
+            {clipsStatus.expiry.reason === 'pressure' ? ' to make room on the tracker' : clipsStatus.expiry.patch ? ` with patch ${clipsStatus.expiry.patch}` : ''}.
+            {' '}Clips stay for the current patch and the {clipsStatus.clipPatches - 1 === 1 ? 'one' : String(clipsStatus.clipPatches - 1)} before it; keep a game to hold its clips past that.
+          </p>
+        </div>
+      ) : visibleClips.length > 0 && (
         <ClipReel clips={visibleClips} canManage={canManage} theater={theater} onToggleTheater={toggleTheater}
           title={hasFootage ? 'Team fights' : 'Clips'}
           hint={hasFootage ? "the fights you weren't in, rendered from the replay (your footage never saw them)" : 'your kills & deaths, rendered from the official replay'}
+          kept={clipsStatus?.kept ?? false}
+          onToggleKeep={() => { api.keepClips(m.id).then(() => api.clipsStatus(m.id).then(setClipsStatus)).catch(e => window.alert(String(e.message ?? e))) }}
           onDelete={index => { void api.deleteClip(m.id, index).then(() => api.clips(m.id).then(setClips)) }} />
       )}
 

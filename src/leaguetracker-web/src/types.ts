@@ -573,7 +573,23 @@ export interface StorageInfo {
   replaysMb: number
   clipsMb: number
   fullGamesMb: number
+  vodsMb: number
   databaseMb: number
+  keptClipsMb: number
+  mediaGb: number
+  allowanceGb: number
+  keptAllowanceGb: number
+  diskFreeGb: number
+  diskFloorGb: number
+  currentPatch: string | null
+  clipPatches: number
+  replayPatches: number
+}
+
+export interface ClipsStatus {
+  kept: boolean
+  expiry: { reason: 'patch' | 'pressure' | string; patch: string | null; atUtc: string; clips: number; bytes: number } | null
+  clipPatches: number
 }
 
 export interface LensTile {
