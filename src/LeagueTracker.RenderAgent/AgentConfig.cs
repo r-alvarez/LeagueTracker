@@ -18,6 +18,11 @@ public sealed class AgentConfig
     public int CaptureFramerate { get; set; } = 30;
     public int MaxWindowsPerJob { get; set; }
 
+    // SPIKE: "replay-api" has the game engine write the clip (WebM) and x264
+    // encode it offline; "ddagrab" is the shipped live screen capture.
+    public string ClipCapture { get; set; } = "ddagrab";
+    public int ClipCaptureHeight { get; set; }
+
     /// Renders only start after this much keyboard/mouse idle time - the
     /// camera lock needs the game window focused, which can only be taken
     /// reliably (and politely) when nobody is using the PC.
@@ -226,6 +231,8 @@ public sealed class AgentConfig
         if (Environment.GetEnvironmentVariable("LT_RECORD_QUEUES") is { Length: > 0 } queues) config.RecordQueues = queues;
         if (Environment.GetEnvironmentVariable("LT_RECORD_AUDIO") is { Length: > 0 } audio) config.RecordAudio = audio is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_CAPTURE_BACKEND") is { Length: > 0 } backend) config.CaptureBackend = backend;
+        if (Environment.GetEnvironmentVariable("LT_CLIP_CAPTURE") is { Length: > 0 } clipCapture) config.ClipCapture = clipCapture;
+        if (Environment.GetEnvironmentVariable("LT_CLIP_CAPTURE_HEIGHT") is { Length: > 0 } clipHeight && int.TryParse(clipHeight, out var clipHeightValue)) config.ClipCaptureHeight = clipHeightValue;
         if (Environment.GetEnvironmentVariable("LT_UPLOAD_INGAME_MBPS") is { Length: > 0 } mbps && double.TryParse(mbps, System.Globalization.CultureInfo.InvariantCulture, out var mbpsValue)) config.UploadInGameMbps = mbpsValue;
         if (Environment.GetEnvironmentVariable("LT_KEEP_RECORDINGS") is { Length: > 0 } keep) config.KeepRecordingsAfterPublish = keep is not ("0" or "false");
         if (Environment.GetEnvironmentVariable("LT_RECORD_MAX_HEIGHT") is { Length: > 0 } maxHeight && int.TryParse(maxHeight, out var maxHeightValue)) config.RecordMaxHeight = maxHeightValue;

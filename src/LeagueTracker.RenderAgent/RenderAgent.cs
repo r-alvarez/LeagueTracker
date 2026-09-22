@@ -735,7 +735,7 @@ public sealed class RenderAgent(AgentConfig config)
                     if (frozen > 0)
                     {
                         var probe = output + ".probe.mp4";
-                        await CaptureAsync(probe, 7, ct);
+                        await CaptureWindowAsync(replayApi, probe, 7, ct);
                         var probeFroze = await SimFrozeDuringAsync(probe, ct);
                         if (File.Exists(probe)) File.Delete(probe);
                         if (probeFroze)
@@ -762,14 +762,15 @@ public sealed class RenderAgent(AgentConfig config)
                         : duration;
                     Log.Info($"Window {window.Index}: recording {captureSec}s...");
                     var started = DateTime.UtcNow;
-                    await CaptureAsync(output, captureSec, ct);
+                    await CaptureWindowAsync(replayApi, output, captureSec, ct);
                     await replayApi.SetPlaybackAsync(time: null, paused: true, speed: null, ct);
 
                     // Desktop Duplication can end the stream early (e.g. a display
                     // mode switch) with ffmpeg still exiting 0 - trust the wall
-                    // clock, not the exit code, and redo the window.
+                    // clock, not the exit code, and redo the window. The engine
+                    // path is not real-time, so the clock says nothing there.
                     var recorded = (DateTime.UtcNow - started).TotalSeconds;
-                    if (recorded < captureSec - 3 && attempt < 3)
+                    if (!UsesReplayApiCapture && recorded < captureSec - 3 && attempt < 3)
                     {
                         Log.Warn($"Window {window.Index}: capture ended after {recorded:0}s of {captureSec}s - retrying");
                         continue;
@@ -1208,6 +1209,56 @@ public sealed class RenderAgent(AgentConfig config)
         {
             Log.Warn($"Could not save an engage failure frame: {ex.Message}");
         }
+    }
+
+    private bool UsesReplayApiCapture => string.Equals(config.ClipCapture, "replay-api", StringComparison.OrdinalIgnoreCase);
+
+    private Task CaptureWindowAsync(ReplayApiClient api, string output, int durationSec, CancellationToken ct) =>
+        UsesReplayApiCapture ? CaptureViaReplayApiAsync(api, output, durationSec, ct) : CaptureAsync(output, durationSec, ct);
+
+    // SPIKE: offline x264 on the engine's WebM can use the slow preset the
+    // live capture cannot afford; both sizes are logged for the comparison.
+    private async Task CaptureViaReplayApiAsync(ReplayApiClient api, string output, int durationSec, CancellationToken ct)
+    {
+        var rect = GameWindow.FindClientRect(GameWindowTitle);
+        if (rect is not { Width: >= 32, Height: >= 32 } r)
+        {
+            throw new InvalidOperationException("game window not found or minimized - the engine records the window's own size");
+        }
+        var height = config.ClipCaptureHeight > 0 ? Math.Min(config.ClipCaptureHeight, r.Height) : r.Height;
+        var width = (int)Math.Round((double)r.Width * height / r.Height);
+        width &= ~1;
+        height &= ~1;
+
+        var playhead = await api.GetPlaybackAsync(ct) ?? throw new InvalidOperationException("Replay API stopped answering before the recording");
+        var startTime = playhead.Time;
+        var endTime = startTime + Math.Max(2, durationSec);
+        var webm = Path.ChangeExtension(output, ".webm");
+        if (File.Exists(webm)) File.Delete(webm);
+
+        await api.SetPlaybackAsync(time: null, paused: true, speed: 1, ct);
+        var started = DateTime.UtcNow;
+        await api.StartRecordingAsync(webm, startTime, endTime, config.CaptureFramerate, width, height, ct);
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(durationSec * 4 + 60);
+        var sawRecording = false;
+        while (DateTime.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            var state = await api.GetRecordingAsync(ct);
+            if (state is { Recording: true }) { sawRecording = true; continue; }
+            if (state is { Recording: false } && (sawRecording || File.Exists(webm))) break;
+        }
+        if (!File.Exists(webm)) throw new InvalidOperationException($"the engine produced no file for {startTime:0}-{endTime:0}s (recording ran {(DateTime.UtcNow - started).TotalSeconds:0}s)");
+        var engineSec = (DateTime.UtcNow - started).TotalSeconds;
+        var webmBytes = new FileInfo(webm).Length;
+
+        var encodeStart = DateTime.UtcNow;
+        await RunFfmpegAsync($"-y -i \"{webm}\" -c:v libx264 -preset slow -crf 23 -pix_fmt yuv420p -movflags +faststart \"{output}\"", ct);
+        var mp4Bytes = new FileInfo(output).Length;
+        Log.Info($"replay-api capture: {width}x{height}@{config.CaptureFramerate} {durationSec}s - engine {engineSec:0}s -> webm {webmBytes / 1048576.0:0.0} MB; x264 slow {(DateTime.UtcNow - encodeStart).TotalSeconds:0}s -> mp4 {mp4Bytes / 1048576.0:0.0} MB");
+        File.Delete(webm);
     }
 
     private Task CaptureAsync(string output, int durationSec, CancellationToken ct)
