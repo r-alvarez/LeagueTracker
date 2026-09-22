@@ -37,9 +37,11 @@ concurrency:
 env:
   # https://www.gyan.dev/ffmpeg/builds/ - the versioned "full" build (NVENC
   # included), same as the owner's machines use. Bump both lines together;
-  # the .sha256 next to the archive is where the checksum comes from.
-  FFMPEG_VERSION: 9.0.1
-  FFMPEG_SHA256: 4b9c814cb07a1f90d05b768ef4eb2abbf89af94bbb924df5b7dbd6e64e1e2b96
+  # the .sha256 next to the archive is where the checksum comes from. gyan.dev
+  # keeps only the latest patch of a series: 9.0.1 vanished when 9.0.2 came out
+  # (2026-09-19) and the release job 404'd until this was bumped.
+  FFMPEG_VERSION: 9.0.2
+  FFMPEG_SHA256: f0e46253c70dfe902bac915dfb4224f0cf1b7c6eeab9da2ccc9a5581f9a71b13
   INNOSETUP_VERSION: 6.7.1
   # What counts as "the agent" for the release decision.
   AGENT_PATHS: >-
