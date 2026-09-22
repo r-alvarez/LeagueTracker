@@ -159,9 +159,11 @@ def main() -> None:
     unicast_down = False
     while True:
         jobs: list[str] = []
+        answered = 0
         for url in TRACKERS:
             try:
                 jobs += pending_jobs(url)
+                answered += 1
             except Exception as ex:  # noqa: BLE001 - one line per outage, not per poll
                 if url not in unreachable:
                     unreachable.add(url)
@@ -194,7 +196,9 @@ def main() -> None:
             if not was_waking:
                 log(f"{len(jobs)} job(s) waiting - sending wake packets")
             was_waking = True
-        elif was_waking:
+        elif was_waking and answered:
+            # An outage is not a drained queue: keep the wake state (and the
+            # log) until a tracker actually answers with zero.
             log("queue drained - going quiet")
             was_waking = False
 
