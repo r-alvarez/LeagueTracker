@@ -61,7 +61,7 @@ fight windows only - the rule from 2026-08-04, no configuration needed).
    `deploy\publish-agent.ps1 -ReleaseDir <NAS>\apps\leaguetracker\agent-releases`
    - version = `yyyy.M.d.HHmm`, zip bundles ffmpeg; agents update themselves
      when idle (no game, no upload) within the hour or on the next heartbeat.
-4. **Waker:** `PC_MAC` / `WOL_BROADCAST` / `UNIFI_URL` are Portainer stack
+4. **Waker:** `PC_MAC` / `PC_ADDR` / `WOL_BROADCAST` / `UNIFI_URL` are Portainer stack
    env vars (with `UNIFI_USER`/`UNIFI_PASS`), never in the compose - they
    describe the render box's network; update them when the renderer moves.
 5. **Cloudflare Access.** Zero Trust → Access → Applications → Add →

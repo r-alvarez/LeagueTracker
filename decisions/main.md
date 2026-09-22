@@ -2012,3 +2012,25 @@ the main driver. `MatchStage` now derives the view from the source alone —
 footage when there is any, otherwise the map with the Footage/Map tabs kept
 only for that case so the link/render controls stay reachable. The per-moment
 `viewFor`, the `opened` flag and the pin-reset on open went with it.
+
+## 2026-09-22 — The waker never woke the render box; a routed packet does
+
+**The render box slept through an hour of wake requests, and neither path
+had ever delivered one.** 56 jobs pending from 13:41Z, the waker sending every
+minute by broadcast and through `cmd/devmgr`, UniFi answering `rc:ok` - and the
+box's own event log shows S3 from 00:49 until a hand on the power button at
+14:39Z (`powercfg /lastwake`: a wake with no device source). The broadcast is
+the directed-broadcast the gateway drops (known since August); the `devmgr`
+`ok` is the non-answer the 09-15 entry warned about. Re-reading the one wake
+that did work (09-16: `PCI Express Root Port`, i.e. the NIC, from a WinRM
+probe) says what does land: a **unicast** from another subnet is routed into
+the box's VLAN, and the sleeping NIC wakes either on the frame itself, when
+the gateway still holds the MAC, or on the gateway's ARP for the box's IP -
+"Wake on pattern match" covers ARP for one's own address. So the waker now
+also sends the magic packet to `PC_ADDR` (IP or `rjav-agent01.lan`, resolved
+on every send), which is the path documented as the working one; the UniFi
+call stays because it costs nothing, but its `ok` is logged as accepted, not
+delivered. The consequences: `PC_ADDR` must be set in the stack, and the
+render box keeps "Wake on pattern match" **enabled** - the opposite of the
+advice for the gaming PC, where it was turned off against spurious wakes,
+because on the render box it is the wake.

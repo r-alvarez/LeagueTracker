@@ -184,7 +184,7 @@ new ids.
 | `YT_BEN_CLIENT_ID`, `YT_BEN_CLIENT_SECRET`, `YT_BEN_REFRESH_TOKEN` | One agent's own Google project (keyed by its key id in the compose) |
 | `POSTGRES_PASSWORD` | The database password: the `postgres` service sets it, the app and `pg-backup` connect with it. Must exist before the first deploy of the PostgreSQL build - the compose refuses to start without it. The app's connection string caps its one pool at 80 of the server's 100 connections so `pg_dump` and a hand `psql` always get in |
 | `UPLOADS_MAX_MEDIA_GB` | Per-account media allowance in GB (default 60). Raise it with the pool: at the default, an account simply stops accepting clips |
-| `PC_MAC`, `WOL_BROADCAST`, `UNIFI_URL`, `UNIFI_USER`, `UNIFI_PASS` | The waker |
+| `PC_MAC`, `PC_ADDR`, `WOL_BROADCAST`, `UNIFI_URL`, `UNIFI_USER`, `UNIFI_PASS` | The waker. `PC_ADDR` is the render box's IP or LAN name (`rjav-agent01.lan`): the magic packet is routed to it, and the box's NIC wakes on either the frame or the gateway's ARP for it - the one path that has woken the box, so the box keeps "Wake on pattern match" enabled |
 | `TRACKER_AGENT_KEY` | The waker's approved agent key: `GET /api/render/pending` needs one since reads are authorised. Optional so the stack starts without it; until it is set the waker logs one line and every poll is a 401 (nothing wakes the PC). Enrolled once, below |
 
 ### Enrolling the waker (once)
