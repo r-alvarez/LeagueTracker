@@ -38,6 +38,39 @@ public sealed class ReplayApiClient : IDisposable
     public Task SetPlaybackAsync(double? time, bool? paused, double? speed, CancellationToken ct) =>
         PostAsync("/replay/playback", new { time, paused, speed }, ct);
 
+    public sealed record RecordingState(bool Recording, double CurrentTime, double StartTime, double EndTime, string? Path);
+
+    // enforceFrameRate: a slow frame costs wall time, never a dropped frame.
+    // Riot documents no quality knob; lossless WebM would be tens of GB.
+    public Task StartRecordingAsync(string path, double startTime, double endTime, int framesPerSecond, int width, int height, CancellationToken ct) =>
+        PostAsync("/replay/recording", new
+        {
+            recording = true,
+            path,
+            codec = "webm",
+            startTime,
+            endTime,
+            currentTime = startTime,
+            width,
+            height,
+            framesPerSecond,
+            enforceFrameRate = true,
+            replaySpeed = 1.0,
+            lossless = false,
+        }, ct);
+
+    public async Task<RecordingState?> GetRecordingAsync(CancellationToken ct)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<RecordingState>(await _http.GetStringAsync($"{Base}/replay/recording", ct), Json);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            return null;
+        }
+    }
+
     /// Selects the tracked player: fog of war renders from their team's view
     /// and the target frame shows their abilities/cooldowns. The UI state is
     /// asserted explicitly every time because the game persists replay UI
