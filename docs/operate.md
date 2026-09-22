@@ -184,6 +184,7 @@ new ids.
 | `YT_BEN_CLIENT_ID`, `YT_BEN_CLIENT_SECRET`, `YT_BEN_REFRESH_TOKEN` | One agent's own Google project (keyed by its key id in the compose) |
 | `POSTGRES_PASSWORD` | The database password: the `postgres` service sets it, the app and `pg-backup` connect with it. Must exist before the first deploy of the PostgreSQL build - the compose refuses to start without it. The app's connection string caps its one pool at 80 of the server's 100 connections so `pg_dump` and a hand `psql` always get in |
 | `UPLOADS_MAX_MEDIA_GB` | Per-account media allowance in GB (default 60). Raise it with the pool: at the default, an account simply stops accepting clips |
+| `RENDER_ALERT_NTFY_URL` | Optional phone push when the render queue stalls: an ntfy topic URL such as `https://ntfy.sh/<long-random-topic>` (the topic name is the only secret - make it unguessable). Blank = the alert shows only on the site and in admins' agent trays |
 | `PC_MAC`, `PC_ADDR`, `WOL_BROADCAST`, `UNIFI_URL`, `UNIFI_USER`, `UNIFI_PASS` | The waker. `PC_ADDR` is the render box's IP or LAN name (`rjav-agent01.lan`): the magic packet is routed to it, and the box's NIC wakes on either the frame or the gateway's ARP for it - the one path that has woken the box, so the box keeps "Wake on pattern match" enabled |
 | `TRACKER_AGENT_KEY` | The waker's approved agent key: `GET /api/render/pending` needs one since reads are authorised. Optional so the stack starts without it; until it is set the waker logs one line and every poll is a 401 (nothing wakes the PC). Enrolled once, below |
 
@@ -227,6 +228,8 @@ public instance - raise them knowingly: the nightly `pg_dump` fails near
 | `Uploads__MinFreeGb` | 20 | No upload is accepted that would leave less than this free on the data disk |
 | `Uploads__MaxVodGb` / `MaxRenderGb` / `MaxClipMb` / `MaxSidecarMb` | 8 / 4 / 512 / 64 | Per-file caps, enforced while the body streams |
 | `Uploads__SweepTempAfterHours` | 24 | Interrupted `.tmp`/`.part` uploads older than this are removed (every six hours) |
+| `RenderWatch__StallMinutes` | 120 | Render work waiting with nothing finishing for this long raises the "Render box stalled" alert (banner for admins, a tray notification on admins' own recorders, the optional ntfy push). Nothing finishing = no clip uploaded, no job completed or failed, and no renderer asking for work and finding none |
+| `RenderWatch__RemindHours` | 6 | While a stall lasts, the ntfy push repeats this often; it also says when the queue moves again |
 
 A refused upload answers 413 (over a cap) or 507 (allowance or disk).
 The agent sends `Expect: 100-continue`, so it hears the refusal before it

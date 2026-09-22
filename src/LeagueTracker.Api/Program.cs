@@ -73,6 +73,11 @@ builder.Services.AddScoped<ReviewReelService>();
 builder.Services.AddScoped<GameplanService>();
 builder.Services.AddPerAccount<RenderLeaseService>();
 builder.Services.AddSingleton<RenderPendingCount>();
+builder.Services.Configure<RenderWatchOptions>(builder.Configuration.GetSection("RenderWatch"));
+builder.Services.AddSingleton<RenderProgress>();
+builder.Services.AddHttpClient(RenderWatchdog.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddSingleton<RenderWatchdog>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RenderWatchdog>());
 builder.Services.AddSingleton<AgentRegistry>();
 builder.Services.AddSingleton<AgentKeyStore>();
 builder.Services.AddHttpClient("github", c =>
@@ -537,12 +542,16 @@ app.MapPost("/api/agent/log", async (HttpContext http, Caller caller, AgentRegis
 
 // The heartbeat's identity is the key that authenticated it; the name in
 // the body is display text at most.
-app.MapPost("/api/agent/heartbeat", (AgentHeartbeat beat, Caller caller, AgentRegistry agents) =>
+// A stalled render queue rides back to the operator's own recorders, whose
+// tray is where they will actually see it - nobody watches a renderer's.
+app.MapPost("/api/agent/heartbeat", (AgentHeartbeat beat, Caller caller, AgentRegistry agents, UserStore users, RenderWatchdog watch) =>
 {
     var key = caller.Agent!;
     agents.Record(key, beat);
     var pending = agents.PendingCommand(key.Id);
-    return Results.Ok(new { latest = agents.Latest()?.Version, command = pending?.Command, commandToken = pending?.Token });
+    var alert = key.Role is not LeagueTracker.Api.Registry.AgentRole.Renderer && key.IsBound && users.ById(key.OwnerUserId)?.IsAdmin is true
+        ? watch.Current : null;
+    return Results.Ok(new { latest = agents.Latest()?.Version, command = pending?.Command, commandToken = pending?.Token, alert = alert?.Message, alertId = alert?.Id });
 }).RequireAuthorization(Policies.Agent);
 
 // The waker on the NAS needs one bit - is render work waiting anywhere -
@@ -1037,7 +1046,7 @@ renderRead.MapGet("/render/queue", async (ClipService clips, FullGameService ful
 // review loop), then explicit full-game requests. The plan manifest is written
 // at claim time so uploads can be validated against it.
 render.MapPost("/render/next", async (AccountContext acct, ClipService clips, FullGameService full, RenderLeaseService leases,
-    ReplayArchiveService replays, VodService vods, LeagueDbContext db, Caller caller, CancellationToken ct = default) =>
+    ReplayArchiveService replays, VodService vods, LeagueDbContext db, Caller caller, RenderProgress progress, CancellationToken ct = default) =>
 {
     // The lease is held by the key that authenticated - never a name the
     // caller chose (audit T-M1).
@@ -1114,27 +1123,32 @@ render.MapPost("/render/next", async (AccountContext acct, ClipService clips, Fu
         });
     }
 
+    // A renderer that asks and gets nothing is awake and caught up here.
+    progress.Touch(acct.Current.Id);
     return Results.NoContent();
 });
 
-render.MapPut("/render/{matchId}/full", async (string matchId, HttpRequest request, FullGameService full, UploadQuota quota, LeagueDbContext db, CancellationToken ct) =>
+render.MapPut("/render/{matchId}/full", async (string matchId, HttpRequest request, AccountContext acct, RenderProgress progress, FullGameService full, UploadQuota quota, LeagueDbContext db, CancellationToken ct) =>
 {
     if (full.VideoTargetPath(matchId) is not { } target) return Results.NotFound();
     if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == matchId, ct)) return Results.NotFound();
+    progress.Touch(acct.Current.Id);
     return await StoreUploadAsync(request, target, quota, quota.MaxRenderBytes, ct);
 });
 
-render.MapPut("/render/{matchId}/clips/{index:int}", async (string matchId, int index, HttpRequest request, ClipService clips, UploadQuota quota, CancellationToken ct) =>
+render.MapPut("/render/{matchId}/clips/{index:int}", async (string matchId, int index, HttpRequest request, AccountContext acct, RenderProgress progress, ClipService clips, UploadQuota quota, CancellationToken ct) =>
 {
     var plan = await clips.LoadPlanAsync(matchId, ct);
     if (plan is null || index < 0 || index >= plan.Windows.Count) return Results.NotFound();
     // A job that outlived its lease and its match's retention window.
     if (clips.Expiry(matchId) is not null) return Results.Json(new { error = "these clips expired; the match is off the render queue" }, statusCode: StatusCodes.Status410Gone);
+    progress.Touch(acct.Current.Id);
     return await StoreUploadAsync(request, clips.ClipTargetPath(matchId, index), quota, quota.MaxClipBytes, ct);
 });
 
-render.MapPost("/render/{matchId}/complete", (string matchId, RenderLeaseService leases, ClipService clips, FullGameService full, string kind = "clips") =>
+render.MapPost("/render/{matchId}/complete", (string matchId, AccountContext acct, RenderProgress progress, RenderLeaseService leases, ClipService clips, FullGameService full, string kind = "clips") =>
 {
+    progress.Touch(acct.Current.Id);
     if (kind is "full") full.CompleteRequest(matchId);
     else clips.ClearFailed(matchId);
     leases.Release($"{kind}:{matchId}");
@@ -1145,15 +1159,17 @@ render.MapPost("/render/{matchId}/complete", (string matchId, RenderLeaseService
 // hangs at the spot, a camera target the replay doesn't know): record the
 // verdict so the match completes with a named gap instead of failing forever,
 // and render/next stops asking for them. An owner retry lifts it.
-render.MapPost("/render/{matchId}/unrenderable", async (string matchId, Dictionary<int, string> windows, ClipService clips, string kind = "clips", CancellationToken ct = default) =>
+render.MapPost("/render/{matchId}/unrenderable", async (string matchId, Dictionary<int, string> windows, AccountContext acct, RenderProgress progress, ClipService clips, string kind = "clips", CancellationToken ct = default) =>
 {
     if (kind is not "clips" || windows is not { Count: > 0 }) return Results.BadRequest();
+    progress.Touch(acct.Current.Id);
     await clips.MarkUnrenderableAsync(matchId, windows, ct);
     return Results.Ok();
 });
 
-render.MapPost("/render/{matchId}/fail", async (string matchId, HttpRequest request, RenderLeaseService leases, ClipService clips, FullGameService full, string kind = "clips", CancellationToken ct = default) =>
+render.MapPost("/render/{matchId}/fail", async (string matchId, HttpRequest request, AccountContext acct, RenderProgress progress, RenderLeaseService leases, ClipService clips, FullGameService full, string kind = "clips", CancellationToken ct = default) =>
 {
+    progress.Touch(acct.Current.Id);
     using var reader = new StreamReader(request.Body);
     var error = await reader.ReadToEndAsync(ct);
     error = error is { Length: > 0 } ? error.Trim() : "unknown";
