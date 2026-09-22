@@ -15,6 +15,18 @@ public sealed class UploadsOptions
     public int MaxClipMb { get; set; } = 512;
     public int MaxSidecarMb { get; set; } = 64;
     public int SweepTempAfterHours { get; set; } = 24;
+    public double MaxKeptFraction { get; set; } = 0.5;
+}
+
+public sealed record StorageHeadroom(long FreeBytes, long FloorBytes, long InFlightBytes, long AllowanceBytes, long MediaBytes, long AccountInFlightBytes)
+{
+    public long DiskLeft => FreeBytes - FloorBytes - InFlightBytes;
+    public long AllowanceLeft => AllowanceBytes - MediaBytes - AccountInFlightBytes;
+
+    public string Describe() =>
+        $"free {Gb(FreeBytes)} GB, floor {Gb(FloorBytes)} GB, in flight {Gb(InFlightBytes)} GB; account media {Gb(MediaBytes)} of {Gb(AllowanceBytes)} GB";
+
+    private static string Gb(long bytes) => (bytes / 1024.0 / 1024 / 1024).ToString("0.0");
 }
 
 public enum UploadRefusal { TooLarge, Allowance, Disk }
@@ -42,7 +54,7 @@ public sealed class UploadReservation : IDisposable
     public void Dispose() => _release();
 }
 
-public sealed class UploadQuota(DataPaths paths, IOptions<UploadsOptions> options, Func<string, long>? freeSpaceOf = null)
+public sealed class UploadQuota(DataPaths paths, IOptions<UploadsOptions> options, Func<string, long>? freeSpaceOf = null, ILogger<UploadQuota>? log = null)
 {
     private const long Gb = 1024L * 1024 * 1024;
     private const long Mb = 1024L * 1024;
@@ -56,16 +68,32 @@ public sealed class UploadQuota(DataPaths paths, IOptions<UploadsOptions> option
     public long MaxRenderBytes => (long)(options.Value.MaxRenderGb * Gb);
     public long MaxClipBytes => options.Value.MaxClipMb * Mb;
     public long MaxSidecarBytes => options.Value.MaxSidecarMb * Mb;
+    public long MaxKeptBytes => (long)(options.Value.MaxMediaGbPerAccount * options.Value.MaxKeptFraction * Gb);
+
+    // The allowance is the account's; the disk is everyone's, so its headroom
+    // is net of every account's in-flight uploads.
+    public StorageHeadroom Headroom()
+    {
+        lock (Gate)
+        {
+            return new StorageHeadroom(
+                FreeBytes(),
+                (long)(options.Value.MinFreeGb * Gb),
+                InFlight.Values.Sum(),
+                (long)(options.Value.MaxMediaGbPerAccount * Gb),
+                MediaBytes(),
+                InFlight.GetValueOrDefault(paths.DataDir));
+        }
+    }
 
     public UploadReservation Reserve(long? declaredBytes, long fileCap)
     {
         lock (Gate)
         {
             var key = paths.DataDir;
-            // The allowance is the account's; the disk is everyone's, so its
-            // headroom is net of every account's in-flight uploads.
-            var allowanceLeft = (long)(options.Value.MaxMediaGbPerAccount * Gb) - MediaBytes() - InFlight.GetValueOrDefault(key);
-            var diskLeft = FreeBytes() - (long)(options.Value.MinFreeGb * Gb) - InFlight.Values.Sum();
+            var headroom = Headroom();
+            var allowanceLeft = headroom.AllowanceLeft;
+            var diskLeft = headroom.DiskLeft;
             var budget = Math.Max(0, Math.Min(fileCap, Math.Min(allowanceLeft, diskLeft)));
 
             var refusal =
@@ -73,7 +101,14 @@ public sealed class UploadQuota(DataPaths paths, IOptions<UploadsOptions> option
                 : diskLeft <= 0 || declaredBytes > diskLeft ? UploadRefusal.Disk
                 : allowanceLeft <= 0 || declaredBytes > allowanceLeft ? UploadRefusal.Allowance
                 : (UploadRefusal?)null;
-            if (refusal is not null) return new UploadReservation(0, fileCap, refusal, () => { });
+            if (refusal is not null)
+            {
+                // A refusal without its figures sent a day of debugging at the
+                // pool when the dataset quota was the cap.
+                log?.LogWarning("Upload refused ({Refusal}) for {Account}: declared {Declared}, cap {Cap}; {Headroom}",
+                    refusal, Path.GetFileName(key), declaredBytes, fileCap, headroom.Describe());
+                return new UploadReservation(0, fileCap, refusal, () => { });
+            }
 
             var reserved = declaredBytes ?? budget;
             InFlight.AddOrUpdate(key, reserved, (_, current) => current + reserved);
