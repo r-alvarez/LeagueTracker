@@ -74,7 +74,12 @@ def get_json(url: str):
         if ex.code == 401:
             raise RuntimeError("the tracker answered 401 - TRACKER_AGENT_KEY is unset, not yet approved or revoked; "
                                "enrol and approve the waker on the Machines page") from None
-        raise
+        # Quote who refused and why: the tracker refuses a pending or revoked
+        # key in JSON, Cloudflare refuses a poll that left the LAN in HTML,
+        # and both read as a bare "HTTP Error 403" (2026-09-22).
+        reply = ex.read(200).decode("utf-8", "replace").strip()
+        server = ex.headers.get("Server", "")
+        raise RuntimeError(f"HTTP {ex.code}{' from ' + server if server else ''}: {reply or ex.reason}") from None
     # A Cloudflare Access sign-in page (HTML, not JSON) lands here too and
     # raises - meaning DNS resolved the tracker via the internet instead of
     # the LAN's split-horizon view. The caller logs it; fix the NAS DNS.
