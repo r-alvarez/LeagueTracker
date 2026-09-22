@@ -1,6 +1,6 @@
 import { account } from './account'
 import { csrfHeaders } from './auth'
-import type { AdminUsers, AgentKey, AnalyticsSummary, BuildVersion, ClaimInfo, InviteResult, JoinCodeInfo, MyAgents, ClipInfo, FullGameStatus, FundamentalsResponse, Gameplan, GameplanAdherence, GameplanImportResult, GameplanSummary, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchGameplan, MatchPage, MatchReview, MatchTrack, ReferencePoint, RenderAlert, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
+import type { AdminUsers, AgentKey, AnalyticsSummary, BuildVersion, ClaimInfo, InviteResult, JoinCodeInfo, MyAgents, ClipInfo, ClipsStatus, FullGameStatus, FundamentalsResponse, Gameplan, GameplanAdherence, GameplanImportResult, GameplanSummary, JobStatus, LensResponse, LiveGame, LpPerGame, LpPoint, MatchDetail, MatchFacets, MatchFilters, MatchGameplan, MatchPage, MatchReview, MatchTrack, ReferencePoint, RenderAlert, RenderQueueRow, ReviewVerdicts, Stats, StopLoss, StorageInfo, Status, VodStatus } from './types'
 
 /// Every API call goes through here: account-scoped URL rewriting, the
 /// session cookie, and the CSRF header on writes. Bare fetch() elsewhere is
@@ -98,6 +98,12 @@ export const api = {
   },
   clips: (id: string) => get<ClipInfo[]>(`/api/matches/${id}/clips`),
   deleteClip: async (id: string, index: number) => { await apiFetch(`/api/matches/${id}/clips/${index}`, { method: 'DELETE' }) },
+  clipsStatus: (id: string) => get<ClipsStatus>(`/api/matches/${id}/clips/status`),
+  keepClips: async (id: string): Promise<boolean> => {
+    const r = await apiFetch(`/api/matches/${id}/clips/keep`, { method: 'POST' })
+    if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error ?? `keep -> HTTP ${r.status}`)
+    return ((await r.json()) as { kept: boolean }).kept
+  },
   renderQueue: () => get<RenderQueueRow[]>('/api/render/queue'),
   vodStatus: (id: string) => get<VodStatus>(`/api/matches/${id}/vod/status`),
   setVodLink: async (id: string, url: string): Promise<VodStatus> => {

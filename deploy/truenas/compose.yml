@@ -139,6 +139,10 @@ services:
       # A stalled render queue is shown to admins on the site and in their
       # agent trays; this adds a phone push (an ntfy topic URL). Blank = off.
       RenderWatch__NtfyUrl: ${RENDER_ALERT_NTFY_URL:-}
+      # First deploy: dry run, mark the games to keep on their match pages,
+      # then clear it - the first live sweep takes patches of clips at once.
+      Retention__ClipPatches: ${RETENTION_CLIP_PATCHES:-2}
+      Retention__DryRun: ${RETENTION_DRY_RUN:-false}
       Accounts__DataRoot: /data
       Accounts__Default: ImRA-87166
       Accounts__List__0__GameName: ImRA
@@ -257,9 +261,10 @@ services:
 
   # Wakes the render PC while render work waits, so the gaming machine can
   # sleep instead of idling 24/7. The PC and the NAS are on different subnets
-  # and routers drop directed broadcasts, so the primary path asks the UniFi
-  # gateway to emit the magic packet inside the PC's own VLAN. Everything that
-  # describes the network - PC_MAC, WOL_BROADCAST, UNIFI_URL and the UniFi
+  # and routers drop directed broadcasts, so the magic packet is routed to
+  # the box's own address (its NIC wakes on the frame or on the gateway's
+  # ARP for it), with the UniFi console asked to emit one too. Everything that
+  # describes the network - PC_MAC, PC_ADDR, WOL_BROADCAST, UNIFI_URL and the UniFi
   # login (a local view-capable admin) - is a Portainer stack env var, NEVER
   # committed here: this repo is public. Host networking keeps the secondary
   # raw broadcast possible and makes the tracker hostnames resolve via
@@ -279,6 +284,9 @@ services:
       # every poll is a 401 and the waker says so once (docs/operate.md §5).
       - TRACKER_AGENT_KEY=${TRACKER_AGENT_KEY:-}
       - PC_MAC=${PC_MAC:-}
+      # The box's IP or LAN name: a routed magic packet is the path that
+      # has actually woken it (the NIC wakes on the frame or the ARP).
+      - PC_ADDR=${PC_ADDR:-}
       - WOL_BROADCAST=${WOL_BROADCAST:-255.255.255.255}
       - POLL_SECONDS=60
       - UNIFI_URL=${UNIFI_URL:-}

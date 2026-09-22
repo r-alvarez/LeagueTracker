@@ -15,6 +15,10 @@ public sealed record ClipWindow(int Index, int StartSec, int EndSec, string Labe
 
 public sealed record ClipPlan(string MatchId, string GameVersion, double DurationSec, List<ClipWindow> Windows);
 
+public sealed record ClipExpiry(string Reason, string? Patch, DateTime AtUtc, int Clips, long Bytes);
+
+public sealed record ClipReclaim(int Clips, long Bytes);
+
 /// Plans and stores the per-match highlight clips that the render agent turns
 /// into mp4s. Follows the app's files-as-truth rule: the plan manifest and the
 /// rendered clips live under data/clips/{matchId}; the db is never written.
@@ -274,6 +278,91 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
     public bool HasClips(string matchId) =>
         DirFor(matchId) is { } dir && Directory.Exists(dir) && Directory.EnumerateFiles(dir, "*.mp4").Any();
 
+    public long ClipBytes(string matchId) =>
+        DirFor(matchId) is { } dir && Directory.Exists(dir)
+            ? Directory.EnumerateFiles(dir, "*.mp4").Sum(f => new FileInfo(f).Length)
+            : 0;
+
+    public IEnumerable<string> MatchesWithClips() =>
+        !Directory.Exists(ClipsRoot)
+            ? []
+            : Directory.EnumerateDirectories(ClipsRoot).Select(Path.GetFileName).OfType<string>().Where(HasClips);
+
+    public bool IsKept(string matchId) =>
+        DirFor(matchId) is { } dir && File.Exists(Path.Combine(dir, "keep"));
+
+    public long KeptBytes() => MatchesWithClips().Where(IsKept).Sum(ClipBytes);
+
+    // Pins are bounded: an account that pinned everything would hold its whole
+    // allowance in files the sweeper may never touch and refuse every upload.
+    public (bool Kept, string? Error) ToggleKeep(string matchId, long keptCapBytes)
+    {
+        if (DirFor(matchId) is not { } dir || !HasClips(matchId)) return (false, "no clips to keep");
+        var marker = Path.Combine(dir, "keep");
+        if (File.Exists(marker))
+        {
+            File.Delete(marker);
+            return (false, null);
+        }
+        var wouldHold = KeptBytes() + ClipBytes(matchId);
+        if (wouldHold > keptCapBytes)
+        {
+            return (false, $"kept clips would hold {wouldHold / 1024.0 / 1024 / 1024:0.0} GB, over the {keptCapBytes / 1024.0 / 1024 / 1024:0.0} GB allowed for pins");
+        }
+        File.WriteAllText(marker, DateTime.UtcNow.ToString("o"));
+        return (true, null);
+    }
+
+    public ClipExpiry? Expiry(string matchId)
+    {
+        if (DirFor(matchId) is not { } dir) return null;
+        var path = Path.Combine(dir, "expired.json");
+        if (!File.Exists(path)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<ClipExpiry>(File.ReadAllText(path), Json);
+        }
+        catch
+        {
+            return new ClipExpiry("unknown", null, File.GetLastWriteTimeUtc(path), 0, 0);
+        }
+    }
+
+    public void ClearExpiry(string matchId)
+    {
+        if (DirFor(matchId) is not { } dir) return;
+        var path = Path.Combine(dir, "expired.json");
+        if (File.Exists(path)) File.Delete(path);
+    }
+
+    // The plan survives expiry on purpose: without it the page could only say
+    // "no clips", and the queue would replan and re-render the match.
+    public ClipExpiry ExpireClips(string matchId, string reason, string? patch)
+    {
+        var dir = DirFor(matchId)!;
+        var mp4s = Directory.EnumerateFiles(dir, "*.mp4").ToList();
+        var expiry = new ClipExpiry(reason, patch, DateTime.UtcNow, mp4s.Count, mp4s.Sum(f => new FileInfo(f).Length));
+        foreach (var mp4 in mp4s) File.Delete(mp4);
+        File.WriteAllText(Path.Combine(dir, "expired.json"), JsonSerializer.Serialize(expiry, Json));
+        return expiry;
+    }
+
+    // Once footage of the player's own screen exists, their kill/death clips
+    // duplicate it (render/next stops making them); ones rendered before the
+    // footage arrived are the leftover.
+    public async Task<ClipReclaim> ReclaimPersonalClipsAsync(string matchId, CancellationToken ct)
+    {
+        if (await LoadPlanAsync(matchId, ct) is not { } plan) return new ClipReclaim(0, 0);
+        var personal = plan.Windows
+            .Where(w => w.Kind is not "fight")
+            .Select(w => ClipPath(matchId, w.Index))
+            .OfType<string>()
+            .ToList();
+        var bytes = personal.Sum(f => new FileInfo(f).Length);
+        foreach (var mp4 in personal) File.Delete(mp4);
+        return new ClipReclaim(personal.Count, bytes);
+    }
+
     public string? FailReason(string matchId)
     {
         if (DirFor(matchId) is not { } dir) return null;
@@ -365,6 +454,7 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         if (DirFor(matchId) is not { } dir || !Directory.Exists(dir)) return;
         foreach (var mp4 in Directory.EnumerateFiles(dir, "*.mp4")) File.Delete(mp4);
         DeletePlan(matchId);
+        ClearExpiry(matchId);
     }
 
     /// Drops one bad clip so just that window re-renders. Also clears the
@@ -403,6 +493,7 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         {
             var failed = FailReason(m.Id);
             if (failed is not null && IsDismissed(m.Id)) continue; // dealt with - off the board
+            if (Expiry(m.Id) is not null) continue;
             // The saved plan is the manifest existing clips were rendered
             // against; only never-claimed matches need a fresh plan.
             var plan = await LoadPlanAsync(m.Id, ct) ?? (m.HasTimeline ? await PlanAsync(m.Id, ct) : null);

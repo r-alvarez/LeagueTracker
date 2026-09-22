@@ -23,10 +23,12 @@ The container sees one volume, `/data` = `/mnt/MediaPool/apps/leaguetracker`.
 | `<account>/games/<matchId>.json` | The raw match + timeline as Riot returned it — the source of every analytical number | Only while Riot still serves the match (about two years): `POST .../sync/history` re-fetches |
 | `<account>/lp-history.csv` | Every LP snapshot ever taken, mirrored as it is taken | **No.** A snapshot exists only at capture time |
 | schema `acct_<id>` (in the cluster) | The index over `games/`: matches, participants, deaths, positions, LP snapshots, per-game LP attribution, rank-at-game-time context, `KnownMatches` (the poller's baseline), `KeyValues` (puuid cache). `<id>` is the account's registry id (`GET /api/accounts`) | Mostly — see §3 |
-| `<account>/replays/<matchId>.rofl` | Riot replay files, downloadable only for the last ~5 games | **No** |
+| `<account>/replays/<matchId>.rofl` | Riot replay files, downloadable only for the last ~5 games; swept once the client can no longer play their patch (`Retention__ReplayPatches`, 1) | **No** |
 | `<account>/vods/<matchId>/` | The agent's upload: `youtube.txt` (the only pointer to the channel video), review sidecar, the mp4 when `UploadVods` is on | No — the agent prunes its copy once published |
-| `<account>/clips/<matchId>/` | Rendered clips and their plan | Yes, by the renderer, while the `.rofl` exists |
+| `<account>/clips/<matchId>/` | Rendered clips and their plan. Clips of games older than the current and previous patch expire (`Retention__ClipPatches`, 2) unless the match is marked keep on its page; `expired.json` records what went, the plan stays so the page can say so | Yes, by the renderer, while the `.rofl` exists |
 | `<account>/fullgames/` | Full-game renders (kept ones; the rest expire after `FullGameRetentionDays`) | Same |
+
+When free space nears the upload floor (`Uploads__MinFreeGb` + `Retention__PressureHeadroomGb`) or an account nears its allowance, the hourly sweep evicts unkept full renders, then the oldest unkept clips, and logs a warning if that was not enough. The floor is measured on the dataset the container sees, so a ZFS quota on `MediaPool/apps/leaguetracker` counts as the disk (200 GB until 2026-09-22, now 1 TB). `GET /api/storage` shows the figures. `Retention__DryRun=true` makes the sweep log what it would take without deleting: use it on the first deploy, mark the games to keep on their match pages, then clear it. Deleted files stay referenced by any ZFS snapshot of the dataset until that snapshot is destroyed, so `zfs list -o used,avail` moves only once the snapshots do.
 
 Nothing else is persistent. Render leases, live-game state, agent
 heartbeats and one-shot agent commands are in memory and rebuild
@@ -183,7 +185,7 @@ new ids.
 | `POSTGRES_PASSWORD` | The database password: the `postgres` service sets it, the app and `pg-backup` connect with it. Must exist before the first deploy of the PostgreSQL build - the compose refuses to start without it. The app's connection string caps its one pool at 80 of the server's 100 connections so `pg_dump` and a hand `psql` always get in |
 | `UPLOADS_MAX_MEDIA_GB` | Per-account media allowance in GB (default 60). Raise it with the pool: at the default, an account simply stops accepting clips |
 | `RENDER_ALERT_NTFY_URL` | Optional phone push when the render queue stalls: an ntfy topic URL such as `https://ntfy.sh/<long-random-topic>` (the topic name is the only secret - make it unguessable). Blank = the alert shows only on the site and in admins' agent trays |
-| `PC_MAC`, `WOL_BROADCAST`, `UNIFI_URL`, `UNIFI_USER`, `UNIFI_PASS` | The waker |
+| `PC_MAC`, `PC_ADDR`, `WOL_BROADCAST`, `UNIFI_URL`, `UNIFI_USER`, `UNIFI_PASS` | The waker. `PC_ADDR` is the render box's IP or LAN name (`rjav-agent01.lan`): the magic packet is routed to it, and the box's NIC wakes on either the frame or the gateway's ARP for it - the one path that has woken the box, so the box keeps "Wake on pattern match" enabled |
 | `TRACKER_AGENT_KEY` | The waker's approved agent key: `GET /api/render/pending` needs one since reads are authorised. Optional so the stack starts without it; until it is set the waker logs one line and every poll is a 401 (nothing wakes the PC). Enrolled once, below |
 
 ### Enrolling the waker (once)
