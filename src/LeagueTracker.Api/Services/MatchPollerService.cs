@@ -262,8 +262,9 @@ public sealed class MatchPollerService(
             var report = await scope.ServiceProvider.GetRequiredService<MediaRetentionService>().SweepAsync(ct);
             if (report.Changed)
             {
-                logger.LogInformation("Retention for {Account}: {Replays} replay(s), {ClipMatches} match(es) of clips, {Personal} personal clip(s), {Full} full render(s), {Evicted} pressure eviction(s); {Mb:0} MB freed",
-                    account.Id, report.ReplaysExpired, report.ClipMatchesExpired, report.PersonalClipsReclaimed, report.FullGamesExpired, report.PressureEvictions, report.BytesFreed / 1024.0 / 1024);
+                logger.LogInformation("Retention for {Account}{Mode}: {Replays} replay(s), {ClipMatches} match(es) of clips, {Personal} personal clip(s), {Full} full render(s), {Evicted} pressure eviction(s); {Mb:0} MB {Verb}",
+                    account.Id, report.DryRun ? " (dry run)" : "", report.ReplaysExpired, report.ClipMatchesExpired, report.PersonalClipsReclaimed, report.FullGamesExpired, report.PressureEvictions,
+                    report.BytesFreed / 1024.0 / 1024, report.DryRun ? "would be freed" : "freed");
             }
         }
 

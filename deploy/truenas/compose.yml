@@ -136,6 +136,10 @@ services:
       # policy - so it follows the pool from the stack environment rather
       # than waiting on a release. Two accounts hit it silently in Sept 2026.
       Uploads__MaxMediaGbPerAccount: ${UPLOADS_MAX_MEDIA_GB:-60}
+      # First deploy: dry run, mark the games to keep on their match pages,
+      # then clear it - the first live sweep takes patches of clips at once.
+      Retention__ClipPatches: ${RETENTION_CLIP_PATCHES:-2}
+      Retention__DryRun: ${RETENTION_DRY_RUN:-false}
       Accounts__DataRoot: /data
       Accounts__Default: ImRA-87166
       Accounts__List__0__GameName: ImRA

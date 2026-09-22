@@ -199,6 +199,22 @@ public class MediaRetentionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_dry_run_counts_what_would_go_and_deletes_nothing()
+    {
+        var old = await GameAsync("EUW1_1", "16.15", new DateTime(2026, 8, 1));
+        Replay(old.Id);
+
+        var report = await Service(new MediaRetentionOptions { DryRun = true }).SweepAsync(Patches, [old], CancellationToken.None);
+
+        Assert.True(report.DryRun);
+        Assert.Equal((1, 1), (report.ClipMatchesExpired, report.ReplaysExpired));
+        Assert.Equal(3L * 1024 * 1024 + 1024, report.BytesFreed);
+        Assert.True(_clips.HasClips(old.Id));
+        Assert.NotNull(_replays.PathFor(old.Id));
+        Assert.Null(_clips.Expiry(old.Id));
+    }
+
+    [Fact]
     public async Task An_owner_retry_lifts_the_expiry()
     {
         var old = await GameAsync("EUW1_1", "16.15", new DateTime(2026, 8, 1));

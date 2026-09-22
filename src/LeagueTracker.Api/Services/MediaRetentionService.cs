@@ -16,13 +16,15 @@ public sealed class MediaRetentionOptions
     public double PressureHeadroomGb { get; set; } = 10;
     public double AllowanceHeadroomFraction { get; set; } = 0.1;
     public int SweepMinutes { get; set; } = 60;
+    // The first live sweep takes patches of clips off every account at once.
+    public bool DryRun { get; set; }
 }
 
 public sealed record RetainedMatch(string Id, string GameVersion, DateTime GameEndUtc);
 
 public sealed record RetentionReport(
     int ReplaysExpired, int ClipMatchesExpired, int PersonalClipsReclaimed, int FullGamesExpired,
-    int PressureEvictions, long BytesFreed, bool Starved)
+    int PressureEvictions, long BytesFreed, bool Starved, bool DryRun = false)
 {
     public bool Changed => BytesFreed > 0 || FullGamesExpired > 0 || Starved;
 }
@@ -60,7 +62,15 @@ public sealed class MediaRetentionService(
             {
                 if (!known.TryGetValue(matchId, out var match) || Busy(matchId)) continue;
                 if (PatchReference.PatchAge(patches, match.GameVersion) < settings.ReplayPatches) continue;
-                freed += replays.Delete(matchId);
+                if (settings.DryRun)
+                {
+                    freed += replays.PathFor(matchId) is { } path ? new FileInfo(path).Length : 0;
+                    log.LogInformation("Dry run: would drop replay {MatchId} (patch {Patch})", matchId, PatchReference.PatchOf(match.GameVersion));
+                }
+                else
+                {
+                    freed += replays.Delete(matchId);
+                }
                 replaysExpired++;
             }
 
@@ -68,13 +78,22 @@ public sealed class MediaRetentionService(
             {
                 if (!known.TryGetValue(matchId, out var match) || clips.IsKept(matchId) || Busy(matchId)) continue;
                 if (PatchReference.PatchAge(patches, match.GameVersion) < settings.ClipPatches) continue;
-                var expiry = clips.ExpireClips(matchId, "patch", PatchReference.PatchOf(match.GameVersion));
-                freed += expiry.Bytes;
+                var patch = PatchReference.PatchOf(match.GameVersion);
+                if (settings.DryRun)
+                {
+                    var bytes = clips.ClipBytes(matchId);
+                    freed += bytes;
+                    log.LogInformation("Dry run: would expire clips of {MatchId} (patch {Patch}, {Mb:0} MB)", matchId, patch, bytes / 1024.0 / 1024);
+                }
+                else
+                {
+                    freed += clips.ExpireClips(matchId, "patch", patch).Bytes;
+                }
                 clipMatchesExpired++;
             }
         }
 
-        if (settings.ReclaimPersonalClips)
+        if (settings.ReclaimPersonalClips && !settings.DryRun)
         {
             foreach (var matchId in clips.MatchesWithClips().ToList())
             {
@@ -86,12 +105,12 @@ public sealed class MediaRetentionService(
             }
         }
 
-        var fullGamesExpired = full.SweepRetention(riot.Value.FullGameRetentionDays);
+        var fullGamesExpired = settings.DryRun ? 0 : full.SweepRetention(riot.Value.FullGameRetentionDays);
 
-        var (evictions, evictedBytes, starved) = RelievePressure(known, settings);
+        var (evictions, evictedBytes, starved) = settings.DryRun ? (0, 0L, false) : RelievePressure(known, settings);
         freed += evictedBytes;
 
-        return new RetentionReport(replaysExpired, clipMatchesExpired, reclaimedClips, fullGamesExpired, evictions, freed, starved);
+        return new RetentionReport(replaysExpired, clipMatchesExpired, reclaimedClips, fullGamesExpired, evictions, freed, starved, settings.DryRun);
     }
 
     // Disk and allowance refuse uploads independently, so both are relieved.
