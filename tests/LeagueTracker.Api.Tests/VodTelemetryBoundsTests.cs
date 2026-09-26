@@ -40,7 +40,7 @@ public class VodTelemetryBoundsTests : IDisposable
     }
 
     private static IEnumerable<string> Actions(int count, long spacingMs = 100) =>
-        Enumerable.Range(0, count).Select(i => $"{i * spacingMs},key_down,Q,0,0");
+        Enumerable.Range(0, count).Select(i => $"{i * spacingMs},mouse_down,right,0,0");
 
     [Fact]
     public void Backup_status_exposes_exact_bytes_and_sidecars_alone_are_not_a_video()

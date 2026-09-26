@@ -37,6 +37,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="LeagueTracker.RenderAgent.Tests" />
+    <!-- One reading of the input telemetry for the site and the review window. -->
+    <Compile Include="..\LeagueTracker.Api\Services\InputTelemetry.cs" Link="Review\InputTelemetry.cs" />
     <InternalsVisibleTo Include="LeagueTracker.ReviewSmoke" />
     <PackageReference Include="ScreenRecorderLib" Version="6.6.0" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />

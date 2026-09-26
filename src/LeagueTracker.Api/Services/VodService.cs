@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
+using LeagueTracker.Telemetry;
 
 namespace LeagueTracker.Api.Services;
 
@@ -85,15 +86,20 @@ public sealed class VodService(DataPaths paths)
 
     /// Actions-per-minute over the game in 10s buckets, derived from the
     /// input telemetry (key/click/wheel presses; cursor motion is not an
-    /// "action"). Computed once and cached next to the telemetry - the csv
-    /// runs to ~35k rows per minute of game.
+    /// "action"), plus the ult casts found in it. Computed once and cached
+    /// next to the telemetry - the csv runs to ~35k rows per minute of game.
     public object? ApmSeries(string matchId)
     {
         if (DirFor(matchId) is not { } dir) return null;
         var cache = Path.Combine(dir, "apm.json");
         if (File.Exists(cache))
         {
-            try { return JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(cache)); }
+            try
+            {
+                var cached = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(cache));
+                // An older reading of the same file (key repeats counted, no ults).
+                if (cached.TryGetProperty("v", out var v) && v.TryGetInt32(out var version) && version == InputTelemetry.Version) return cached;
+            }
             catch { /* recompute below */ }
         }
         if (EventsPath(matchId) is not { } eventsPath) return null;
@@ -102,8 +108,8 @@ public sealed class VodService(DataPaths paths)
         {
             using var file = File.OpenRead(eventsPath);
             // Files uploaded before the bounds existed get the absolute ceiling.
-            if (ReadTelemetry(file, MaxRecordingSec) is not { Rejection: null, Buckets.Count: > 0 } read) return null;
-            File.WriteAllText(cache, JsonSerializer.Serialize(Series(read.Buckets), Json));
+            if (ReadTelemetry(file, MaxRecordingSec) is not { Rejection: null, Telemetry.Buckets.Count: > 0 } read) return null;
+            File.WriteAllText(cache, JsonSerializer.Serialize(read.Telemetry.Series(), Json));
             return JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(cache));
         }
         catch
@@ -122,8 +128,6 @@ public sealed class VodService(DataPaths paths)
     private const int MaxActionsPerSec = 20;
     private const int MaxRecordingSec = 3 * 3600;
     private const int MaxLineChars = 256;
-    private const int BucketSec = 10;
-    private static readonly string[] ActionTypes = ["key_down", "mouse_down", "wheel"];
 
     public sealed record TelemetryRejection(string Error);
 
@@ -145,7 +149,7 @@ public sealed class VodService(DataPaths paths)
             }
             if (read.Rejection is { } rejection) return rejection;
             File.Move(temp, target, overwrite: true);
-            File.WriteAllText(Path.Combine(Path.GetDirectoryName(target)!, "apm.json"), JsonSerializer.Serialize(Series(read.Buckets), Json));
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(target)!, "apm.json"), JsonSerializer.Serialize(read.Telemetry.Series(), Json));
             return null;
         }
         catch (TelemetryTooLargeException ex)
@@ -158,14 +162,14 @@ public sealed class VodService(DataPaths paths)
         }
     }
 
-    private sealed record TelemetryRead(TelemetryRejection? Rejection, List<int> Buckets);
+    private sealed record TelemetryRead(TelemetryRejection? Rejection, InputTelemetry Telemetry);
 
     private static TelemetryRead ReadTelemetry(Stream compressed, double maxSec)
     {
         var maxMs = (long)(maxSec * 1000);
         var maxLines = (long)(maxSec * MaxLinesPerSec);
         var maxActions = (long)(maxSec * MaxActionsPerSec);
-        List<int> buckets = [];
+        var telemetry = new InputTelemetry();
         var lines = 0L;
         var actions = 0L;
         try
@@ -182,14 +186,13 @@ public sealed class VodService(DataPaths paths)
                 var comma = line.IndexOf(',');
                 if (comma <= 0 || !long.TryParse(line.AsSpan(0, comma), out var tMs)) return Reject($"telemetry line {lines + 1} has no timestamp");
                 if (tMs < 0 || tMs > maxMs) return Reject($"telemetry line {lines + 1} is stamped {tMs} ms, outside the recording's 0-{maxMs} ms");
-                var type = line.AsSpan(comma + 1);
-                var typeEnd = type.IndexOf(',');
-                if (typeEnd >= 0) type = type[..typeEnd];
-                if (!IsAction(type)) continue;
+                var fields = line.Split(',', 5);
+                if (fields.Length < 2) continue;
+                telemetry.Add(tMs, fields[1], fields.Length > 2 ? fields[2] : "", fields.Length > 3 ? fields[3] : "");
+                // The cap counts raw press rows: key repeats are not APM, but
+                // they are still rows a hostile upload could pile up.
+                if (fields[1] is not ("key_down" or "mouse_down" or "wheel")) continue;
                 if (++actions > maxActions) return Reject($"telemetry has more than {maxActions} actions for a {maxSec:0}s recording");
-                var bucket = (int)(tMs / 1000 / BucketSec);
-                while (buckets.Count <= bucket) buckets.Add(0);
-                buckets[bucket]++;
             }
         }
         catch (InvalidDataException ex)
@@ -200,9 +203,9 @@ public sealed class VodService(DataPaths paths)
         {
             return Reject(ex.Message);
         }
-        return new(null, buckets);
+        return new(null, telemetry);
 
-        static TelemetryRead Reject(string error) => new(new(error), []);
+        static TelemetryRead Reject(string error) => new(new(error), new());
     }
 
     // Not StreamReader.ReadLine: it would buffer a newline-free gzip bomb whole.
@@ -235,22 +238,7 @@ public sealed class VodService(DataPaths paths)
 
     private static TelemetryTooLargeException TooLong() => new($"telemetry line longer than {MaxLineChars} characters");
 
-    private static bool IsAction(ReadOnlySpan<char> type)
-    {
-        foreach (var action in ActionTypes)
-        {
-            if (type.SequenceEqual(action)) return true;
-        }
-        return false;
-    }
 
-    private static object Series(List<int> buckets) => new
-    {
-        bucketSec = BucketSec,
-        // counts-per-bucket scaled to per-minute, the unit players know
-        apm = buckets.Select(c => c * 60 / BucketSec).ToArray(),
-        averageApm = buckets is { Count: > 0 } ? (int)Math.Round(buckets.Sum() * 60.0 / (buckets.Count * BucketSec)) : 0,
-    };
 
     private sealed class TelemetryTooLargeException(string message) : Exception(message);
 

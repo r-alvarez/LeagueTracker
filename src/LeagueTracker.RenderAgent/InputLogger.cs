@@ -36,28 +36,49 @@ public sealed class InputLogger : IDisposable
     /// telemetry. Zero (tests) logs regardless of focus.
     private readonly nint _gameWindow;
 
-    private InputLogger(string path, nint gameWindow)
+    // The R slot's brightness, logged as hud_r rows on the same clock as the
+    // presses (see UltSlotProbe). Four samples a second: a cooldown is
+    // seconds long, a recast lockout about one.
+    private readonly UltSlotProbe? _ultSlot;
+    private readonly System.Threading.Timer? _ultTimer;
+    private int _sampling;
+
+    private InputLogger(string path, nint gameWindow, UltSlotProbe? ultSlot)
     {
         Path = path;
         _gameWindow = gameWindow;
+        _ultSlot = ultSlot;
         _writer = Task.Run(() => WriteLoopAsync(_cts.Token));
+        if (ultSlot is not null) _ultTimer = new System.Threading.Timer(_ => SampleUltSlot(), null, 250, 250);
         // Low-level hooks need a thread that pumps messages; the callbacks
         // fire on it, so it must never block - callbacks only enqueue.
         _hookThread = new Thread(HookPump) { IsBackground = true, Name = "input-logger" };
         _hookThread.Start();
     }
 
-    public static InputLogger? TryStart(string path, nint gameWindow = 0)
+    public static InputLogger? TryStart(string path, nint gameWindow = 0, UltSlotProbe? ultSlot = null)
     {
         try
         {
-            return new InputLogger(path, gameWindow);
+            return new InputLogger(path, gameWindow, ultSlot);
         }
         catch (Exception ex)
         {
             Log.Warn($"Input logging unavailable: {ex.Message}");
+            ultSlot?.Dispose();
             return null;
         }
+    }
+
+    private void SampleUltSlot()
+    {
+        if (Interlocked.Exchange(ref _sampling, 1) == 1) return;
+        try
+        {
+            if (_ultSlot?.Sample() is { } lum) Enqueue("hud_r", "", lum, 0);
+        }
+        catch { /* a missed sample is a gap, never worth the recording */ }
+        finally { Volatile.Write(ref _sampling, 0); }
     }
 
     private void HookPump()
@@ -169,6 +190,12 @@ public sealed class InputLogger : IDisposable
         // the writer drain the queue and close the gzip trailer.
         if (_hookThreadId != 0) PostThreadMessageW(_hookThreadId, WmQuit, 0, 0);
         _hookThread.Join(TimeSpan.FromSeconds(3));
+        if (_ultTimer is not null)
+        {
+            using var stopped = new ManualResetEvent(false);
+            if (_ultTimer.Dispose(stopped)) stopped.WaitOne(TimeSpan.FromSeconds(2));
+            _ultSlot!.Dispose();
+        }
         _cts.Cancel();
         try { _writer.Wait(TimeSpan.FromSeconds(5)); } catch { /* logged nothing worth losing the VOD over */ }
         _cts.Dispose();

@@ -2034,3 +2034,37 @@ delivered. The consequences: `PC_ADDR` must be set in the stack, and the
 render box keeps "Wake on pattern match" **enabled** - the opposite of the
 advice for the gaming PC, where it was turned off against spurious wakes,
 because on the render box it is the wake.
+
+## 2026-09-26 — APM counts presses, and the ult is read off the HUD
+
+**Our APM read ~10% above Ascent's for the same game, and the gap was ours.**
+Ruben's 26 Sep game 2 logged side by side: 9,803 clicks on both, 1,718 vs
+1,711 real key presses - and 1,101 extra `key_down` rows in ours, 1,087 of
+them Tab. Windows repeats `key_down` ~30/s while a key is held, the logger
+records every one, and the APM series counted every one: holding the
+scoreboard was a burst of "actions". A key_down on a key already held (and
+seen under 1.1s ago - a key_up lost while alt-tabbed must not swallow the next
+real press) is now a repeat, not an action: 367 → 335, Ascent says 332. The
+upload cap still counts raw press rows, repeats included, since the cap is
+about what a hostile file can pile up, not about APM.
+
+**Ult casts.** Riot gives `spell4Casts` as a total and the timeline has no
+casts at all, so the telemetry is the source: R presses (Ctrl+R is a level-up)
+chained with gaps of 15s or less are one use - Ahri's three dashes, mashing R
+while the cast lands. A press is not a cast (R on cooldown, out of range), so
+the recorder also samples the R slot's brightness on screen four times a
+second (`hud_r` rows) and the chain counts as a cast only if the slot went
+dark for 4s+ right after it; short dips are CC and recast lockouts. Checked on
+the same game: 10 chains from keys alone, 10 HUD-confirmed casts, same times,
+and 31 `spell4Casts` = 10 ults × 3 dashes. Decoding the video afterwards
+instead was measured at ~5 minutes per 1440p game - on the machine the next
+game is about to be played on - so the probe is a 52px GDI read during the
+game. Its position is only calibrated for GlobalScale 0.30 (centred, 105px up
+at 1440p, scaling with window height); other HUD scales skip the probe and
+fall back to presses, labelled "R pressed" instead of "ult". The review lists
+each use with what the next 12s bought (takedowns incl. assists, a death, the
+fight it was in) - it says what happened and leaves the judging to the
+footage, since an ult with no takedown can still be an escape. The analyzer
+source is shared by the API and the agent (linked file) so the site and the
+review window cannot drift apart again; cached `apm.json` carries `v: 2` and
+older caches are recomputed.

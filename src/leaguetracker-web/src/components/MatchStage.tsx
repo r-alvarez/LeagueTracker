@@ -7,10 +7,11 @@ import type { FullGameStatus, MapMoment, MatchTrack, VodStatus } from '../types'
 
 const SPEEDS = [4, 8]
 type View = 'map' | 'footage'
-type Filter = 'missed' | 'mine' | 'objectives' | 'all'
+type Filter = 'missed' | 'mine' | 'ults' | 'objectives' | 'all'
 const FILTERS: { key: Filter; label: string; test: (m: MapMoment) => boolean }[] = [
   { key: 'missed', label: 'Fights without you', test: m => m.kind === 'fight' && !!m.withoutMe },
   { key: 'mine', label: 'Your fights', test: m => (m.kind === 'fight' && !m.withoutMe) || m.kind === 'kill' || m.kind === 'death' },
+  { key: 'ults', label: 'Your ults', test: m => m.kind === 'ult' },
   { key: 'objectives', label: 'Objectives', test: m => m.kind === 'objective' },
   { key: 'all', label: 'All', test: () => true },
 ]
@@ -108,7 +109,7 @@ export default function MatchStage({ matchId, track, moments, durationSec, vod, 
   }, [playing, t, win.end])
 
   const counts = useMemo(() => FILTERS.map(f => moments.filter(f.test).length), [moments])
-  const shown = FILTERS.find(f => f.key === filter) ?? FILTERS[3]
+  const shown = FILTERS.find(f => f.key === filter) ?? FILTERS[FILTERS.length - 1]
 
   if (!track && !hasFootage && source !== 'pending') return null
 

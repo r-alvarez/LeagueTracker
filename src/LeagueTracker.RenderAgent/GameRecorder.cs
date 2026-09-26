@@ -1387,7 +1387,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
 
         // Hooks live exactly as long as the capture, so event t_ms and video
         // time share a zero point (within ffmpeg's first-frame latency).
-        using var inputLogger = config.RecordInputs ? InputLogger.TryStart(eventsPath, g.Process.MainWindowHandle) : null;
+        using var inputLogger = config.RecordInputs ? InputLogger.TryStart(eventsPath, g.Process.MainWindowHandle, UltSlotProbe.TryCreate(leagueRoot, g.Rect)) : null;
         var startedUtc = DateTime.UtcNow;
         var clockMap = new List<(double, double)>();
         string? activePlayer = null;
@@ -1506,7 +1506,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         }
         startedUtc = DateTime.UtcNow; // zero point = frames actually flowing
         using var audio = config.RecordAudio ? ProcessAudioCapture.TryStartToFile(g.Process.Id, Path.ChangeExtension(partPath, ".pcm")) : null;
-        using var inputLogger = config.RecordInputs ? InputLogger.TryStart(eventsPath, g.Process.MainWindowHandle) : null;
+        using var inputLogger = config.RecordInputs ? InputLogger.TryStart(eventsPath, g.Process.MainWindowHandle, UltSlotProbe.TryCreate(leagueRoot, g.Rect)) : null;
 
         var clockMap = new List<(double, double)>();
         string? activePlayer = null;

@@ -4,11 +4,12 @@ import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'rec
 import { api } from '../api'
 import { reviewHost } from '../reviewHost'
 import { clock } from './TimeLink'
+import { clockMapper } from '../vodClock'
 import type { FullGameStatus, MapMoment, VodStatus } from '../types'
 
 const youtubeId = (url: string) => /(?:youtu\.be\/|[?&]v=|shorts\/)([A-Za-z0-9_-]{11})/.exec(url)?.[1] ?? null
 
-const glyph = (m: MapMoment) => (m.kind === 'death' ? '✖' : m.kind === 'fight' ? '⚡' : '⚔')
+const glyph = (m: MapMoment) => (m.kind === 'death' ? '✖' : m.kind === 'fight' ? '⚡' : m.kind === 'ult' ? 'R' : '⚔')
 // Kills read as wins, deaths as losses; fights carry their own tone (a drawn
 // 3v3 is neither) so the strip stays honest about how each fight went.
 const markerColour = (m: MapMoment) =>
@@ -76,28 +77,7 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
   const [youtubeAttempt, setYoutubeAttempt] = useState(0)
   const source = footageSource(vod, fullGame)
 
-  // Piecewise-linear mapping over the sampled (videoSec, gameSec) pairs. A
-  // capture restart leaves a gap in the video while the game clock runs on,
-  // so the two sides of a seam sit at different offsets. Outside the sampled
-  // range the clocks advance in lockstep.
-  const clockPairs = useMemo(() => {
-    const pairs = (vod?.meta?.clockMap ?? []).filter(p => Number.isFinite(p.videoSec) && Number.isFinite(p.gameSec))
-    return [...pairs].sort((a, b) => a.videoSec - b.videoSec)
-  }, [vod])
-
-  const interpolate = (from: 'videoSec' | 'gameSec', to: 'videoSec' | 'gameSec', x: number): number | null => {
-    if (clockPairs.length === 0) return null
-    const first = clockPairs[0]
-    const last = clockPairs[clockPairs.length - 1]
-    if (x <= first[from]) return first[to] + (x - first[from])
-    if (x >= last[from]) return last[to] + (x - last[from])
-    const upper = clockPairs.findIndex(p => p[from] >= x)
-    const lo = clockPairs[upper - 1]
-    const hi = clockPairs[upper]
-    const span = hi[from] - lo[from]
-    if (span <= 0) return lo[to] + (x - lo[from])
-    return lo[to] + ((x - lo[from]) / span) * (hi[to] - lo[to])
-  }
+  const interpolate = useMemo(() => clockMapper(vod?.meta?.clockMap), [vod])
 
   const ytId = vod?.youtubeUrl ? youtubeId(vod.youtubeUrl) : null
 
@@ -207,6 +187,9 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
     .filter(m => m.videoSec <= stripDuration)
   const isCurrent = (m: MapMoment) => moment !== null && m.kind === moment.kind && m.timeSec === moment.timeSec
 
+  const ults = moments.filter(m => m.kind === 'ult')
+  const ultSummary = ults.length === 0 ? '' : ` · ${ults.length} ult${ults.length === 1 ? '' : 's'}, ${ults.filter(m => m.tone === 'win').length} with a takedown`
+
   const apmData = (vod?.apm?.apm ?? []).map((apm, i) => {
     const videoSec = i * (vod?.apm?.bucketSec ?? 10)
     return { videoSec, apm, gameClock: clock(interpolate('videoSec', 'gameSec', videoSec) ?? videoSec) }
@@ -293,7 +276,7 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
       {apmData.length > 1 && (
         <div className="footage-apm">
           <div className="sub-h" style={{ marginBottom: 0 }}>
-            Actions per minute <span className="mut">· average {vod?.apm?.averageApm} · click the line to jump</span>
+            Actions per minute <span className="mut">· average {vod?.apm?.averageApm}{ultSummary} · click the line to jump</span>
           </div>
           <ResponsiveContainer width="100%" height={80}>
             <AreaChart data={apmData} margin={{ top: 4, right: 12, bottom: 0, left: 8 }}
@@ -320,7 +303,7 @@ export default function FootageView({ matchId, vod, onVodChange, fullGame, onFul
 
       <div className="footage-foot">
         {source === 'recorded' && vod?.sizeMb != null && <div className="mut sm-text">{Math.round(vod.sizeMb)} MB {vod.local ? 'on this PC' : 'on the tracker'}</div>}
-        {source === 'youtube' && clockPairs.length === 0 && <div className="mut sm-text">No recording clock map — jumps assume the video starts at the game's 0:00.</div>}
+        {source === 'youtube' && interpolate('videoSec', 'gameSec', 0) === null && <div className="mut sm-text">No recording clock map — jumps assume the video starts at the game's 0:00.</div>}
         {source === 'render' && fullGame && (
           <div className="mut sm-text">
             Replay render · {fullGame.sizeMb} MB{fullGame.renderedUtc && ` · rendered ${new Date(fullGame.renderedUtc).toLocaleDateString()}`}

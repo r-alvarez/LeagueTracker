@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using LeagueTracker.Telemetry;
 
 namespace LeagueTracker.RenderAgent.Review;
 
@@ -187,28 +188,25 @@ public sealed class RecordingLibrary
         var cache = SafeMetadata(recording.Name + ".apm.json");
         try
         {
-            if (File.Exists(cache)) return JsonNode.Parse(File.ReadAllText(cache));
+            if (File.Exists(cache) && JsonNode.Parse(File.ReadAllText(cache)) is { } cached
+                && cached["v"]?.GetValueKind() == JsonValueKind.Number && cached["v"]!.GetValue<int>() == InputTelemetry.Version) return cached;
             var events = SafeMetadata(recording.Name + ".events.csv.gz");
             if (!File.Exists(events)) return null;
             using var file = File.OpenRead(events);
             using var gzip = new GZipStream(file, CompressionMode.Decompress);
             using var reader = new StreamReader(gzip);
-            var buckets = new int[6 * 60 * 6]; // At most six hours; never allocate based on unchecked telemetry.
-            var last = 0;
+            var telemetry = new InputTelemetry();
             long characters = 0;
             while (reader.ReadLine() is { } line)
             {
                 characters += line.Length;
                 if (characters > 512L * 1024 * 1024) return null;
-                var parts = line.Split(',', 3);
-                if (parts.Length < 2 || parts[1] is not ("key_down" or "mouse_down" or "wheel")
-                    || !long.TryParse(parts[0], out var ms) || ms < 0 || ms / 10000 >= buckets.Length) continue;
-                var i = (int)(ms / 10000);
-                buckets[i]++;
-                last = Math.Max(last, i);
+                var parts = line.Split(',', 5);
+                // At most six hours; never allocate based on unchecked telemetry.
+                if (parts.Length < 2 || !long.TryParse(parts[0], out var ms) || ms < 0 || ms >= 6L * 3600 * 1000) continue;
+                telemetry.Add(ms, parts[1], parts.Length > 2 ? parts[2] : "", parts.Length > 3 ? parts[3] : "");
             }
-            var node = JsonSerializer.SerializeToNode(new { bucketSec = 10, apm = buckets.Take(last + 1).Select(n => n * 6),
-                averageApm = (int)Math.Round(buckets.Sum() * 6d / (last + 1)) }, Json);
+            var node = JsonSerializer.SerializeToNode(telemetry.Series(), Json);
             AtomicWrite(cache, node!.ToJsonString());
             return node;
         }

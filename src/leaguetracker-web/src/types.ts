@@ -469,7 +469,7 @@ export interface VodMoment {
  *  else is one instant. withoutMe marks the fights the player's own footage
  *  never saw - the map's reason to exist. */
 export interface MapMoment {
-  kind: 'fight' | 'kill' | 'death' | 'objective'
+  kind: 'fight' | 'kill' | 'death' | 'objective' | 'ult'
   timeSec: number
   endSec?: number
   label: string
@@ -551,10 +551,17 @@ export interface VodMeta {
   segments?: VodSegment[]
 }
 
+/** One use of the ult on the video's clock. confirmed = the recorder saw
+ *  the R slot go on cooldown; otherwise it is a chain of R presses. */
+export interface VodUlt { videoSec: number; presses: number; confirmed: boolean }
+
 export interface VodApm {
   bucketSec: number
   apm: number[]
   averageApm: number
+  // Absent from series computed before ult tracking.
+  ults?: VodUlt[]
+  ultSource?: 'hud' | 'keys' | null
 }
 
 export interface VodStatus {

@@ -13,6 +13,7 @@ import ClipReel from '../components/ClipReel'
 import { RelTime, tierClass } from '../components/Stats'
 
 import { footageSource } from '../components/FootageView'
+import { ultMoments } from '../ults'
 
 type Tab = 'scoreboard' | 'build' | 'timeline'
 
@@ -613,6 +614,8 @@ export default function MatchDetail() {
         label: `${objectiveLabel(o.kind, o.subKind)} · ${o.byMyTeam ? 'my team' : 'enemy'}`,
         tone: (o.byMyTeam ? 'win' : 'loss') as MapMoment['tone'],
       })),
+    // Ults come from the recording's input telemetry, so only filmed games have them.
+    ...ultMoments(vod, kills, deaths, detail.fights, track),
   ].sort((a, b) => a.timeSec - b.timeSec)
 
   return (
