@@ -6,10 +6,10 @@ namespace LeagueTracker.Api.Services;
 
 public sealed record ClipEvent(string Kind, int TimeSec);
 
-/// Kind "moment" = the player's own kills/deaths (camera on them); "fight" =
-/// a team fight they were not part of, filmed from CameraName's POV so the
-/// replay shows footage the player's own screen never had. Defaults keep
-/// pre-existing plan manifests deserializable.
+// Kind "moment" = a fight the player was in (camera on them); "fight" =
+// a team fight they were not part of, filmed from CameraName's POV so the
+// replay shows footage the player's own screen never had. Defaults keep
+// pre-existing plan manifests deserializable.
 public sealed record ClipWindow(int Index, int StartSec, int EndSec, string Label, List<ClipEvent> Events,
     string Kind = "moment", string? CameraName = null, string? CameraChampion = null);
 
@@ -69,38 +69,58 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
 
         // Every kill in the match, not just the player's: the chained window
         // end needs the kills around their events too.
-        var kills = await db.KillEvents.AsNoTracking()
+        var ledger = await db.KillEvents.AsNoTracking()
             .Where(k => k.MatchId == matchId)
             .OrderBy(k => k.TimeSec)
-            .Select(k => new Kill(k.TimeSec, k.KillerParticipantId, k.VictimParticipantId, k.X, k.Y))
+            .Select(k => new { k.TimeSec, k.KillerParticipantId, k.VictimParticipantId, k.X, k.Y, k.AssistIds, k.DamagePids })
             .ToListAsync(ct);
-        var mine = kills.Where(k => k.KillerId == myPid || k.VictimId == myPid).ToList();
+        var kills = ledger
+            .Select(k => new Kill(k.TimeSec, k.KillerParticipantId, k.VictimParticipantId, k.X, k.Y, Pids(k.AssistIds), Pids(k.DamagePids)))
+            .ToList();
 
-        var windows = new List<ClipWindow>();
-        if (mine.Count > 0)
-        {
-            var group = new List<Kill> { mine[0] };
-            var groupEnd = ChainedEndSec(mine[0], kills);
-            foreach (var k in mine.Skip(1))
-            {
-                if (k.TimeSec - PreRollSec <= groupEnd + PostRollSec)
-                {
-                    group.Add(k);
-                    groupEnd = Math.Max(groupEnd, ChainedEndSec(k, kills));
-                }
-                else
-                {
-                    windows.Add(ToWindow(windows.Count, group, myPid.Value, groupEnd, match.DurationSec));
-                    group = [k];
-                    groupEnd = ChainedEndSec(k, kills);
-                }
-            }
-            windows.Add(ToWindow(windows.Count, group, myPid.Value, groupEnd, match.DurationSec));
-        }
+        var windows = MomentWindows(kills, myPid.Value, match.DurationSec);
         windows.AddRange(await FightWindowsAsync(match, windows.Count, ct));
 
         return windows is { Count: > 0 } ? new ClipPlan(matchId, match.GameVersion, match.DurationSec, windows) : null;
     }
+
+    private static int[] Pids(string csv) =>
+        [.. csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(int.Parse)];
+
+    // Matches TimelineAnalyzer's "participated" so every "Your fights" row has a
+    // clip; kills and deaths alone left assists-only games with none.
+    public static List<ClipWindow> MomentWindows(List<Kill> kills, int myPid, double durationSec)
+    {
+        var mine = kills.Where(k => InvolvementOf(k, myPid) is not null).ToList();
+        if (mine is not { Count: > 0 }) return [];
+
+        List<ClipWindow> windows = [];
+        var group = new List<Kill> { mine[0] };
+        var groupEnd = ChainedEndSec(mine[0], kills);
+        foreach (var k in mine.Skip(1))
+        {
+            if (k.TimeSec - PreRollSec <= groupEnd + PostRollSec)
+            {
+                group.Add(k);
+                groupEnd = Math.Max(groupEnd, ChainedEndSec(k, kills));
+            }
+            else
+            {
+                windows.Add(ToWindow(windows.Count, group, myPid, groupEnd, durationSec));
+                group = [k];
+                groupEnd = ChainedEndSec(k, kills);
+            }
+        }
+        windows.Add(ToWindow(windows.Count, group, myPid, groupEnd, durationSec));
+        return windows;
+    }
+
+    private static string? InvolvementOf(Kill k, int myPid) =>
+        k.VictimId == myPid ? "death"
+        : k.KillerId == myPid ? "kill"
+        : k.AssistIds.Contains(myPid) ? "assist"
+        : k.DamagePids.Contains(myPid) ? "trade"
+        : null;
 
     /// The team's skirmishes/teamfights the player was NOT in, filmed from a
     /// fighter's POV - a killer or assister who survived it, per the analyzer's
@@ -204,7 +224,7 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         return windows;
     }
 
-    private sealed record Kill(int TimeSec, int KillerId, int VictimId, int X, int Y);
+    public sealed record Kill(int TimeSec, int KillerId, int VictimId, int X, int Y, int[] AssistIds, int[] DamagePids);
 
     /// Where the play actually ends: from the given kill, follow ANY kills
     /// that land within ChainSec/ChainUnits of the last chained one. A kill
@@ -224,15 +244,19 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
 
     private static ClipWindow ToWindow(int index, List<Kill> group, int myPid, int endEventSec, double durationSec)
     {
-        var events = group.Select(k => new ClipEvent(k.VictimId == myPid ? "death" : "kill", k.TimeSec)).ToList();
+        var events = group.Select(k => new ClipEvent(InvolvementOf(k, myPid)!, k.TimeSec)).ToList();
         var kills = events.Count(e => e.Kind is "kill");
         var deaths = events.Count(e => e.Kind is "death");
-        var label = (kills, deaths) switch
+        var assists = events.Count(e => e.Kind is "assist");
+        var label = (kills, deaths, assists) switch
         {
-            (> 0, > 0) => "fight",
-            (1, _) => "kill",
-            (> 1, _) => $"{kills}-kills",
-            _ => "death",
+            (> 0, > 0, _) => "fight",
+            (1, _, _) => "kill",
+            (> 1, _, _) => $"{kills}-kills",
+            (_, > 0, _) => "death",
+            (_, _, 1) => "assist",
+            (_, _, > 1) => $"{assists}-assists",
+            _ => "trade",
         };
         return new ClipWindow(
             index,
