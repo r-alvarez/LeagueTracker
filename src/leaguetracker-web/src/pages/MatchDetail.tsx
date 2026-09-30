@@ -718,7 +718,7 @@ export default function MatchDetail() {
       ) : visibleClips.length > 0 && (
         <ClipReel clips={visibleClips} canManage={canManage} theater={theater} onToggleTheater={toggleTheater}
           title={hasFootage ? 'Team fights' : 'Clips'}
-          hint={hasFootage ? "the fights you weren't in, rendered from the replay (your footage never saw them)" : 'your kills & deaths, rendered from the official replay'}
+          hint={hasFootage ? "the fights you weren't in, rendered from the replay (your footage never saw them)" : 'your fights and the ones you missed, rendered from the official replay'}
           kept={clipsStatus?.kept ?? false}
           onToggleKeep={() => { api.keepClips(m.id).then(() => api.clipsStatus(m.id).then(setClipsStatus)).catch(e => window.alert(String(e.message ?? e))) }}
           onDelete={index => { void api.deleteClip(m.id, index).then(() => api.clips(m.id).then(setClips)) }} />
