@@ -1236,12 +1236,20 @@ public sealed class RenderAgent(AgentConfig config)
     /// while the simulation runs) sits unchanged for 5s+ anywhere in the clip.
     /// Cropping to the clock avoids false life from things that animate even
     /// when the sim is hung: torch flames, water, the FPS counter, the cursor.
-    /// Calibrated against real clips: a hung job's clips freeze wall-to-wall
-    /// (bar one keyframe pulse); healthy clips report nothing.
+    /// The crop is the digits alone. The old 8%x5% box around them was mostly
+    /// map, and one digit ticking over sits under the noise floor of a box
+    /// that size - so a camera locked on a champion standing still read as a
+    /// hang with the clock running (EUW1_7999595794 w2, 2026-09-30: flagged
+    /// 5.0s "frozen" while the screen showed 16:14 -> 16:18, and skipped as
+    /// "hung again" three times; with the manual camera the same window
+    /// never froze). The skips cluster mid-game, where a laning champion
+    /// stands still for seconds at a time. On the digits a tick
+    /// is several times the threshold (no span over 1.5s in that clip), and a
+    /// paused replay still reads as frozen for the whole pause.
     private async Task<bool> SimFrozeDuringAsync(string clipPath, CancellationToken ct)
     {
         var stderr = await RunFfmpegAsync(
-            $"-i \"{clipPath}\" -vf \"crop=in_w*0.08:in_h*0.05:in_w*0.45:in_h*0.05,freezedetect=n=0.003:d=5\" -an -f null -", ct);
+            $"-i \"{clipPath}\" -vf \"crop=in_w*0.04:in_h*0.022:in_w*0.48:in_h*0.069,freezedetect=n=0.003:d=5\" -an -f null -", ct);
         return stderr.Contains("freeze_start", StringComparison.Ordinal);
     }
 

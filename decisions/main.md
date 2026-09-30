@@ -2068,3 +2068,22 @@ footage, since an ult with no takedown can still be an escape. The analyzer
 source is shared by the API and the agent (linked file) so the site and the
 review window cannot drift apart again; cached `apm.json` carries `v: 2` and
 older caches are recomputed.
+
+## 2026-09-30 — The "sim hang" check was watching too much of the screen
+
+The render box skipped 44 windows as "the simulation hung again on a fresh
+game process", and they cluster mid-game (every one starts between 634s and
+1250s). Tested on one of them (EUW1_7999595794 w2, skipped three times):
+the replay did not hang. Played on a bare replay it never froze, whether the
+agent jumped straight to it or played through from 846s, fresh process or
+not. It "froze" only once the camera was locked on the champion. A lossless
+recording of the flagged span shows the clock running 16:14 → 16:18 through
+a 5.0s "freeze". The detector's 8%×5% box around the clock was mostly map.
+One digit ticking over is under freezedetect's noise floor for a box that
+size, so a still camera on a champion standing in lane read as a hang.
+
+The crop is now the digits alone (4%×2.2% at 48%/6.9%). On the same
+recording it finds no span over 1.5s. A replay paused for 10s mid-clip is
+still caught for the full pause, so real hangs, if any are left, are still
+detected. Windows already marked unrenderable for this reason need
+requeuing to come back.
