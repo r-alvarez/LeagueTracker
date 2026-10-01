@@ -54,6 +54,20 @@ INSECURE = ssl.create_default_context()
 INSECURE.check_hostname = False
 INSECURE.verify_mode = ssl.CERT_NONE
 
+# IPv4 only. The LAN's split-horizon DNS overrides the trackers' A record
+# (-> the NAS) but not their AAAA, which still names Cloudflare - so whenever
+# the NAS had working IPv6 the poll left the LAN and Cloudflare refused the
+# urllib client (1010), and the waker slept through queued work for hours
+# (2026-10-01). Everything this talks to is on the LAN over IPv4 anyway.
+_getaddrinfo = socket.getaddrinfo
+
+
+def _getaddrinfo_v4(host, port, family=0, *args, **kwargs):
+    return _getaddrinfo(host, port, socket.AF_INET, *args, **kwargs)
+
+
+socket.getaddrinfo = _getaddrinfo_v4
+
 # "rendering" means the PC holds a lease, so it is awake and working;
 # "done"/"failed"/"no-events" need nothing. Only these two mean idle work.
 
@@ -174,7 +188,9 @@ def main() -> None:
                     unreachable.add(url)
                     log(f"cannot read queue at {url}: {ex} (not repeated until it recovers)")
                 continue
-            unreachable.discard(url)
+            if url in unreachable:
+                unreachable.discard(url)
+                log(f"queue at {url} readable again")
 
         if jobs:
             send_broadcast()
