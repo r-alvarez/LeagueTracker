@@ -41,7 +41,7 @@
     <Compile Include="..\LeagueTracker.Api\Services\InputTelemetry.cs" Link="Review\InputTelemetry.cs" />
     <InternalsVisibleTo Include="LeagueTracker.ReviewSmoke" />
     <PackageReference Include="ScreenRecorderLib" Version="6.6.0" />
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <EmbeddedResource Include="$(ReviewUiArchive)" LogicalName="review-ui.zip" Condition="Exists('$(ReviewUiArchive)')" />
     <EmbeddedResource Include="$(WebViewBootstrapper)" LogicalName="webview2-bootstrapper.exe" Condition="Exists('$(WebViewBootstrapper)')" />
