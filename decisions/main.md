@@ -2087,3 +2087,17 @@ recording it finds no span over 1.5s. A replay paused for 10s mid-clip is
 still caught for the full pause, so real hangs, if any are left, are still
 detected. Windows already marked unrenderable for this reason need
 requeuing to come back.
+
+## 2026-10-06 — A full channel waits for tomorrow instead of failing the game
+
+YouTube's per-channel upload cap answers `400 uploadLimitExceeded`. The
+quota check only looked at 403s, so the cap fell through to "deterministic
+reject" and `.ytfailed.txt` stopped every game that hit it: 14 Sep, 18 Sep,
+26 Sep, 03 Oct and all five games of 05 Oct sat unpublished until the
+markers were deleted by hand. The reason in the body now decides (400 or
+403), so the cap postpones with the same hourly backoff as project quota.
+
+The cap is per channel, not per Google Cloud project: Ben's agent had its
+own project but a token minted on Ruben's account, so both players' uploads
+counted against one channel. Separate projects split API quota; only a
+token consented to a different channel splits the upload cap.

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using LeagueTracker.RenderAgent;
 
 namespace LeagueTracker.RenderAgent.Tests;
@@ -60,6 +61,14 @@ public class UploadThrottleTests
     [InlineData("https://example.com/video", null)]
     public void Video_ids_are_read_from_both_link_shapes(string url, string? expected)
         => Assert.Equal(expected, YouTubeUploader.VideoIdOf(url));
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest, "\"reason\": \"uploadLimitExceeded\"", true)]
+    [InlineData(HttpStatusCode.Forbidden, "\"reason\": \"quotaExceeded\"", true)]
+    [InlineData(HttpStatusCode.BadRequest, "\"reason\": \"invalidTitle\"", false)]
+    [InlineData(HttpStatusCode.NotFound, "\"reason\": \"uploadLimitExceeded\"", false)]
+    public void Channel_and_project_limits_wait_instead_of_failing(HttpStatusCode status, string body, bool waits)
+        => Assert.Equal(waits, YouTubeUploader.IsQuotaLimit(status, body));
 
     // Stands in for a socket whose send buffer fills at the line rate - the
     // only way the throttle can measure anything.

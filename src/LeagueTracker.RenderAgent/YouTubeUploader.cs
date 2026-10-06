@@ -250,9 +250,7 @@ public sealed class YouTubeUploader(AgentConfig config, UploadThrottle throttle)
         // The 1600-unit videos.insert cost against a 10k/day default quota
         // caps automation at ~6 uploads a day; the excess simply queues. The
         // day resets at midnight Pacific - hourly re-checks are cheap enough.
-        if (status == HttpStatusCode.Forbidden
-            && (body.Contains("quotaExceeded") || body.Contains("dailyLimitExceeded")
-                || body.Contains("uploadLimitExceeded") || body.Contains("rateLimitExceeded")))
+        if (IsQuotaLimit(status, body))
         {
             _backoffUntilUtc = DateTime.UtcNow.AddHours(1);
             return new(UploadOutcome.Postponed, Error: "YouTube quota/upload limit reached (resets midnight Pacific)");
@@ -265,6 +263,14 @@ public sealed class YouTubeUploader(AgentConfig config, UploadThrottle throttle)
         if ((int)status >= 500) return new(UploadOutcome.Postponed, Error: $"YouTube answered {(int)status}");
         return new(UploadOutcome.Failed, Error: $"{(int)status} {Snippet(body)}");
     }
+
+    // The channel's upload cap arrives as 400 uploadLimitExceeded, not 403 -
+    // keyed on status it fell through to Failed and .ytfailed.txt stranded a
+    // whole evening of games (05 Oct 2026). The reason decides, not the code.
+    internal static bool IsQuotaLimit(HttpStatusCode status, string body)
+        => status is HttpStatusCode.Forbidden or HttpStatusCode.BadRequest
+           && (body.Contains("quotaExceeded") || body.Contains("dailyLimitExceeded")
+               || body.Contains("uploadLimitExceeded") || body.Contains("rateLimitExceeded"));
 
     /// True once YouTube has finished processing the video - the point after
     /// which the local file is redundant. Null = could not tell (no token,
