@@ -108,6 +108,40 @@ public sealed class ReviewTests : IDisposable
     }
 
     [Fact]
+    public void A_long_rotated_game_leaves_nothing_but_whose_it_was()
+    {
+        string M(string file) => Path.Combine(_root, "metadata", file);
+        var old = DateTime.UtcNow.AddDays(-30);
+        void Leave(string file, DateTime written) { File.WriteAllText(M(file), "x"); File.SetLastWriteTimeUtc(M(file), written); }
+        foreach (var name in new[] { "v1.2 - Game 1", "v1.2 - Game 10", "fresh", "kept", "resuming" })
+        {
+            Add(name, 30, true);
+            File.SetLastWriteTimeUtc(M(name + ".json"), old);
+            foreach (var ext in new[] { ".jpg", ".events.csv.gz", ".seg02.events.csv.gz", ".apm.json", ".uploaded", ".linked", ".youtube.txt", ".review-published", ".pruned" })
+                Leave(name + ext, old);
+        }
+        File.Delete(Path.Combine(_root, "v1.2 - Game 1.mp4"));
+        File.Delete(Path.Combine(_root, "v1.2 - Game 10.mp4"));
+        File.Delete(Path.Combine(_root, "fresh.mp4"));
+        Leave("fresh.pruned", DateTime.UtcNow.AddDays(-1));
+        File.Delete(Path.Combine(_root, "resuming.mp4"));
+        Leave("resuming.inflight.json", old);
+        Leave("game-numbers.json", old);
+        Leave("stranger.txt", old);
+
+        Assert.Equal(["v1.2 - Game 1", "v1.2 - Game 10"], _library.SettledNames().Where(n => n != "game-numbers").Order());
+        Assert.Equal(20, _library.Tidy());
+        Assert.Equal(0, _library.Tidy());
+        Assert.Empty(Directory.GetFiles(Path.Combine(_root, "metadata"), "v1.2 - Game 1*"));
+        foreach (var untouched in new[] { "fresh", "kept", "resuming" })
+            Assert.True(File.Exists(M(untouched + ".events.csv.gz")) && File.Exists(M(untouched + ".uploaded")));
+        Assert.True(File.Exists(M("game-numbers.json")) && File.Exists(M("stranger.txt")));
+        Assert.DoesNotContain(_library.List(), r => r.Name.StartsWith("v1.2"));
+        foreach (var untouched in new[] { "fresh", "kept", "resuming" }) File.Delete(M(untouched + ".json"));
+        Assert.Equal(["Player#EUW"], _library.Players());
+    }
+
+    [Fact]
     public void Playback_lease_prevents_delete_and_pruning()
     {
         var r = Add("playing", 4, true);
