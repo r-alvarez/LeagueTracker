@@ -177,10 +177,10 @@ public sealed class RecordingLibrary
         return removed;
     });
 
-    /// A rotated game still lists in the review app from its sidecar and
-    /// thumbnail. Everything else beside them - input telemetry the tracker
-    /// already holds, delivery marks - serves work that is finished or never
-    /// coming once the video has been gone this long with nothing written.
+    /// What a game leaves in metadata/ - sidecar, thumbnail, input telemetry
+    /// the tracker already holds, delivery marks - serves work that is
+    /// finished or never coming once the video has been gone this long with
+    /// nothing written. The game itself lives on at the tracker and YouTube.
     public static readonly TimeSpan SettledAfter = TimeSpan.FromDays(7);
 
     private Dictionary<string, List<FileInfo>> Settled(DateTime nowUtc)
@@ -224,18 +224,50 @@ public sealed class RecordingLibrary
     public int Tidy(DateTime? nowUtc = null) => Locked(() =>
     {
         var removed = 0;
+        var players = Remembered();
+        var known = players.Count;
+        var settled = new List<List<FileInfo>>();
         foreach (var (name, group) in Settled(nowUtc ?? DateTime.UtcNow))
         {
-            foreach (var file in group)
+            // Only a recording's own sidecar says the files are a game's: the
+            // folder's ledgers and settings are .json here too.
+            try
             {
-                if (file.Name.Equals(name + ".json", StringComparison.OrdinalIgnoreCase)
-                    || file.Name.Equals(name + ".jpg", StringComparison.OrdinalIgnoreCase)) continue;
-                try { file.Delete(); removed++; }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* next pass */ }
+                if (ReadRecording(name).Player is { Length: > 0 } player) players.Add(player);
+                settled.Add(group);
             }
+            catch (Exception ex) when (ex is IOException or JsonException or InvalidOperationException or FormatException or ArgumentException or UnauthorizedAccessException) { }
+        }
+        if (players.Count > known) AtomicWrite(SafeMetadata(PlayersFile), JsonSerializer.Serialize(players.Order(), Json));
+        foreach (var file in settled.SelectMany(group => group))
+        {
+            try { file.Delete(); removed++; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* next pass */ }
         }
         return removed;
     });
+
+    // The review app opens an account on the evidence that this PC recorded
+    // it; that must outlive the sidecars of games long tidied away.
+    private const string PlayersFile = "players.json";
+
+    private HashSet<string> Remembered()
+    {
+        try
+        {
+            if (JsonSerializer.Deserialize<string[]>(File.ReadAllText(SafeMetadata(PlayersFile)), Json) is { } saved)
+                return new(saved.Where(p => !string.IsNullOrWhiteSpace(p)), StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or ArgumentException) { }
+        return new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public IReadOnlySet<string> Players()
+    {
+        var players = Remembered();
+        foreach (var player in List(int.MaxValue).Select(r => r.Player).OfType<string>()) players.Add(player);
+        return players;
+    }
 
     public static double FreeGb(string root)
     {

@@ -2110,12 +2110,14 @@ for 359 games on Ruben's PC, nearly all of it telemetry the tracker already
 holds, and the same pile on Ben's.
 
 A game is settled once its video is gone, nothing is in flight and nothing
-under its name has been written for seven days. The library then keeps the
-sidecar and the thumbnail - what the review app lists a rotated game from -
-and removes the rest. The delivery sweep passes settled games by, because
-without their marks it would send the sidecar again and ask the tracker for
-a link on every pass. The week covers what can still arrive after rotation:
-a late sidecar upload, a link.
+under its name has been written for seven days. Everything under its name
+then goes, sidecar and thumbnail included: the game is on YouTube and the
+tracker, and Ruben does not want a local trace of it. It drops out of
+"Games on this PC". The delivery sweep passes settled games by rather than
+start work on files about to disappear. The week covers what can still
+arrive after rotation: a late sidecar upload, a link.
 
-Deleting the sidecar too would empty the folder but drop the game from
-"Games on this PC"; that stays a separate choice.
+The review app opens an account on the evidence that this PC recorded it,
+read from the sidecars. That evidence now outlives them in
+`metadata/players.json`, or an alt not played for a few weeks would vanish
+from the app.

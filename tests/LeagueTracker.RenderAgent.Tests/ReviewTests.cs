@@ -108,7 +108,7 @@ public sealed class ReviewTests : IDisposable
     }
 
     [Fact]
-    public void A_long_rotated_game_keeps_only_what_the_library_lists_it_from()
+    public void A_long_rotated_game_leaves_nothing_but_whose_it_was()
     {
         string M(string file) => Path.Combine(_root, "metadata", file);
         var old = DateTime.UtcNow.AddDays(-30);
@@ -130,14 +130,15 @@ public sealed class ReviewTests : IDisposable
         Leave("stranger.txt", old);
 
         Assert.Equal(["v1.2 - Game 1", "v1.2 - Game 10"], _library.SettledNames().Where(n => n != "game-numbers").Order());
-        Assert.Equal(16, _library.Tidy());
+        Assert.Equal(20, _library.Tidy());
         Assert.Equal(0, _library.Tidy());
-        Assert.Equal(["v1.2 - Game 1.jpg", "v1.2 - Game 1.json"], Directory.GetFiles(Path.Combine(_root, "metadata"), "v1.2 - Game 1.*").Select(Path.GetFileName).Order());
-        Assert.Equal(["v1.2 - Game 10.jpg", "v1.2 - Game 10.json"], Directory.GetFiles(Path.Combine(_root, "metadata"), "v1.2 - Game 10.*").Select(Path.GetFileName).Order());
+        Assert.Empty(Directory.GetFiles(Path.Combine(_root, "metadata"), "v1.2 - Game 1*"));
         foreach (var untouched in new[] { "fresh", "kept", "resuming" })
             Assert.True(File.Exists(M(untouched + ".events.csv.gz")) && File.Exists(M(untouched + ".uploaded")));
         Assert.True(File.Exists(M("game-numbers.json")) && File.Exists(M("stranger.txt")));
-        Assert.False(_library.List().Single(r => r.Name == "v1.2 - Game 1").Available);
+        Assert.DoesNotContain(_library.List(), r => r.Name.StartsWith("v1.2"));
+        foreach (var untouched in new[] { "fresh", "kept", "resuming" }) File.Delete(M(untouched + ".json"));
+        Assert.Equal(["Player#EUW"], _library.Players());
     }
 
     [Fact]

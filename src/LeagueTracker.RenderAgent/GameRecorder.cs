@@ -1109,7 +1109,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 || Path.GetFileName(sidecar) == "library-settings.json"
                 || sidecar.EndsWith(".ytsession.json", StringComparison.OrdinalIgnoreCase)) continue;
             var baseName = Path.GetFileNameWithoutExtension(sidecar);
-            if (settled.Contains(baseName)) continue; // its delivery marks are tidied away - nothing is owed, nothing to redo
+            if (settled.Contains(baseName)) continue; // about to be tidied away - nothing is owed, nothing to redo
             var delivered = File.Exists(Path.Combine(MetaDir, baseName + ".uploaded"));
             if (delivered && !_youtube.Enabled)
             {
