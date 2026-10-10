@@ -108,6 +108,39 @@ public sealed class ReviewTests : IDisposable
     }
 
     [Fact]
+    public void A_long_rotated_game_keeps_only_what_the_library_lists_it_from()
+    {
+        string M(string file) => Path.Combine(_root, "metadata", file);
+        var old = DateTime.UtcNow.AddDays(-30);
+        void Leave(string file, DateTime written) { File.WriteAllText(M(file), "x"); File.SetLastWriteTimeUtc(M(file), written); }
+        foreach (var name in new[] { "v1.2 - Game 1", "v1.2 - Game 10", "fresh", "kept", "resuming" })
+        {
+            Add(name, 30, true);
+            File.SetLastWriteTimeUtc(M(name + ".json"), old);
+            foreach (var ext in new[] { ".jpg", ".events.csv.gz", ".seg02.events.csv.gz", ".apm.json", ".uploaded", ".linked", ".youtube.txt", ".review-published", ".pruned" })
+                Leave(name + ext, old);
+        }
+        File.Delete(Path.Combine(_root, "v1.2 - Game 1.mp4"));
+        File.Delete(Path.Combine(_root, "v1.2 - Game 10.mp4"));
+        File.Delete(Path.Combine(_root, "fresh.mp4"));
+        Leave("fresh.pruned", DateTime.UtcNow.AddDays(-1));
+        File.Delete(Path.Combine(_root, "resuming.mp4"));
+        Leave("resuming.inflight.json", old);
+        Leave("game-numbers.json", old);
+        Leave("stranger.txt", old);
+
+        Assert.Equal(["v1.2 - Game 1", "v1.2 - Game 10"], _library.SettledNames().Where(n => n != "game-numbers").Order());
+        Assert.Equal(16, _library.Tidy());
+        Assert.Equal(0, _library.Tidy());
+        Assert.Equal(["v1.2 - Game 1.jpg", "v1.2 - Game 1.json"], Directory.GetFiles(Path.Combine(_root, "metadata"), "v1.2 - Game 1.*").Select(Path.GetFileName).Order());
+        Assert.Equal(["v1.2 - Game 10.jpg", "v1.2 - Game 10.json"], Directory.GetFiles(Path.Combine(_root, "metadata"), "v1.2 - Game 10.*").Select(Path.GetFileName).Order());
+        foreach (var untouched in new[] { "fresh", "kept", "resuming" })
+            Assert.True(File.Exists(M(untouched + ".events.csv.gz")) && File.Exists(M(untouched + ".uploaded")));
+        Assert.True(File.Exists(M("game-numbers.json")) && File.Exists(M("stranger.txt")));
+        Assert.False(_library.List().Single(r => r.Name == "v1.2 - Game 1").Available);
+    }
+
+    [Fact]
     public void Playback_lease_prevents_delete_and_pruning()
     {
         var r = Add("playing", 4, true);

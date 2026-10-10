@@ -1085,6 +1085,8 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
             var library = new Review.RecordingLibrary(RecordingsDir);
             var removed = library.Prune(library.Settings(config), config.UploadVods || _youtube.Enabled);
             if (removed > 0) Log.Info($"Recording library: removed {removed} old unpinned recording(s)");
+            var tidied = library.Tidy();
+            if (tidied > 0) Log.Info($"Recording library: cleared {tidied} leftover file(s) of games whose video is long gone");
         }
         catch (Exception ex) { Log.Warn($"Recording library cleanup: {ex.Message}"); }
     }
@@ -1099,6 +1101,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
         var youtubeGo = _youtube.Enabled;
         string? resolvedPlatform = null;
         var platformProbed = false;
+        var settled = new Review.RecordingLibrary(RecordingsDir).SettledNames();
         foreach (var sidecar in Directory.EnumerateFiles(MetaDir, "*.json").OrderBy(f => f))
         {
             if (sidecar.EndsWith(".inflight.json", StringComparison.OrdinalIgnoreCase)
@@ -1106,6 +1109,7 @@ public sealed class GameRecorder(AgentConfig config, string ffmpeg, string leagu
                 || Path.GetFileName(sidecar) == "library-settings.json"
                 || sidecar.EndsWith(".ytsession.json", StringComparison.OrdinalIgnoreCase)) continue;
             var baseName = Path.GetFileNameWithoutExtension(sidecar);
+            if (settled.Contains(baseName)) continue; // its delivery marks are tidied away - nothing is owed, nothing to redo
             var delivered = File.Exists(Path.Combine(MetaDir, baseName + ".uploaded"));
             if (delivered && !_youtube.Enabled)
             {

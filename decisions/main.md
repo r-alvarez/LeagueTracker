@@ -2101,3 +2101,21 @@ The cap is per channel, not per Google Cloud project: Ben's agent had its
 own project but a token minted on Ruben's account, so both players' uploads
 counted against one channel. Separate projects split API quota; only a
 token consented to a different channel splits the upload cap.
+
+## 2026-10-10 — A rotated game's leftovers go a week after its video
+
+Rotation only ever removed the mp4. Every game kept its input telemetry and
+five or six delivery marks in `metadata/` for good: 2,557 files and 2.6 GB
+for 359 games on Ruben's PC, nearly all of it telemetry the tracker already
+holds, and the same pile on Ben's.
+
+A game is settled once its video is gone, nothing is in flight and nothing
+under its name has been written for seven days. The library then keeps the
+sidecar and the thumbnail - what the review app lists a rotated game from -
+and removes the rest. The delivery sweep passes settled games by, because
+without their marks it would send the sidecar again and ask the tracker for
+a link on every pass. The week covers what can still arrive after rotation:
+a late sidecar upload, a link.
+
+Deleting the sidecar too would empty the folder but drop the game from
+"Games on this PC"; that stays a separate choice.
