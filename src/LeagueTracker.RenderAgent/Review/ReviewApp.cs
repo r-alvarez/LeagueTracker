@@ -340,9 +340,7 @@ internal sealed class ReviewForm : Form
                 // Renderer scope can include other people's accounts. Only a
                 // full Riot ID written while this PC recorded a live game is
                 // evidence that the account belongs in this review library.
-                var localRiotIds = _library.List()
-                    .Select(r => r.Player)
-                    .OfType<string>()
+                var localRiotIds = _library.Players()
                     .Where(p => !string.IsNullOrWhiteSpace(p) && p.Contains('#') && !p.Equals("Unknown", StringComparison.OrdinalIgnoreCase))
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
                 return await _api.DiscoverAsync(Flag("refresh"), ct, localRiotIds);

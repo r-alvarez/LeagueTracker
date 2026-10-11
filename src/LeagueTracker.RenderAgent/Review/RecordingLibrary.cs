@@ -177,6 +177,98 @@ public sealed class RecordingLibrary
         return removed;
     });
 
+    /// What a game leaves in metadata/ - sidecar, thumbnail, input telemetry
+    /// the tracker already holds, delivery marks - serves work that is
+    /// finished or never coming once the video has been gone this long with
+    /// nothing written. The game itself lives on at the tracker and YouTube.
+    public static readonly TimeSpan SettledAfter = TimeSpan.FromDays(7);
+
+    private Dictionary<string, List<FileInfo>> Settled(DateTime nowUtc)
+    {
+        var games = new Dictionary<string, List<FileInfo>>(StringComparer.OrdinalIgnoreCase);
+        if (!Directory.Exists(Metadata) || IsReparse(Metadata)) return games;
+        var files = new DirectoryInfo(Metadata).GetFiles();
+        foreach (var file in files)
+        {
+            var name = Path.GetFileNameWithoutExtension(file.Name);
+            if (file.Extension.Equals(".json", StringComparison.OrdinalIgnoreCase)
+                && !name.EndsWith(".inflight") && !name.EndsWith(".review") && !name.EndsWith(".apm") && !name.EndsWith(".ytsession"))
+                games[name] = [];
+        }
+        // "Game 1.seg02.events.csv.gz" belongs to "Game 1": the longest
+        // sidecar name the file name extends, whatever dots the name holds.
+        foreach (var file in files)
+        {
+            for (var name = file.Name; name.LastIndexOf('.') is > 0 and var dot;)
+            {
+                name = name[..dot];
+                if (!games.TryGetValue(name, out var group)) continue;
+                group.Add(file);
+                break;
+            }
+        }
+        foreach (var (name, group) in games.ToArray())
+        {
+            if (File.Exists(Path.Combine(Root, name + ".mp4"))
+                || group.Any(f => f.Name.Equals(name + ".inflight.json", StringComparison.OrdinalIgnoreCase))
+                || group.Max(f => f.LastWriteTimeUtc) > nowUtc - SettledAfter)
+                games.Remove(name);
+        }
+        return games;
+    }
+
+    /// Games with nothing left owed: the delivery sweep passes them by.
+    public IReadOnlySet<string> SettledNames(DateTime? nowUtc = null) =>
+        Settled(nowUtc ?? DateTime.UtcNow).Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    public int Tidy(DateTime? nowUtc = null) => Locked(() =>
+    {
+        var removed = 0;
+        var players = Remembered();
+        var known = players.Count;
+        var settled = new List<List<FileInfo>>();
+        foreach (var (name, group) in Settled(nowUtc ?? DateTime.UtcNow))
+        {
+            // Only a recording's own sidecar says the files are a game's: the
+            // folder's ledgers and settings are .json here too.
+            try
+            {
+                if (ReadRecording(name).Player is { Length: > 0 } player) players.Add(player);
+                settled.Add(group);
+            }
+            catch (Exception ex) when (ex is IOException or JsonException or InvalidOperationException or FormatException or ArgumentException or UnauthorizedAccessException) { }
+        }
+        if (players.Count > known) AtomicWrite(SafeMetadata(PlayersFile), JsonSerializer.Serialize(players.Order(), Json));
+        foreach (var file in settled.SelectMany(group => group))
+        {
+            try { file.Delete(); removed++; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* next pass */ }
+        }
+        return removed;
+    });
+
+    // The review app opens an account on the evidence that this PC recorded
+    // it; that must outlive the sidecars of games long tidied away.
+    private const string PlayersFile = "players.json";
+
+    private HashSet<string> Remembered()
+    {
+        try
+        {
+            if (JsonSerializer.Deserialize<string[]>(File.ReadAllText(SafeMetadata(PlayersFile)), Json) is { } saved)
+                return new(saved.Where(p => !string.IsNullOrWhiteSpace(p)), StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or ArgumentException) { }
+        return new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public IReadOnlySet<string> Players()
+    {
+        var players = Remembered();
+        foreach (var player in List(int.MaxValue).Select(r => r.Player).OfType<string>()) players.Add(player);
+        return players;
+    }
+
     public static double FreeGb(string root)
     {
         try { return new DriveInfo(Path.GetPathRoot(Path.GetFullPath(root))!).AvailableFreeSpace / 1024d / 1024 / 1024; }
