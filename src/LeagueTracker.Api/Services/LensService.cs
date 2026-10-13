@@ -36,6 +36,7 @@ public sealed class LensService(LeagueDbContext db)
         // Fighting - mechanics
         new("ssHit", "Skillshots hit", "Landed skillshots per game", "fighting", "mechanics", true, 0),
         new("ssDodged", "Skillshots dodged", "Dodged skillshots per game", "fighting", "mechanics", true, 0),
+        new("charmHit", "Charm hit rate", "Ahri games: charms that caught a champion, per E cast", "fighting", "mechanics", true, 0, "%"),
         // Laning
         new("g10", "Gold diff @10", "Gold lead vs your lane opponent at 10:00", "laning", null, true, 0, "g"),
         new("xp10", "XP diff @10", "XP lead vs your lane opponent at 10:00", "laning", null, true, 0),
@@ -105,9 +106,20 @@ public sealed class LensService(LeagueDbContext db)
                 .ToListAsync(ct))
             .ToDictionary(x => x.MatchId);
 
-        var rows = matches.Select(m => MatchMetricRows.ComputeRow(m,
-            deathAgg.TryGetValue(m.Id, out var da) ? da.Collapses : 0,
-            deathAgg.TryGetValue(m.Id, out var db2) ? db2.AfterObjective : 0)).ToList();
+        var eCasts = (await db.Participants.AsNoTracking()
+                .Where(p => p.IsMe && p.Champion == "Ahri")
+                .Select(p => new { p.MatchId, p.Spell3Casts })
+                .ToListAsync(ct))
+            .ToDictionary(p => p.MatchId, p => p.Spell3Casts);
+
+        var rows = matches.Select(m =>
+        {
+            var row = MatchMetricRows.ComputeRow(m,
+                deathAgg.TryGetValue(m.Id, out var da) ? da.Collapses : 0,
+                deathAgg.TryGetValue(m.Id, out var db2) ? db2.AfterObjective : 0);
+            MatchMetricRows.AddCharmRate(row, m, eCasts.TryGetValue(m.Id, out var e) ? e : null);
+            return row;
+        }).ToList();
 
         if (days is { } d)
         {

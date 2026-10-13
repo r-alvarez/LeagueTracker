@@ -1,3 +1,4 @@
+using LeagueTracker.Api.Data;
 using LeagueTracker.Api.Services;
 
 namespace LeagueTracker.Api.Tests;
@@ -53,5 +54,23 @@ public class MatchMetricRowsTests
         // equal games and a recent window equal to them -> half below -> 50.
         var baseline = Rows("cs", 7, 7, 7, 7, 7);
         Assert.Equal(50, MatchMetricRows.Percentile(baseline, Rows("cs", 7, 7, 7), "cs", true));
+    }
+
+    [Fact]
+    public void Charm_is_immobilisations_over_E_casts_on_Ahri_only()
+    {
+        var ahri = new Match { Champion = "Ahri", ChallengesJson = """{"enemyChampionImmobilizations":12,"skillshotsHit":50}""" };
+        Assert.Equal((30, 12), MatchMetricRows.Charm(ahri, 30));
+
+        var row = new Dictionary<string, double>();
+        MatchMetricRows.AddCharmRate(row, ahri, 30);
+        Assert.Equal(40, row["charmHit"]);
+
+        // No casts, no counter, or another champion: no metric rather than a zero.
+        Assert.Null(MatchMetricRows.Charm(ahri, 0));
+        Assert.Null(MatchMetricRows.Charm(ahri, null));
+        Assert.Null(MatchMetricRows.Charm(new Match { Champion = "Ahri", ChallengesJson = "{}" }, 30));
+        Assert.Null(MatchMetricRows.Charm(new Match { Champion = "Ahri" }, 30));
+        Assert.Null(MatchMetricRows.Charm(new Match { Champion = "Lux", ChallengesJson = ahri.ChallengesJson }, 30));
     }
 }

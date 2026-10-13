@@ -94,6 +94,30 @@ public static class MatchMetricRows
         catch { /* malformed block - skip */ }
     }
 
+    /// Riot counts how many times a player immobilised an enemy champion but not
+    /// which ability did it. Ahri's kit has one immobilising spell and it stops
+    /// on the first thing it hits, so on her games that counter over her E casts
+    /// IS the charm hit rate - slightly understated, since charms thrown at
+    /// minions or camps sit in the denominator. Null off Ahri or without both numbers.
+    public static (int Casts, int Landed)? Charm(Match m, int? eCasts)
+    {
+        if (m.Champion != "Ahri" || eCasts is not > 0 || m.ChallengesJson is not { Length: > 0 }) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(m.ChallengesJson);
+            return doc.RootElement.TryGetProperty("enemyChampionImmobilizations", out var v)
+                   && v.ValueKind is JsonValueKind.Number && v.TryGetDouble(out var landed)
+                ? (eCasts.Value, (int)landed)
+                : null;
+        }
+        catch { return null; }
+    }
+
+    public static void AddCharmRate(Dictionary<string, double> row, Match m, int? eCasts)
+    {
+        if (Charm(m, eCasts) is { } c) row["charmHit"] = Math.Min(100, 100.0 * c.Landed / c.Casts);
+    }
+
     public static double? Mean(List<Dictionary<string, double>> set, string key)
     {
         var vals = set.Where(r => r.ContainsKey(key)).Select(r => r[key]).ToList();

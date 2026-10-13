@@ -2121,3 +2121,22 @@ The review app opens an account on the evidence that this PC recorded it,
 read from the sidecars. That evidence now outlives them in
 `metadata/players.json`, or an alt not played for a few weeks would vanish
 from the app.
+
+## 2026-10-13 — Charm hit rate from Riot's immobilisation counter
+
+Riot gives skillshots hit as one per-game total, so no ability's accuracy
+can be read from it. Ahri is the exception by kit: Charm is her only
+immobilising spell and it stops on the first thing it hits, so the
+challenges counter `enemyChampionImmobilizations` over her E casts is the
+share of charms that caught a champion. Both numbers were already stored,
+so the whole Ahri history has it without a re-ingest.
+
+It reads slightly low: a charm thrown at a minion or a camp is a cast with
+nothing to land on. A charm a minion blocked is a miss and counts as one.
+The match page shows the raw pair beside the percentage so a game where
+the counter and the casts disagree is visible rather than clamped away.
+The Lens and Trading carry it as a trend over Ahri games only.
+
+It is hard-wired to Ahri. Other champions with one catch spell also
+immobilise through items, passives or multi-target hits, and the ratio
+stops meaning accuracy.

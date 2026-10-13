@@ -88,6 +88,7 @@ public sealed class FundamentalsService(LeagueDbContext db, ChallengesBenchmarkS
                 new("dpmEarly", "DMG/m early", "Damage per minute, first 10 minutes", true, 0),
                 new("ssHit", "Skillshots hit", "Landed skillshots per game", true, 0),
                 new("ssDodged", "Skillshots dodged", "Dodged skillshots per game", true, 0),
+                new("charmHit", "Charm hit rate", "Ahri games: charms that caught a champion, per E cast", true, 0, "%"),
                 new("firstTo2", "First to level 2", "How often you hit level 2 first", true, 0, "%"),
                 new("lvl6Lead", "Level 6 lead", "Seconds ahead of lane to level 6 (+ = first)", true, 0, "s"),
             ]),
@@ -162,9 +163,9 @@ public sealed class FundamentalsService(LeagueDbContext db, ChallengesBenchmarkS
         var matchIds = matches.Select(m => m.Id).ToList();
         var missingPings = (await db.Participants.AsNoTracking()
                 .Where(p => p.IsMe && matchIds.Contains(p.MatchId))
-                .Select(p => new { p.MatchId, p.PingsJson })
+                .Select(p => new { p.MatchId, p.PingsJson, p.Spell3Casts })
                 .ToListAsync(ct))
-            .ToDictionary(p => p.MatchId, p => PingCount(p.PingsJson, "Missing"));
+            .ToDictionary(p => p.MatchId, p => (Missing: PingCount(p.PingsJson, "Missing"), ECasts: p.Spell3Casts));
 
         var rows = matches.Select(m =>
         {
@@ -182,7 +183,11 @@ public sealed class FundamentalsService(LeagueDbContext db, ChallengesBenchmarkS
                 row["lanePhaseDeaths"] = agg?.LaneDeaths ?? 0;
                 row["contestedSecures"] = m.ContestedEpicsTaken;
             }
-            if (missingPings.TryGetValue(m.Id, out var pings)) row["missingPings"] = pings;
+            if (missingPings.TryGetValue(m.Id, out var mine))
+            {
+                row["missingPings"] = mine.Missing;
+                MatchMetricRows.AddCharmRate(row, m, mine.ECasts);
+            }
             // Conditional keys: only games that WERE ahead/behind carry the metric,
             // so the rate reads "of the games in that state, how many converted".
             if (m.TeamGoldDiff15 is { } tg15)

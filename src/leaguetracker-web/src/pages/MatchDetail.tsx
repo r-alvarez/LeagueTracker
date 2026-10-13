@@ -500,6 +500,13 @@ function DetailsTab({ detail }: { detail: Detail }) {
               })()}
             </div>
           )}
+          {detail.charm && (
+            <div className="obj-chips cast-chips" style={{ marginTop: 8 }}>
+              <span className="obj-chip" title="Enemy champions immobilised (Riot's counter - Charm is Ahri's only immobilising spell) over E casts. Charms thrown at minions or camps count as misses.">
+                {Math.min(100, Math.round((100 * detail.charm.landed) / detail.charm.casts))}% <span className="mut">charms landed · {detail.charm.landed} of {detail.charm.casts}</span>
+              </span>
+            </div>
+          )}
           <div style={{ marginTop: 12 }}>
             {pings.length === 0 ? <span className="mut">No pings recorded.</span> : (
               <span className="obj-chips cast-chips">

@@ -323,6 +323,8 @@ export interface MatchDetail {
   mySide: string
   teamObjectives: { ally: TeamObjectiveCounts; enemy: TeamObjectiveCounts }
   skillOrder: number[]
+  /** Ahri only: E casts and enemy champions immobilised (Riot's counter). */
+  charm: { casts: number; landed: number } | null
   laning: {
     csAt10: number | null
     csAt15: number | null

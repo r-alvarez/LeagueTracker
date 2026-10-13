@@ -1232,6 +1232,9 @@ read.MapGet("/matches/{id}", async (AccountContext acct, string id, LeagueDbCont
         MySide = match.Participants.FirstOrDefault(p => p.IsMe)?.TeamId == 100 ? "Blue" : "Red",
         TeamObjectives = new { Ally = TeamObjectives(true), Enemy = TeamObjectives(false) },
         SkillOrder = match.SkillOrder is { Length: > 0 } ? match.SkillOrder.Split(',').Select(int.Parse).ToArray() : [],
+        Charm = MatchMetricRows.Charm(match, match.Participants.FirstOrDefault(p => p.IsMe)?.Spell3Casts) is { } charm
+            ? new { charm.Casts, charm.Landed }
+            : null,
         Laning = new
         {
             match.CsAt10, match.CsAt15,
