@@ -161,10 +161,15 @@ services:
       Accounts__List__2__DataDir: /data/ben
       Accounts__List__2__DisplayName: ${ACCOUNT_2_DISPLAYNAME:-}
       Accounts__List__2__Owner: ${OWNER_BEN:-}
-      # Accounts__List__3__GameName: ${ACCOUNT_3_GAMENAME:-}
-      # Accounts__List__3__TagLine: ${ACCOUNT_3_TAGLINE:-}
-      # Accounts__List__3__DataDir: /data/<folder>
-      # Accounts__List__3__DisplayName: ${ACCOUNT_3_DISPLAYNAME:-}
+      Accounts__List__3__GameName: ImRA
+      Accounts__List__3__TagLine: "1093"
+      Accounts__List__3__DataDir: /data/alt2
+      Accounts__List__3__DisplayName: Ruben (alt 2)
+      Accounts__List__3__Owner: ${OWNER_RUBEN:-}
+      # Accounts__List__4__GameName: ${ACCOUNT_4_GAMENAME:-}
+      # Accounts__List__4__TagLine: ${ACCOUNT_4_TAGLINE:-}
+      # Accounts__List__4__DataDir: /data/<folder>
+      # Accounts__List__4__DisplayName: ${ACCOUNT_4_DISPLAYNAME:-}
       Agent__ReleaseDir: /data/agent-releases
       Agent__SyncReleases: "true"
       Agent__Profile__RecordNamePrefix: Road to Platinum
