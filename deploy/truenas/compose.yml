@@ -141,9 +141,9 @@ services:
       Retention__ClipPatches: ${RETENTION_CLIP_PATCHES:-2}
       Retention__DryRun: ${RETENTION_DRY_RUN:-false}
       Accounts__DataRoot: /data
-      Accounts__Default: ImRA-87166
-      Accounts__List__0__GameName: ImRA
-      Accounts__List__0__TagLine: "87166"
+      Accounts__Default: ItsRA-Sun
+      Accounts__List__0__GameName: ItsRA
+      Accounts__List__0__TagLine: "Sun"
       Accounts__List__0__DataDir: /data/main
       Accounts__List__0__DisplayName: Ruben
       Accounts__List__0__Owner: ${OWNER_RUBEN:-}

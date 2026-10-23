@@ -53,8 +53,8 @@ services:
     environment:
       - ConnectionStrings__LeagueTracker=Host=postgres;Database=leaguetracker;Username=leaguetracker;Password=${POSTGRES_PASSWORD:-leaguetracker};Maximum Pool Size=80
       - Accounts__DataRoot=/data
-      - Accounts__List__0__GameName=ImRA
-      - Accounts__List__0__TagLine=87166
+      - Accounts__List__0__GameName=ItsRA
+      - Accounts__List__0__TagLine=Sun
       - Accounts__List__0__DataDir=/data
       - Riot__HideLp=false
     volumes:
