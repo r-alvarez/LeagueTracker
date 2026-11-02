@@ -97,6 +97,10 @@ public static class ManagementEndpoints
 
         // --- Admin ----------------------------------------------------------------
 
+        // The render watchdog's verdict: nothing while the queue is moving.
+        // Admin-only - it names machines and accounts.
+        admin.MapGet("/render-alert", (RenderWatchdog watch) => watch.Current is { } alert ? Results.Ok(alert) : Results.NoContent());
+
         admin.MapGet("/users", (UserStore users, AccountRegistry accounts, AgentKeyStore keys, Auth0ManagementClient auth0) => Results.Ok(new
         {
             // Whether "Add a person" can reach the provider on this instance;

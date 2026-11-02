@@ -19,6 +19,13 @@ public sealed class AgentTray : IDisposable
     private ToolStripMenuItem? _pauseItem;
     private SynchronizationContext? _ui;
     private bool _reviewNotification;
+    // The tracker alert episode last shown as a notification, and when -
+    // each stall pops once, then again every few hours while it lasts.
+    private string? _alertShownId;
+    private DateTime _alertShownUtc;
+    private string? _alertUrl;
+    private ToolStripMenuItem? _alertItem;
+    private static readonly TimeSpan AlertRemindEvery = TimeSpan.FromHours(4);
     private readonly Dictionary<string, Icon> _icons = [];
 
     public AgentTray(AgentConfig config, Action quit, Func<Task> checkForUpdates)
@@ -44,6 +51,8 @@ public sealed class AgentTray : IDisposable
         menu.Items.Add(new ToolStripMenuItem($"LeagueTracker agent {AgentConfig.Version} · {_config.Role}") { Enabled = false });
         _statusItem = new ToolStripMenuItem("starting") { Enabled = false };
         menu.Items.Add(_statusItem);
+        _alertItem = new ToolStripMenuItem("", null, (_, _) => Open(AlertSiteUrl())) { Visible = false, ForeColor = Color.FromArgb(200, 90, 20) };
+        menu.Items.Add(_alertItem);
         menu.Items.Add(new ToolStripSeparator());
         _pauseItem = new ToolStripMenuItem("Pause", null, (_, _) => { RenderAgent.SetPaused(!RenderAgent.Paused); Refresh(); });
         menu.Items.Add(_pauseItem);
@@ -70,7 +79,13 @@ public sealed class AgentTray : IDisposable
 
         _icon = new NotifyIcon { ContextMenuStrip = menu, Visible = true };
         _icon.DoubleClick += (_, _) => Review.ReviewApp.Launch();
-        _icon.BalloonTipClicked += (_, _) => { if (_reviewNotification) Review.ReviewApp.Launch(last: true); _reviewNotification = false; };
+        _icon.BalloonTipClicked += (_, _) =>
+        {
+            if (_reviewNotification) Review.ReviewApp.Launch(last: true);
+            else if (_alertUrl is not null) Open(AlertSiteUrl());
+            _reviewNotification = false;
+            _alertUrl = null;
+        };
         Refresh();
         Application.Run();
     }
@@ -83,9 +98,40 @@ public sealed class AgentTray : IDisposable
         var line = paused && state is "idle" or "paused" ? "Paused - not recording or rendering" : Describe(state, detail);
         _statusItem.Text = line;
         _pauseItem.Text = paused ? "Resume" : "Pause (stop recording/rendering)";
-        _icon.Text = Truncate($"LeagueTracker agent · {line}", 127);
-        _icon.Icon = IconFor(paused ? "paused" : state is "starting" or "waiting" ? "waiting" : AgentStatus.LastError is not null && state is "idle" ? "warn" : state is "idle" ? "idle" : "busy");
+        var alert = AgentStatus.TrackerAlert;
+        _icon.Text = Truncate(alert is null ? $"LeagueTracker agent · {line}" : $"LeagueTracker agent · {line} · Render box stalled", 127);
+        _icon.Icon = IconFor(paused ? "paused" : state is "starting" or "waiting" ? "waiting" : (AgentStatus.LastError is not null || alert is not null) && state is "idle" ? "warn" : state is "idle" ? "idle" : "busy");
+        if (_alertItem is not null)
+        {
+            _alertItem.Visible = alert is not null;
+            _alertItem.Text = alert is null ? "" : "⚠ Render box stalled - open the tracker";
+            _alertItem.ToolTipText = alert?.Text;
+        }
+        ShowAlert(alert);
     }
+
+    // A stall is exactly the thing nobody notices, so it interrupts: once
+    // when it starts, then every few hours until the queue moves again. Never
+    // over a game: it waits for the next refresh after the game closes.
+    private void ShowAlert((string Text, string Id, string Url)? alert)
+    {
+        if (alert is not { } a || _icon is null) return;
+        if (_alertShownId == a.Id && DateTime.UtcNow - _alertShownUtc < AlertRemindEvery) return;
+        if (Process.GetProcessesByName("League of Legends") is { Length: > 0 } running)
+        {
+            foreach (var p in running) p.Dispose();
+            return;
+        }
+        _alertShownId = a.Id;
+        _alertShownUtc = DateTime.UtcNow;
+        _reviewNotification = false;
+        _alertUrl = a.Url;
+        _icon.ShowBalloonTip(10000, "Render box stalled", Truncate(a.Text, 255), ToolTipIcon.Warning);
+    }
+
+    // The site root: the stall banner shows on every page for an admin.
+    private string AlertSiteUrl() =>
+        $"{(_alertUrl ?? AgentStatus.TrackerAlert?.Url ?? _config.ServerUrls.FirstOrDefault() ?? "").TrimEnd('/')}/";
 
     private void OnRecordingReady()
     {

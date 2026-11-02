@@ -23,8 +23,10 @@ public sealed record AgentRelease(string Version, string File, long SizeBytes, s
 
 /// The tracker's answer to a heartbeat: the newest published version, and a
 /// one-shot command the owner queued from the Data page (with a token so the
-/// agent runs it once and a restart never re-triggers it).
-public sealed record HeartbeatReply(string? Latest, string? Command, string? CommandToken);
+/// agent runs it once and a restart never re-triggers it). Alert is the
+/// tracker's word that its render queue has stalled - sent only to the
+/// operator's own machines; AlertId changes when a new stall starts.
+public sealed record HeartbeatReply(string? Latest, string? Command, string? CommandToken, string? Alert = null, string? AlertId = null);
 
 public sealed record RenderJob(
     string Kind, string MatchId, string GameVersion, double DurationSec, string ReplayUrl,
@@ -307,7 +309,7 @@ public sealed class TrackerClient
             var root = doc.RootElement;
             string? Str(string name) => root.TryGetProperty(name, out var v) && v.ValueKind is JsonValueKind.String ? v.GetString() : null;
             NoteHeartbeat(true, null);
-            return new HeartbeatReply(Str("latest"), Str("command"), Str("commandToken"));
+            return new HeartbeatReply(Str("latest"), Str("command"), Str("commandToken"), Str("alert"), Str("alertId"));
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {

@@ -136,6 +136,9 @@ services:
       # policy - so it follows the pool from the stack environment rather
       # than waiting on a release. Two accounts hit it silently in Sept 2026.
       Uploads__MaxMediaGbPerAccount: ${UPLOADS_MAX_MEDIA_GB:-60}
+      # A stalled render queue is shown to admins on the site and in their
+      # agent trays; this adds a phone push (an ntfy topic URL). Blank = off.
+      RenderWatch__NtfyUrl: ${RENDER_ALERT_NTFY_URL:-}
       # First deploy: dry run, mark the games to keep on their match pages,
       # then clear it - the first live sweep takes patches of clips at once.
       Retention__ClipPatches: ${RETENTION_CLIP_PATCHES:-2}
