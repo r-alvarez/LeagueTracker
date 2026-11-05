@@ -261,6 +261,9 @@ static async ValueTask<object?> RequireAvailableAccount(EndpointFilterInvocation
 
 // The declared length is the client's word (and a chunked body declares
 // none), so the budget is enforced on the bytes as they arrive.
+// Ranked replays run 10-30 MB; anything far past that is not a replay.
+const long MaxReplayBytes = 128L * 1024 * 1024;
+
 static async Task<IResult> StoreUploadAsync(HttpRequest request, string target, UploadQuota quota, long cap, CancellationToken ct)
 {
     using var reservation = quota.Reserve(request.ContentLength, cap);
@@ -1168,6 +1171,33 @@ render.MapPost("/render/{matchId}/fail", async (string matchId, HttpRequest requ
 // waiting out the 30-minute lease.
 render.MapPost("/render/release-stale", (Caller caller, RenderLeaseService leases) =>
     Results.Ok(new { released = leases.ReleaseAgent(caller.Agent!.Id) }));
+
+// Riot stopped serving replays to the tracker, so agents fetch them through
+// their League client: this is the shopping list, the PUT below the delivery.
+render.MapGet("/render/replays/wanted", async (ClipService clips, PatchReference patches,
+    IOptions<MediaRetentionOptions> retention, CancellationToken ct) =>
+    Results.Ok(await clips.WantedReplaysAsync(await patches.PatchesNewestFirstAsync(ct), retention.Value.ReplayPatches, ct)));
+
+render.MapPut("/matches/{id}/replay", async (string id, HttpRequest request, ReplayArchiveService replays,
+    LeagueDbContext db, UploadQuota quota, CancellationToken ct) =>
+{
+    if (replays.UploadStagingPath(id) is not { } staging) return Results.NotFound();
+    if (!await db.Matches.AsNoTracking().AnyAsync(m => m.Id == id, ct)) return Results.NotFound();
+    var stored = await StoreUploadAsync(request, staging, quota, MaxReplayBytes, ct);
+    if (!File.Exists(staging)) return stored;
+    return await replays.AcceptUploadAsync(id, staging, ct)
+        ? stored
+        : Results.BadRequest(new { error = "not a League replay file" });
+});
+
+render.MapPost("/matches/{id}/replay/unavailable", async (string id, HttpRequest request, ReplayArchiveService replays, CancellationToken ct) =>
+{
+    using var reader = new StreamReader(request.Body);
+    var reason = (await reader.ReadToEndAsync(ct)).Trim();
+    return await replays.MarkUnavailableAsync(id, reason is { Length: > 0 } ? reason[..Math.Min(reason.Length, 200)] : "unknown", ct)
+        ? Results.Ok()
+        : Results.NotFound();
+});
 
 
 // Re-queues the match: clears the failed marker AND deletes any existing

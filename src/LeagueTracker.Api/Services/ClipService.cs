@@ -19,6 +19,8 @@ public sealed record ClipExpiry(string Reason, string? Patch, DateTime AtUtc, in
 
 public sealed record ClipReclaim(int Clips, long Bytes);
 
+public sealed record WantedReplay(string MatchId, int QueueId, DateTime GameEndUtc);
+
 /// Plans and stores the per-match highlight clips that the render agent turns
 /// into mp4s. Follows the app's files-as-truth rule: the plan manifest and the
 /// rendered clips live under data/clips/{matchId}; the db is never written.
@@ -500,6 +502,34 @@ public sealed class ClipService(LeagueDbContext db, ReplayArchiveService replays
         if (DirFor(matchId) is not { } dir) return;
         var plan = Path.Combine(dir, "plan.json");
         if (File.Exists(plan)) File.Delete(plan);
+    }
+
+    // A patch lasts two weeks, so nothing older could still play anyway; the
+    // cap just keeps the query small.
+    private static readonly TimeSpan WantedReplayWindow = TimeSpan.FromDays(14);
+    // Remakes plan no windows - fetching their replay renders nothing.
+    private const double MinRenderableSec = 300;
+
+    /// Games the render queue would take if only it had the replay: still on
+    /// a playable patch, never rendered, failed or expired, and not already
+    /// proven unfetchable. Empty until the patch list is known - guessing
+    /// "current" would send agents after replays the client refuses.
+    public async Task<List<WantedReplay>> WantedReplaysAsync(IReadOnlyList<string>? patches, int replayPatches, CancellationToken ct)
+    {
+        if (patches is null) return [];
+        var since = DateTime.UtcNow - WantedReplayWindow;
+        var archived = replays.ArchivedMatchIds();
+        var recent = await db.Matches.AsNoTracking()
+            .Where(m => m.HasTimeline && m.GameEndUtc >= since && m.DurationSec >= MinRenderableSec)
+            .OrderByDescending(m => m.GameEndUtc)
+            .Select(m => new { m.Id, m.QueueId, m.GameEndUtc, m.GameVersion })
+            .ToListAsync(ct);
+        return [.. recent
+            .Where(m => !archived.Contains(m.Id)
+                && PatchReference.PatchAge(patches, m.GameVersion) < replayPatches
+                && !replays.IsUnavailable(m.Id)
+                && !HasClips(m.Id) && FailReason(m.Id) is null && Expiry(m.Id) is null)
+            .Select(m => new WantedReplay(m.Id, m.QueueId, m.GameEndUtc))];
     }
 
     /// Render-queue view over every match with an archived replay, newest first.

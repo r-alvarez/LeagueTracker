@@ -43,6 +43,54 @@ public sealed partial class ReplayArchiveService(
         return bytes;
     }
 
+    // Since 2026-10-24 Riot answers the replays endpoint with 403 while every
+    // other match-v5 call works, so render agents fetch the .rofl through their
+    // own League client (it serves any player's game on the live patch) and
+    // upload it here. The sweep above stays: it costs one call per capture and
+    // picks up again by itself if Riot restores access.
+    private static bool IsSafeId(string matchId) =>
+        matchId.Length > 0 && matchId.All(ch => char.IsLetterOrDigit(ch) || ch is '_');
+
+    private string UnavailablePath(string matchId) => Path.Combine(ReplaysDir, $"{matchId}.unavailable");
+
+    public bool IsUnavailable(string matchId) => IsSafeId(matchId) && File.Exists(UnavailablePath(matchId));
+
+    /// The client said it can never serve this game (old patch, expired):
+    /// asking again only wakes a render box for nothing.
+    public async Task<bool> MarkUnavailableAsync(string matchId, string reason, CancellationToken ct)
+    {
+        if (!IsSafeId(matchId)) return false;
+        Directory.CreateDirectory(ReplaysDir);
+        await File.WriteAllTextAsync(UnavailablePath(matchId), $"{DateTime.UtcNow:O} {reason}", ct);
+        return true;
+    }
+
+    public string? UploadStagingPath(string matchId) =>
+        IsSafeId(matchId) ? Path.Combine(ReplaysDir, $"{matchId}.rofl.upload") : null;
+
+    /// Promotes an uploaded file to the archive. Only a real replay (they all
+    /// open with the "RIOT" magic) gets in: the game client would otherwise be
+    /// handed junk at render time and fail far from the cause.
+    public async Task<bool> AcceptUploadAsync(string matchId, string stagedPath, CancellationToken ct)
+    {
+        var magic = new byte[4];
+        await using (var probe = File.OpenRead(stagedPath))
+        {
+            await probe.ReadAtLeastAsync(magic, magic.Length, throwOnEndOfStream: false, ct);
+        }
+        if (magic is not [(byte)'R', (byte)'I', (byte)'O', (byte)'T'])
+        {
+            File.Delete(stagedPath);
+            return false;
+        }
+        var target = Path.Combine(ReplaysDir, $"{matchId}.rofl");
+        File.Move(stagedPath, target, overwrite: true);
+        File.Delete(UnavailablePath(matchId));
+        logger.LogInformation("Archived replay {MatchId} from a render agent's client ({SizeMb:F1} MB)",
+            matchId, new FileInfo(target).Length / 1024.0 / 1024.0);
+        return true;
+    }
+
     // Riot's offer covers the last ~5 games, which straddles a patch day: the
     // game before the update would download as a replay nothing can play.
     private async Task<bool> StillPlayableAsync(string matchId, CancellationToken ct)
