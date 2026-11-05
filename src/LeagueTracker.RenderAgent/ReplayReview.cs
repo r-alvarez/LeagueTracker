@@ -196,8 +196,15 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnl
             var roflPath = Path.Combine(await lcu.GetReplaysPathAsync(ct), $"{platform}-{gameId}.rofl");
             if (!File.Exists(roflPath) && !await tracker.TryDownloadReplayAsync(reel.MatchId, roflPath, ct))
             {
-                Log.Warn($"Post-game review for {reel.MatchId}: no replay archived yet - nothing to play");
-                return;
+                // The tracker can no longer get replays from Riot; this
+                // client can. Sharing the file saves the render box the fetch.
+                var state = await lcu.DownloadReplayAsync(gameId, queueId: 0, DateTime.UtcNow, TimeSpan.FromMinutes(2), ct);
+                if (state is not "watch" || !File.Exists(roflPath))
+                {
+                    Log.Warn($"Post-game review for {reel.MatchId}: no replay on the tracker and the client could not fetch it ({state ?? "no state"}) - nothing to play");
+                    return;
+                }
+                _ = ShareReplayAsync(tracker, reel.MatchId, roflPath);
             }
 
             // Directed camera steers itself; the review wants the player's own
@@ -489,6 +496,27 @@ public sealed class ReplayReview(AgentConfig config, string leagueRoot, IReadOnl
             return await lcu.GetGameSessionAsync(ct) is { PlatformId: { Length: > 0 } platform } session
                 ? $"{platform}_{session.GameId}"
                 : null;
+        }
+    }
+
+    /// Uploads from a private copy: the replay is about to be opened by the
+    /// game, and an upload holding the original must not race that.
+    private static async Task ShareReplayAsync(TrackerClient tracker, string matchId, string roflPath)
+    {
+        var copy = Path.Combine(Path.GetTempPath(), $"lt-share-{matchId}.rofl");
+        try
+        {
+            File.Copy(roflPath, copy, overwrite: true);
+            await tracker.UploadReplayAsync(matchId, copy, CancellationToken.None);
+            Log.Info($"Replay {matchId} fetched through the client and sent to {tracker.Name}");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Could not send replay {matchId} to {tracker.Name} ({ex.Message}) - the render box will fetch it itself");
+        }
+        finally
+        {
+            try { File.Delete(copy); } catch { /* temp folder; best effort */ }
         }
     }
 

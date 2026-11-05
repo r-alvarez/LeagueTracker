@@ -196,5 +196,61 @@ public sealed class LcuClient : IDisposable
         resp.EnsureSuccessStatusCode();
     }
 
+    /// States after which the client will never produce the file. "lost" is
+    /// left out on purpose: the client also says it about a game whose replay
+    /// is merely late, and the caller's strike count covers a real loss.
+    public static bool IsFinalReplayRefusal(string? state) =>
+        state is "incompatible" or "missingOrExpired" or "unsupported";
+
+    /// The match-history "download replay" button, driven through the API.
+    /// Works for any player's game on the client's own patch, not just the
+    /// signed-in account's (verified 2026-11-05). Returns the client's final
+    /// state: "watch" = the .rofl is in the Replays folder; a refusal (see
+    /// IsFinalReplayRefusal); or the state it was stuck in at the timeout -
+    /// an unknown game id sits at "checking" forever rather than failing.
+    public async Task<string?> DownloadReplayAsync(long gameId, int queueId, DateTime gameEndUtc, TimeSpan timeout, CancellationToken ct)
+    {
+        // The client only knows games it has seen in match history; create
+        // registers one by id. Before that, metadata is a 404.
+        var game = JsonSerializer.Serialize(new
+        {
+            gameId, gameType = "", queueId,
+            gameEnd = new DateTimeOffset(DateTime.SpecifyKind(gameEndUtc, DateTimeKind.Utc)).ToUnixTimeMilliseconds(),
+        });
+        using (var create = new StringContent(game, Encoding.UTF8, "application/json"))
+        using (var resp = await _http.PostAsync($"{_base}/lol-replays/v2/metadata/{gameId}/create", create, ct))
+        {
+            resp.EnsureSuccessStatusCode();
+        }
+
+        // "download" before the first attempt says nothing - a made-up id
+        // reads "download" too - so only "watch" short-circuits.
+        var state = await ReplayStateAsync(gameId, ct);
+        if (state is "watch" || IsFinalReplayRefusal(state)) return state;
+
+        using (var button = new StringContent("""{"componentType":"replay-button_match-history"}""", Encoding.UTF8, "application/json"))
+        using (var resp = await _http.PostAsync($"{_base}/lol-replays/v1/rofls/{gameId}/download/graceful", button, ct))
+        {
+            resp.EnsureSuccessStatusCode();
+        }
+
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2), ct);
+            state = await ReplayStateAsync(gameId, ct);
+            if (state is "watch" || IsFinalReplayRefusal(state)) return state;
+        }
+        return state;
+    }
+
+    private async Task<string?> ReplayStateAsync(long gameId, CancellationToken ct)
+    {
+        using var resp = await _http.GetAsync($"{_base}/lol-replays/v1/metadata/{gameId}", ct);
+        if (!resp.IsSuccessStatusCode) return null;
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+        return doc.RootElement.TryGetProperty("state", out var state) ? state.GetString() : null;
+    }
+
     public void Dispose() => _http.Dispose();
 }

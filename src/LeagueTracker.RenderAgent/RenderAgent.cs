@@ -35,6 +35,13 @@ public sealed class RenderAgent(AgentConfig config)
     private int _hubLaunchFailures;
     /// When the render queue was first seen empty, for the idle close below.
     private DateTime? _queueEmptySince;
+    /// Client downloads that ended without a file or a clear refusal, per
+    /// match. In memory on purpose: a restart buys a game three more tries.
+    private readonly Dictionary<string, int> _replayFetchStrikes = [];
+    private const int ReplayFetchStrikesBeforeGivingUp = 3;
+    // Fetching is quick (seconds per game), but a long backlog must not keep
+    // the render queue waiting a whole pass.
+    private const int ReplayFetchesPerPass = 5;
 
     /// Quiet-queue grace before a renderer closes its client. Gaps between
     /// job claims are bimodal - clusters minutes apart, then an hour of
@@ -327,6 +334,8 @@ public sealed class RenderAgent(AgentConfig config)
             _reportedUserActive = false;
         }
 
+        if (config.RenderReplays && !MockRender) await FetchWantedReplaysAsync(ct);
+
         // An empty queue and an unreachable tracker look identical from
         // here, and only one of them means there is no work - so the idle
         // close below acts on an answer, never on silence.
@@ -363,6 +372,83 @@ public sealed class RenderAgent(AgentConfig config)
         }
         if (answered) await MaybeCloseIdleClientAsync(ct);
         return false;
+    }
+
+    /// Riot stopped handing replays to the tracker (403 since 2026-10-24),
+    /// so the render box downloads them through its own client and uploads
+    /// them; the render job for each game appears once its replay lands.
+    private async Task FetchWantedReplaysAsync(CancellationToken ct)
+    {
+        var budget = ReplayFetchesPerPass;
+        foreach (var tracker in _trackers)
+        {
+            if (budget <= 0) return;
+            if (await tracker.GetWantedReplaysAsync(ct) is not { Count: > 0 } wanted) continue;
+            using var lcu = LcuClient.TryConnect(LeagueRoot);
+            if (lcu is null) return;
+            var replaysDir = await lcu.GetReplaysPathAsync(ct);
+            foreach (var game in wanted.Take(budget))
+            {
+                budget--;
+                await FetchReplayAsync(tracker, lcu, replaysDir, game, ct);
+            }
+        }
+    }
+
+    private async Task FetchReplayAsync(TrackerClient tracker, LcuClient lcu, string replaysDir, TrackerClient.WantedReplay game, CancellationToken ct)
+    {
+        var (platform, gameId) = ParseMatchId(game.MatchId);
+        var roflPath = Path.Combine(replaysDir, $"{platform}-{gameId}.rofl");
+        try
+        {
+            var state = await lcu.DownloadReplayAsync(gameId, game.QueueId, game.GameEndUtc, TimeSpan.FromMinutes(3), ct);
+            if (state is "watch" && File.Exists(roflPath))
+            {
+                await tracker.UploadReplayAsync(game.MatchId, roflPath, ct);
+                _replayFetchStrikes.Remove(game.MatchId);
+                Log.Info($"Replay {game.MatchId} fetched through the client and sent to {tracker.Name}");
+                // The render job downloads it again from the tracker into this
+                // same path; a copy left here for a game that never renders
+                // (a VOD-covered one with no fight windows) would just pile up.
+                File.Delete(roflPath);
+                return;
+            }
+            if (LcuClient.IsFinalReplayRefusal(state))
+            {
+                await GiveUpOnReplayAsync(tracker, game.MatchId, $"client says {state}", ct);
+                return;
+            }
+            await StrikeReplayAsync(tracker, game.MatchId, $"client stuck at {state ?? "no state"}", ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            await StrikeReplayAsync(tracker, game.MatchId, ex.Message, ct);
+        }
+    }
+
+    private async Task StrikeReplayAsync(TrackerClient tracker, string matchId, string reason, CancellationToken ct)
+    {
+        var strikes = _replayFetchStrikes[matchId] = _replayFetchStrikes.GetValueOrDefault(matchId) + 1;
+        if (strikes >= ReplayFetchStrikesBeforeGivingUp)
+        {
+            await GiveUpOnReplayAsync(tracker, matchId, $"{strikes} failed tries, last: {reason}", ct);
+            return;
+        }
+        Log.Warn($"Replay {matchId} not fetched ({reason}) - try {strikes}/{ReplayFetchStrikesBeforeGivingUp}, retrying next pass");
+    }
+
+    private async Task GiveUpOnReplayAsync(TrackerClient tracker, string matchId, string reason, CancellationToken ct)
+    {
+        _replayFetchStrikes.Remove(matchId);
+        Log.Warn($"Replay {matchId} cannot be fetched ({reason}) - telling {tracker.Name} to stop asking");
+        try
+        {
+            await tracker.ReportReplayUnavailableAsync(matchId, reason, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            Log.Warn($"Could not mark replay {matchId} unavailable on {tracker.Name}: {ex.Message}");
+        }
     }
 
     /// Nobody plays on a render box, so a client left open after the last

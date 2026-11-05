@@ -243,13 +243,55 @@ public sealed class TrackerClient
             using var resp = await _http.GetAsync($"{Api}/render/queue", ct);
             if (!resp.IsSuccessStatusCode || !IsJson(resp)) return 0;
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
-            return doc.RootElement.EnumerateArray().Count(row =>
+            var claimable = doc.RootElement.EnumerateArray().Count(row =>
                 row.TryGetProperty("status", out var s) && s.GetString() is "pending" or "partial");
+            // A replay still to fetch is work only an open client can do.
+            return claimable + (await GetWantedReplaysAsync(ct) ?? []).Count;
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {
             return 0;
         }
+    }
+
+    public sealed record WantedReplay(string MatchId, int QueueId, DateTime GameEndUtc);
+
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
+    /// Games this tracker wants a replay for (Riot no longer hands them to
+    /// it). Null when it can't say - unreachable, or not redeployed with the
+    /// endpoint yet - which callers treat as "nothing to fetch".
+    public async Task<List<WantedReplay>?> GetWantedReplaysAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _http.GetAsync($"{Api}/render/replays/wanted", ct);
+            if (!resp.IsSuccessStatusCode || !IsJson(resp)) return null;
+            return JsonSerializer.Deserialize<List<WantedReplay>>(await resp.Content.ReadAsStringAsync(ct), WebJson);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    public async Task UploadReplayAsync(string matchId, string roflPath, CancellationToken ct)
+    {
+        await using var file = File.OpenRead(roflPath);
+        using var content = new StreamContent(file);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        using var resp = await _http.PutAsync($"{Api}/matches/{Uri.EscapeDataString(matchId)}/replay", content, ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException($"the tracker refused it ({(int)resp.StatusCode}): {Reason(await resp.Content.ReadAsStringAsync(ct))}");
+        }
+    }
+
+    public async Task ReportReplayUnavailableAsync(string matchId, string reason, CancellationToken ct)
+    {
+        using var content = new StringContent(reason, System.Text.Encoding.UTF8, "text/plain");
+        using var resp = await _http.PostAsync($"{Api}/matches/{Uri.EscapeDataString(matchId)}/replay/unavailable", content, ct);
+        resp.EnsureSuccessStatusCode();
     }
 
     private static bool IsJson(HttpResponseMessage resp) =>
