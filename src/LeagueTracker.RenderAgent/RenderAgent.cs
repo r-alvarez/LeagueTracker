@@ -401,16 +401,27 @@ public sealed class RenderAgent(AgentConfig config)
         var roflPath = Path.Combine(replaysDir, $"{platform}-{gameId}.rofl");
         try
         {
+            // Two tracked players in one game (duo partners) want the same
+            // replay. The first one's copy is the cheap source - and the only
+            // reliable one once that game has rendered: the render deletes the
+            // .rofl but the client keeps saying "watch", with nothing on disk.
+            if (await CopyFromAnotherTrackerAsync(tracker, game.MatchId, roflPath, ct) is { } source)
+            {
+                await SendFetchedReplayAsync(tracker, game.MatchId, roflPath, $"copied from {source.Name}", ct);
+                return;
+            }
+
             var state = await lcu.DownloadReplayAsync(gameId, game.QueueId, game.GameEndUtc, TimeSpan.FromMinutes(3), ct);
+            if (state is "watch" && !File.Exists(roflPath))
+            {
+                // The client's record of a file someone deleted. A scan makes
+                // it look at the folder again before the second ask.
+                await lcu.ScanAsync(ct);
+                state = await lcu.DownloadReplayAsync(gameId, game.QueueId, game.GameEndUtc, TimeSpan.FromMinutes(3), ct);
+            }
             if (state is "watch" && File.Exists(roflPath))
             {
-                await tracker.UploadReplayAsync(game.MatchId, roflPath, ct);
-                _replayFetchStrikes.Remove(game.MatchId);
-                Log.Info($"Replay {game.MatchId} fetched through the client and sent to {tracker.Name}");
-                // The render job downloads it again from the tracker into this
-                // same path; a copy left here for a game that never renders
-                // (a VOD-covered one with no fight windows) would just pile up.
-                File.Delete(roflPath);
+                await SendFetchedReplayAsync(tracker, game.MatchId, roflPath, "fetched through the client", ct);
                 return;
             }
             if (LcuClient.IsFinalReplayRefusal(state))
@@ -426,9 +437,39 @@ public sealed class RenderAgent(AgentConfig config)
         }
     }
 
+    private async Task SendFetchedReplayAsync(TrackerClient tracker, string matchId, string roflPath, string how, CancellationToken ct)
+    {
+        await tracker.UploadReplayAsync(matchId, roflPath, ct);
+        _replayFetchStrikes.Remove($"{tracker.Name}|{matchId}");
+        Log.Info($"Replay {matchId} {how} and sent to {tracker.Name}");
+        // The render job downloads it again from the tracker into this same
+        // path; a copy left here for a game that never renders (a VOD-covered
+        // one with no fight windows) would just pile up.
+        File.Delete(roflPath);
+    }
+
+    private async Task<TrackerClient?> CopyFromAnotherTrackerAsync(TrackerClient wanting, string matchId, string roflPath, CancellationToken ct)
+    {
+        foreach (var other in _trackers.Where(t => t != wanting))
+        {
+            try
+            {
+                if (await other.TryDownloadReplayAsync(matchId, roflPath, ct)) return other;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                Log.Warn($"Could not copy replay {matchId} from {other.Name}: {ex.Message}");
+                // A copy cut off mid-stream must not pass for the client's file.
+                File.Delete(roflPath);
+            }
+        }
+        return null;
+    }
+
     private async Task StrikeReplayAsync(TrackerClient tracker, string matchId, string reason, CancellationToken ct)
     {
-        var strikes = _replayFetchStrikes[matchId] = _replayFetchStrikes.GetValueOrDefault(matchId) + 1;
+        var key = $"{tracker.Name}|{matchId}";
+        var strikes = _replayFetchStrikes[key] = _replayFetchStrikes.GetValueOrDefault(key) + 1;
         if (strikes >= ReplayFetchStrikesBeforeGivingUp)
         {
             await GiveUpOnReplayAsync(tracker, matchId, $"{strikes} failed tries, last: {reason}", ct);
@@ -439,7 +480,7 @@ public sealed class RenderAgent(AgentConfig config)
 
     private async Task GiveUpOnReplayAsync(TrackerClient tracker, string matchId, string reason, CancellationToken ct)
     {
-        _replayFetchStrikes.Remove(matchId);
+        _replayFetchStrikes.Remove($"{tracker.Name}|{matchId}");
         Log.Warn($"Replay {matchId} cannot be fetched ({reason}) - telling {tracker.Name} to stop asking");
         try
         {
