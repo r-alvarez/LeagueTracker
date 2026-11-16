@@ -19,7 +19,7 @@ COPY src/LeagueTracker.Api/ LeagueTracker.Api/
 RUN dotnet publish LeagueTracker.Api -c Release -o /app/publish --no-restore
 
 # --- Runtime ------------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+FROM mcr.microsoft.com/dotnet/aspnet:11.0
 # The aspnet image ships no curl/wget and `dotnet` cannot make an HTTP call
 # by itself, so the probe below needs a client; curl is the one every
 # compose healthcheck override and hand check can reuse.
