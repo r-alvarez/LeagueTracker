@@ -11,7 +11,7 @@ COPY src/leaguetracker-web/ ./
 RUN npm run build -- --outDir dist --emptyOutDir
 
 # --- API build ----------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS api
+FROM mcr.microsoft.com/dotnet/sdk:11.0 AS api
 WORKDIR /src
 COPY src/LeagueTracker.Api/LeagueTracker.Api.csproj LeagueTracker.Api/
 RUN dotnet restore LeagueTracker.Api
