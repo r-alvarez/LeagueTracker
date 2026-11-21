@@ -181,7 +181,7 @@ export default function DataPage() {
         <label className="setting-row">
           <input type="checkbox" disabled={!status || settingsBusy} checked={status?.hideLp ?? false}
             onChange={e => setSetting({ hideLp: e.target.checked })} />
-          <span><strong>Hide rank and LP</strong> <span className="mut">— capture continues, the pages just don't show it; the agent on your PC also covers the LP after ranked games in the League client</span></span>
+          <span><strong>Hide rank and LP</strong> <span className="mut">— capture continues, the pages just don't show it; the agent on your PC also skips the League client's post-game screen after ranked games (stats stay here)</span></span>
         </label>
       </div>
 

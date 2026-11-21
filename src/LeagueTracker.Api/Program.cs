@@ -494,7 +494,7 @@ app.MapGet("/api/agent/accounts", (AccountRegistry registry, Caller caller) =>
         Default = reachable.FirstOrDefault()?.Slug ?? registry.Default.Slug,
         Role = agent.Role.ToString().ToLowerInvariant(),
         Bound = agent.IsBound,
-        // HideLp: the player's PC covers the client's post-game LP with it.
+        // HideLp: the player's PC skips the client's ranked post-game lobby with it.
         Accounts = reachable.Select(a => new { a.Id, a.Slug, a.Label, a.RiotId, a.GameName, a.TagLine, a.Puuid, a.Platform, Region = a.RegionCode, Path = a.UrlPath, Available = initializer.IsReady(a), a.HideLp }),
     });
 }).RequireAuthorization(Policies.Agent);
