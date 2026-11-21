@@ -6,7 +6,7 @@ namespace LeagueTracker.RenderAgent.Tests;
 public class LpCoverTests
 {
     [Theory]
-    [InlineData("PreEndOfGame", 420)]
+    [InlineData("EndOfGame", 420)]
     [InlineData("EndOfGame", 440)]
     [InlineData("EndOfGame", -1)]
     public void Ranked_post_game_screens_are_covered(string phase, long queueId) =>
@@ -15,10 +15,11 @@ public class LpCoverTests
     [Theory]
     [InlineData("EndOfGame", 420, false)]
     [InlineData("EndOfGame", 400, true)]
+    [InlineData("PreEndOfGame", 420, true)]
     [InlineData("InProgress", 420, true)]
     [InlineData("ChampSelect", 420, true)]
     [InlineData("None", 420, true)]
-    public void Nothing_is_covered_without_the_setting_a_ranked_queue_or_a_post_game_screen(string phase, long queueId, bool hideLp) =>
+    public void Nothing_is_covered_without_the_setting_a_ranked_queue_or_the_post_game_lobby(string phase, long queueId, bool hideLp) =>
         Assert.False(LpCover.ShouldCover(phase, queueId, hideLp));
 
     [Fact]

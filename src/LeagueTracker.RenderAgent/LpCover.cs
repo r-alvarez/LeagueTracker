@@ -48,7 +48,9 @@ public sealed class LpCover(string leagueRoot, IReadOnlyList<TrackerClient> serv
 
     internal static bool ShouldCover(string phase, long queueId, bool hideLp) =>
         hideLp
-        && phase is ("PreEndOfGame" or "EndOfGame")
+        // The honor screen before it (PreEndOfGame) shows no LP and is all
+        // vote cards - a box there would only get in the way.
+        && phase is "EndOfGame"
         // An unknown queue is covered: a flash of LP is the one thing this exists to prevent.
         && (queueId < 0 || LpQueues.Contains(queueId));
 
@@ -65,7 +67,7 @@ public sealed class LpCover(string leagueRoot, IReadOnlyList<TrackerClient> serv
         }
 
         await RefreshSettingAsync(_lcu, ct);
-        if (!_hideLp || phase is not ("PreEndOfGame" or "EndOfGame")) return null;
+        if (!_hideLp || phase is not "EndOfGame") return null;
         var queueId = await _lcu.GetGameSessionAsync(ct) is { } session ? session.QueueId : -1;
         return ShouldCover(phase, queueId, _hideLp) ? phase : null;
     }
@@ -157,10 +159,11 @@ internal sealed class CoverForm : Form
     private const int Grip = 14;
     private static string LayoutPath => Path.Combine(AppContext.BaseDirectory, "lp-cover.json");
 
+    // Where the HideLP tool (2jonnyb/LoL-HideLP, 2022) found the post-game
+    // lobby's LP: w/7.27, h/2.37, a ninth of the window each way.
     private static readonly Dictionary<string, CoverRect> Defaults = new()
     {
-        ["PreEndOfGame"] = new(0.35, 0.62, 0.30, 0.18),
-        ["EndOfGame"] = new(0.03, 0.10, 0.30, 0.14),
+        ["EndOfGame"] = new(0.1375, 0.42, 0.111, 0.111),
     };
 
     private readonly Dictionary<string, CoverRect> _layout = LoadLayout();
