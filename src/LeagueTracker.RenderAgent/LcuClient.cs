@@ -150,6 +150,61 @@ public sealed class LcuClient : IDisposable
         }
     }
 
+    /// Who is signed in to the client - null before login or when the
+    /// client can't answer.
+    public async Task<string?> GetCurrentPuuidAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{_base}/lol-summoner/v1/current-summoner", ct));
+            return doc.RootElement.TryGetProperty("puuid", out var puuid) ? puuid.GetString() : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// The post-game lobby's own close: the client goes back to the home
+    /// screen as if the player had pressed it. False when it didn't take
+    /// (the lobby isn't up yet) - the caller simply asks again next tick.
+    public async Task<bool> DismissPostGameStatsAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _http.PostAsync($"{_base}/lol-end-of-game/v1/state/dismiss-stats", null, ct);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// Pending rank-change notifications - promotion and demotion
+    /// ceremonies the client is about to play.
+    public async Task<IReadOnlyList<long>> GetRankedNotificationIdsAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{_base}/lol-ranked/v1/notifications", ct));
+            if (doc.RootElement.ValueKind is not JsonValueKind.Array) return [];
+            return [.. doc.RootElement.EnumerateArray()
+                .Where(n => n.TryGetProperty("id", out var id) && id.ValueKind is JsonValueKind.Number)
+                .Select(n => n.GetProperty("id").GetInt64())];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    public async Task AcknowledgeRankedNotificationAsync(long id, CancellationToken ct)
+    {
+        try { using var _ = await _http.PostAsync($"{_base}/lol-ranked/v1/notifications/{id}/acknowledge", null, ct); }
+        catch { /* still pending - the next tick asks again */ }
+    }
+
     /// Platform id ("EUW1") from the client's region ("EUW").
     public async Task<string?> GetPlatformIdAsync(CancellationToken ct)
     {
