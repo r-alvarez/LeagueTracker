@@ -150,14 +150,18 @@ public sealed class LcuClient : IDisposable
         }
     }
 
-    /// Who is signed in to the client - null before login or when the
-    /// client can't answer.
-    public async Task<string?> GetCurrentPuuidAsync(CancellationToken ct)
+    /// Who is signed in to the client, as "Name#TAG" - null before login or
+    /// when the client can't answer. Not the puuid: the tracker's puuids come
+    /// from the Riot API, which encrypts them per API key, so they never
+    /// equal the client's (seen live 2026-11-21).
+    public async Task<string?> GetCurrentRiotIdAsync(CancellationToken ct)
     {
         try
         {
             using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{_base}/lol-summoner/v1/current-summoner", ct));
-            return doc.RootElement.TryGetProperty("puuid", out var puuid) ? puuid.GetString() : null;
+            var name = doc.RootElement.TryGetProperty("gameName", out var n) ? n.GetString() : null;
+            var tag = doc.RootElement.TryGetProperty("tagLine", out var t) ? t.GetString() : null;
+            return name is { Length: > 0 } && tag is { Length: > 0 } ? $"{name}#{tag}" : null;
         }
         catch
         {

@@ -22,7 +22,7 @@ public sealed class PostGameLpHider(string leagueRoot, IReadOnlyList<TrackerClie
 
     private LcuClient? _lcu;
     private bool _hideLp;
-    private string? _settingPuuid;
+    private string? _settingRiotId;
     private DateTime _settingReadUtc = DateTime.MinValue;
     private long _dismissedGameId;
 
@@ -92,8 +92,8 @@ public sealed class PostGameLpHider(string leagueRoot, IReadOnlyList<TrackerClie
     /// an account the trackers don't know is left alone.
     private async Task RefreshSettingAsync(LcuClient lcu, CancellationToken ct)
     {
-        if (await lcu.GetCurrentPuuidAsync(ct) is not { Length: > 0 } puuid) return;
-        if (puuid == _settingPuuid && DateTime.UtcNow - _settingReadUtc < SettingEvery) return;
+        if (await lcu.GetCurrentRiotIdAsync(ct) is not { Length: > 0 } riotId) return;
+        if (riotId == _settingRiotId && DateTime.UtcNow - _settingReadUtc < SettingEvery) return;
 
         var known = new List<TrackerAccount>();
         foreach (var server in servers)
@@ -102,14 +102,14 @@ public sealed class PostGameLpHider(string leagueRoot, IReadOnlyList<TrackerClie
         }
         _settingReadUtc = DateTime.UtcNow;
         // Every tracker unreachable: keep the last answer rather than show LP over a NAS blip.
-        if (known is not { Count: > 0 } && puuid == _settingPuuid) return;
+        if (known is not { Count: > 0 } && riotId == _settingRiotId) return;
 
-        var hide = known.Exists(a => a.HideLp && a.Puuid == puuid);
-        if (hide != _hideLp || puuid != _settingPuuid)
+        var hide = known.Exists(a => a.HideLp && string.Equals(a.RiotId, riotId, StringComparison.OrdinalIgnoreCase));
+        if (hide != _hideLp || riotId != _settingRiotId)
         {
-            Log.Info(hide ? "Hide LP is on for the signed-in account - ranked post-game lobbies will be skipped" : "Hide LP is off for the signed-in account");
+            Log.Info(hide ? $"Hide LP is on for {riotId} - ranked post-game lobbies will be skipped" : $"Hide LP is off for {riotId}");
         }
-        _settingPuuid = puuid;
+        _settingRiotId = riotId;
         _hideLp = hide;
     }
 }
