@@ -35,7 +35,7 @@ public sealed record RenderJob(
 
 /// Path is the server's canonical address ("euw/ImRA-87166"); a server from
 /// before regions only gives the slug, which still resolves.
-public sealed record TrackerAccount(string Slug, string Label, string RiotId, string? Path = null, string? Puuid = null)
+public sealed record TrackerAccount(string Slug, string Label, string RiotId, string? Path = null, string? Puuid = null, bool HideLp = false)
 {
     public string UrlPath => Path is { Length: > 0 } ? string.Join('/', Path.Split('/').Select(Uri.EscapeDataString)) : Uri.EscapeDataString(Slug);
 }
@@ -139,7 +139,8 @@ public sealed class TrackerClient
                 a.TryGetProperty("label", out var l) ? l.GetString() ?? "" : "",
                 a.GetProperty("riotId").GetString() ?? "",
                 a.TryGetProperty("path", out var p) ? p.GetString() : null,
-                a.TryGetProperty("puuid", out var u) && u.ValueKind is JsonValueKind.String ? u.GetString() : null))];
+                a.TryGetProperty("puuid", out var u) && u.ValueKind is JsonValueKind.String ? u.GetString() : null,
+                a.TryGetProperty("hideLp", out var h) && h.ValueKind is JsonValueKind.True))];
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {

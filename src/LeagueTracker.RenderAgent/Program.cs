@@ -140,6 +140,13 @@ try
     {
         Log.Warn("Post-game review is on but no League install was resolved (mock mode?) - not started");
     }
+    // Recording is what marks a PC somebody plays on; the cover only reads
+    // the client and the trackers, and does nothing unless the signed-in
+    // account has Hide LP switched on.
+    if (config.RecordGames && agent.ResolvedLeagueRoot is { } coverRoot)
+    {
+        loops.Add(new LpCover(coverRoot, agent.Servers).RunAsync(cts.Token));
+    }
     await Task.WhenAll(loops);
     return 0;
 }

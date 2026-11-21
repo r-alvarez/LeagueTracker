@@ -150,6 +150,21 @@ public sealed class LcuClient : IDisposable
         }
     }
 
+    /// Who is signed in to the client - null before login or when the
+    /// client can't answer.
+    public async Task<string?> GetCurrentPuuidAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{_base}/lol-summoner/v1/current-summoner", ct));
+            return doc.RootElement.TryGetProperty("puuid", out var puuid) ? puuid.GetString() : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// Platform id ("EUW1") from the client's region ("EUW").
     public async Task<string?> GetPlatformIdAsync(CancellationToken ct)
     {
