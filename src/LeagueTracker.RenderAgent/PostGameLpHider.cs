@@ -18,12 +18,18 @@ public sealed class PostGameLpHider(string leagueRoot, IReadOnlyList<TrackerClie
     private static readonly TimeSpan PostGameTick = TimeSpan.FromMilliseconds(250);
     // The toggle lives on the site; a flip reaches the PC within this.
     private static readonly TimeSpan SettingEvery = TimeSpan.FromMinutes(5);
+    // A missed read is asked again well before the game it was for ends.
+    private static readonly TimeSpan RetryEvery = TimeSpan.FromSeconds(30);
+    // The tracker client waits minutes for uploads; this loop can't - a
+    // connection left dead by sleep would hold it past the next post-game.
+    private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(15);
     private static readonly HashSet<long> LpQueues = [420, 440];
 
     private LcuClient? _lcu;
     private bool _hideLp;
     private string? _settingRiotId;
     private DateTime _settingReadUtc = DateTime.MinValue;
+    private bool _readFailing;
     private long _dismissedGameId;
 
     public async Task RunAsync(CancellationToken ct)
@@ -93,23 +99,49 @@ public sealed class PostGameLpHider(string leagueRoot, IReadOnlyList<TrackerClie
     private async Task RefreshSettingAsync(LcuClient lcu, CancellationToken ct)
     {
         if (await lcu.GetCurrentRiotIdAsync(ct) is not { Length: > 0 } riotId) return;
-        if (riotId == _settingRiotId && DateTime.UtcNow - _settingReadUtc < SettingEvery) return;
-
-        var known = new List<TrackerAccount>();
-        foreach (var server in servers)
-        {
-            if (await server.GetAccountsAsync(ct) is { } accounts) known.AddRange(accounts);
-        }
+        var every = _readFailing ? RetryEvery : SettingEvery;
+        if (riotId == _settingRiotId && DateTime.UtcNow - _settingReadUtc < every) return;
         _settingReadUtc = DateTime.UtcNow;
-        // Every tracker unreachable: keep the last answer rather than show LP over a NAS blip.
-        if (known is not { Count: > 0 } && riotId == _settingRiotId) return;
+
+        if (await ReadAccountsAsync(ct) is not { } known)
+        {
+            // No answer is not "off": a missed first read taken as "off" once
+            // showed a whole morning's LP to a player who had it on.
+            // The same player keeps the last answer; a new one starts unknown.
+            if (!_readFailing) Log.Warn($"Hide LP: no tracker answered for {riotId} - asking again every {RetryEvery.TotalSeconds:0}s");
+            _readFailing = true;
+            if (riotId != _settingRiotId) _hideLp = false;
+            _settingRiotId = riotId;
+            return;
+        }
 
         var hide = known.Exists(a => a.HideLp && string.Equals(a.RiotId, riotId, StringComparison.OrdinalIgnoreCase));
-        if (hide != _hideLp || riotId != _settingRiotId)
+        if (hide != _hideLp || riotId != _settingRiotId || _readFailing)
         {
             Log.Info(hide ? $"Hide LP is on for {riotId} - ranked post-game lobbies will be skipped" : $"Hide LP is off for {riotId}");
         }
+        _readFailing = false;
         _settingRiotId = riotId;
         _hideLp = hide;
+    }
+
+    /// Every reachable tracker's accounts, or null when none answered.
+    private async Task<List<TrackerAccount>?> ReadAccountsAsync(CancellationToken ct)
+    {
+        List<TrackerAccount>? known = null;
+        foreach (var server in servers)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(ReadTimeout);
+            try
+            {
+                if (await server.GetAccountsAsync(timeout.Token) is { } accounts) (known ??= []).AddRange(accounts);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // Timed out: counts as no answer from this tracker.
+            }
+        }
+        return known;
     }
 }
