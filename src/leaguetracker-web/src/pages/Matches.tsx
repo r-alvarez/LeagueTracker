@@ -40,12 +40,15 @@ function Companion({ name, role }: { name: string; role: string | null }) {
 function Row({ m, reviews }: { m: MatchSummary; reviews: ReviewVerdicts }) {
   const navigate = useNavigate()
   const csPerMin = m.durationMin > 0 ? (m.cs / m.durationMin).toFixed(1) : '—'
-  const result = m.isRemake ? 'Remake' : m.win ? 'Victory' : 'Defeat'
+  // A remake Riot booked as a result (remakeCounted) reads as that result,
+  // tagged "remake"; an unbooked remake stays a muted non-game.
+  const voided = m.isRemake && !m.remakeCounted
+  const result = voided ? 'Remake' : m.win ? 'Victory' : 'Defeat'
   // The contest verdict is the headline; the game's result demotes to the
   // muted sub-line - visible (never hidden), just no longer the verdict.
   // Rows without a review (no timeline, or still loading) keep the old look.
   const contest = m.isRemake ? null : reviews[m.id]?.contest ?? null
-  const rowClass = m.isRemake ? 'mr-remake'
+  const rowClass = voided ? 'mr-remake'
     : contest ? `mr-${contestSide(contest)}`
     : m.win ? 'mr-win' : 'mr-loss'
 
@@ -62,8 +65,8 @@ function Row({ m, reviews }: { m: MatchSummary; reviews: ReviewVerdicts }) {
           </>
         ) : (
           <>
-            <span className={`mr-result ${m.isRemake ? 'mut' : m.win ? 'win' : 'loss'}`}>{result}</span>
-            <span className="sub"><RelTime date={m.gameEndUtc} /></span>
+            <span className={`mr-result ${voided ? 'mut' : m.win ? 'win' : 'loss'}`}>{result}</span>
+            <span className="sub">{m.remakeCounted && <>remake · </>}<RelTime date={m.gameEndUtc} /></span>
           </>
         )}
         <span className="sub">{shortQueue(m.queueName)} · {m.durationMin.toFixed(0)}m · {m.patch}</span>
@@ -126,7 +129,7 @@ function Row({ m, reviews }: { m: MatchSummary; reviews: ReviewVerdicts }) {
         )}
       </div>
 
-      {m.lpChange !== null ? <LpChip change={m.lpChange} /> : <span />}
+      {m.lpChange !== null ? <LpChip change={m.lpChange} mitigated={m.remakeCounted} /> : <span />}
 
       <div className="mr-links" onClick={e => e.stopPropagation()}>
         {m.hasReplay && (
@@ -279,8 +282,9 @@ export default function Matches() {
 
       <div className="match-rows">
         {groups.map((g, gi) => {
-          const wins = g.items.filter(m => !m.isRemake && m.win).length
-          const losses = g.items.filter(m => !m.isRemake && !m.win).length
+          const counts = (m: MatchSummary) => !m.isRemake || m.remakeCounted
+          const wins = g.items.filter(m => counts(m) && m.win).length
+          const losses = g.items.filter(m => counts(m) && !m.win).length
           return (
             <Fragment key={g.label ?? gi}>
               {g.label && (

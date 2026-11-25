@@ -127,6 +127,8 @@ export interface MatchSummary {
   enemyJungler: string | null
   allyJungler: string | null
   isRemake: boolean
+  /** Remake Riot still booked as a result (its W/L counter moved) - counts as a game. */
+  remakeCounted?: boolean
   csAt10: number | null
   laneGoldDiff10: number | null
   killParticipation: number | null

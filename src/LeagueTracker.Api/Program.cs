@@ -1677,6 +1677,9 @@ static object MatchListItem(Match m, string? items = null, int? summoner1Id = nu
     m.SkillshotsHit, m.SkillshotsDodged,
     m.OpponentChampion, m.EnemyJungler, m.AllyJungler, m.CsAt10, m.LaneGoldDiff10, m.KillParticipation, m.SoloKills,
     IsRemake = m.DurationSec < 300,
+    // A remake gets an LP delta only when Riot's win/loss counter moved for it,
+    // i.e. Riot booked it as a result. Such remakes count in the W/L tallies.
+    RemakeCounted = m.DurationSec < 300 && m.LpChange != null,
 };
 
 static IResult CsvFile(string fileName, string csv) =>

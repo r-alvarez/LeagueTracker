@@ -43,8 +43,11 @@ export function KdaStat({ kills, deaths, assists, kp }: { kills: number; deaths:
   )
 }
 
-export function LpChip({ change }: { change: number | null }) {
+export function LpChip({ change, mitigated }: { change: number | null; mitigated?: boolean }) {
   if (change === null) return <span className="mut sm-text">LP —</span>
+  if (mitigated && change === 0) {
+    return <span className="lp-chip mitigated" title="Riot counted this remake as a loss but took no LP">LP mitigated</span>
+  }
   return (
     <span className={`lp-chip ${change >= 0 ? 'gain' : 'loss'}`}>
       {change >= 0 ? '▲' : '▼'} {Math.abs(change)} LP

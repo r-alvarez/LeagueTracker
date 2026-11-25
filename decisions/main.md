@@ -2140,3 +2140,19 @@ The Lens and Trading carry it as a trend over Ahri games only.
 It is hard-wired to Ahri. Other champions with one catch spell also
 immobilise through items, passives or multi-target hits, and the ratio
 stops meaning accuracy.
+
+## 2026-11-25 — Remakes Riot books as a loss count as a loss
+
+A Solo/Duo remake (Garen, 4.6 min) moved Riot's loss counter by one while
+taking no LP. Remakes were never snapshotted, so the next game saw the
+counter move by two and its +20 was refused as unattributable.
+
+The poller now snapshots after ranked remakes as well. A remake whose
+counter moved gets its own delta: 0 shows as "LP mitigated", a negative
+one is a leaver penalty and shows as LP lost. Such remakes read as their
+result (tagged "remake") and count in the day's win/loss tally. A remake
+whose counter did not move stays a muted non-game with no LP. Season
+stats and the review still skip all remakes: there is no gameplay in them.
+
+The ledger backfill still skips remakes. A bracket holding an uncounted
+remake and one real game would hand the real game's LP to the remake.

@@ -407,7 +407,10 @@ public sealed class MatchPollerService(
         var match = await ingest.BuildMatchAsync(matchRaw, timelineRaw, puuid, withRanks: true, ranksAtGameTime: true, ct);
         match.RawPath = await ingest.SaveRawAsync(matchId, matchRaw, timelineRaw, ct);
 
-        if (match.IsRanked && match.DurationSec >= 300)
+        // Remakes too: Riot sometimes books a remake as a loss (with the LP loss
+        // mitigated). Snapshotting after it keeps that counter move from voiding
+        // the next game's LP, and records the remake's own delta (0 = mitigated).
+        if (match.IsRanked)
         {
             await AttributeLpAsync(match, puuid, riot, lp, ct);
         }

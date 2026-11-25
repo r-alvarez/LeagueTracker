@@ -646,9 +646,9 @@ export default function MatchDetail() {
             </span>
             <div className="mh-main">
               <div className="value" style={{ marginTop: 0 }}>
-                {m.isRemake
+                {m.isRemake && !m.remakeCounted
                   ? <span className="mut">Remake</span>
-                  : <span className={m.win ? 'win' : 'loss'}>{m.win ? 'Victory' : 'Defeat'}</span>} — {m.champion}
+                  : <span className={m.win ? 'win' : 'loss'}>{m.win ? 'Victory' : 'Defeat'}{m.remakeCounted && <span className="mut"> (remake)</span>}</span>} — {m.champion}
               </div>
               <div className="sub">
                 <span>{m.kills}/<span className="loss">{m.deaths}</span>/{m.assists}</span> · {m.cs} CS
@@ -696,7 +696,9 @@ export default function MatchDetail() {
           <div className="card tile">
             <div className="label">LP</div>
             <div className="value">
-              <span className={m.lpChange >= 0 ? 'win' : 'loss'}>{m.lpChange >= 0 ? '+' : ''}{m.lpChange}</span>
+              {m.remakeCounted && m.lpChange === 0
+                ? <span className="mut" title="Riot counted this remake as a loss but took no LP">Mitigated</span>
+                : <span className={m.lpChange >= 0 ? 'win' : 'loss'}>{m.lpChange >= 0 ? '+' : ''}{m.lpChange}</span>}
             </div>
             <div className="sub">{m.lpBefore} → {m.lpAfter}</div>
           </div>
